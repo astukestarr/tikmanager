@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.1.0 - 2026-10-08
+
+- **Routers list**: click a column header to sort by it (Status, Client, Router, Site, Model, RouterOS, Uptime, CPU,
+  Last seen); click again to reverse. Status sorts offline routers first. The sort is kept while you use the app.
+
 ## 1.0.0 - 2026-10-08
 
 First public release.

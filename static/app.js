@@ -114,16 +114,37 @@ async function approve(id) {
   });
 }
 
-function table(rows, cols) {
+// Sort routers by a table column. Status: offline before online (ascending). Empty values always go last.
+const upSecs = (s) => { let n = 0; for (const [, v, u] of String(s || "").matchAll(/(\d+)([wdhms])/g)) n += Number(v) * { w: 604800, d: 86400, h: 3600, m: 60, s: 1 }[u]; return n || null; };
+function sortRouters(rows, sort) {
+  if (!sort || !sort.key) return rows;
+  const val = (d) => ({ state: d.state !== "adopted" ? -1 : d.online ? 1 : 0, uptime: upSecs(d.uptime), cpu: d.cpu, last_seen: d.last_seen })[sort.key]
+    ?? (sort.key in { state: 1, uptime: 1, cpu: 1, last_seen: 1 } ? null : String(d[sort.key] ?? "").trim() || null);
+  const dir = sort.dir === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null || y == null) return x == null && y == null ? 0 : x == null ? 1 : -1;
+    const c = typeof x === "number" ? x - y : x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" });
+    return c * dir || String(a.name || "").localeCompare(String(b.name || ""), undefined, { numeric: true });
+  });
+}
+
+// sort = { key, dir } makes the headers clickable buttons (data-sort); the caller re-sorts and redraws
+function table(rows, cols, sort) {
   const head = { state: "Status", org: "Client", name: "Router", site: "Site", model: "Model", version: "RouterOS", uptime: "Uptime",
                  cpu: "CPU", last_seen: "Last seen", last_error: "Problem", tunnel_ip: "Tunnel IP" };
   head.thumb = "";
+  const th = (c) => {
+    if (!sort || c === "thumb") return `<th>${head[c]}</th>`;
+    const on = sort.key === c, aria = on ? (sort.dir === "desc" ? "descending" : "ascending") : "none";
+    return `<th aria-sort="${aria}"><button type="button" class="th-sort${on ? " on" : ""}" data-sort="${c}">${head[c]}<span class="th-arrow">${on ? (sort.dir === "desc" ? "▼" : "▲") : ""}</span></button></th>`;
+  };
   const cell = (d, c) => c === "thumb" ? thumbImg(d, "thumb-sm") : c === "state" ? stateDot(d) : c === "last_seen" ? ago(d.last_seen)
     : c === "cpu" ? (d.cpu == null ? "" : `<div class="row"><div class="bar"><i data-pct="${d.cpu}"></i></div>${d.cpu}%</div>`)
     : c === "uptime" ? `<span class="nowrap" title="${esc(uptime(d.uptime))}">${esc(d.uptime ? uptime(d.uptime, true) : "")}</span>`
     : c === "version" ? esc((d.version || "").replace(" (stable)", ""))
     : c === "org" ? (d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`) : esc(d[c] ?? "");
-  return `<div class="table-wrap"><table><thead><tr>${cols.map((c) => `<th>${head[c]}</th>`).join("")}</tr></thead><tbody>
+  return `<div class="table-wrap"><table><thead><tr>${cols.map(th).join("")}</tr></thead><tbody>
     ${rows.map((d) => `<tr class="click" data-dev="${d.id}">${cols.map((c) => `<td>${cell(d, c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -132,6 +153,7 @@ function bindRows() {
   setBars($("main"));
 }
 
+let routerSort = { key: "", dir: "asc" };   // kept while you move around the app
 async function routers() {
   const [devices, orgs] = await Promise.all([api("/api/devices"), api("/api/orgs")]);
   const pending = devices.filter((d) => d.state !== "adopted");
@@ -147,9 +169,15 @@ async function routers() {
     const o = $("fOrg")?.value, st = $("fState").value, t = $("fText").value.toLowerCase();
     const rows = devices.filter((d) => d.state === "adopted" && (!o || String(d.org_id) === o) && (!st || !!d.online === (st === "online"))
       && (!t || `${d.name} ${d.identity} ${d.model} ${d.version} ${d.site} ${d.org}`.toLowerCase().includes(t)));
-    $("list").innerHTML = rows.length ? table(rows, isTech() ? ["thumb", "state", "org", "name", "site", "model", "version", "uptime", "cpu", "last_seen"] : ["thumb", "state", "name", "site", "model", "version", "uptime", "cpu", "last_seen"])
+    $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), isTech() ? ["thumb", "state", "org", "name", "site", "model", "version", "uptime", "cpu", "last_seen"] : ["thumb", "state", "name", "site", "model", "version", "uptime", "cpu", "last_seen"], routerSort)
       : `<p class="muted">No routers match.</p>`;
     bindRows();
+    // click a header to sort by it; click it again to reverse
+    $("list").querySelectorAll("[data-sort]").forEach((b) => b.addEventListener("click", () => {
+      const k = b.dataset.sort;
+      routerSort = { key: k, dir: routerSort.key === k && routerSort.dir === "asc" ? "desc" : "asc" };
+      draw();
+    }));
   };
   ["fOrg", "fState", "fText"].forEach((id) => $(id)?.addEventListener("input", draw));
   draw();

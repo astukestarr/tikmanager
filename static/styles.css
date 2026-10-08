@@ -185,3 +185,9 @@ fieldset.up-when { border: 1px solid var(--border); border-radius: 10px; padding
 .nav-version { margin-top: 12px; padding: 10px 12px 4px; border-top: 1px solid var(--border); }
 @media (max-width: 760px) { .nav-version { display: none; } }
 .update-pill { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); text-decoration: none; cursor: pointer; }
+
+/* sortable table headers */
+.th-sort { all: unset; cursor: pointer; white-space: nowrap; }
+.th-sort:hover, .th-sort:focus-visible, .th-sort.on { color: var(--text); }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.th-arrow { display: inline-block; min-width: 1em; margin-left: 3px; font-size: 10px; color: var(--accent); }
