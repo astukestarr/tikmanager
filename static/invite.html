@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Accept invitation · TikManager</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="auth">
+    <div class="box">
+      <div class="brand">Tik<b>Manager</b></div>
+      <h1>Welcome</h1>
+      <section id="stepPassword">
+        <p>You've been invited as <strong id="inviteEmail"></strong>. Choose a password - at least 14 characters; a short phrase works well.</p>
+        <form id="setForm">
+          <label class="field">Your name <input id="name" autocomplete="name"></label>
+          <label class="field">Password <input id="newPassword" type="password" autocomplete="new-password" minlength="14" required></label>
+          <label class="field">Password again <input id="newPassword2" type="password" autocomplete="new-password" minlength="14" required></label>
+          <div class="actions"><button class="btn primary" type="submit">Continue</button></div>
+        </form>
+      </section>
+      <section id="stepEnroll" class="hidden">
+        <h2>Set up two-step sign-in</h2>
+        <p>Add an account in your authenticator app (Microsoft Authenticator, Google Authenticator, 1Password...) with this key,
+          or tap the link on your phone:</p>
+        <div class="code" id="secret"></div>
+        <p class="small"><a id="uri" href="#">Open in authenticator app</a></p>
+        <form id="enrollForm"><label class="field">Then enter the 6-digit code it shows <input id="enrollCode" inputmode="numeric" maxlength="7" required></label>
+          <div class="actions"><button class="btn primary" type="submit">Finish</button></div></form>
+      </section>
+      <section id="stepVerify" class="hidden"><form id="codeForm"><input id="code"></form></section>
+      <p class="status" id="status" role="status"></p>
+      <p class="muted small" id="support"></p>
+    </div>
+  </main>
+  <script src="/brand.js"></script>
+  <script src="/login.js"></script>
+</body>
+</html>

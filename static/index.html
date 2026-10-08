@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TikManager</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Tik<b>Manager</b></div>
+    <span class="pill hidden" id="devBadge">DEV · simulated routers</span>
+    <span class="spacer"></span>
+    <span class="muted small" id="who"></span>
+    <button class="btn" type="button" id="logout">Sign out</button>
+  </header>
+  <div class="shell">
+    <nav class="nav" id="nav" aria-label="Sections">
+      <button type="button" data-view="dashboard">Dashboard</button>
+      <button type="button" data-view="routers">Routers</button>
+      <button type="button" data-view="sites">Site map</button>
+      <button type="button" data-view="vpns" data-tech>Site-to-site VPN</button>
+      <button type="button" data-view="backups" data-tech>Backups</button>
+      <button type="button" data-view="upgrades" data-tech>Upgrades</button>
+      <button type="button" data-view="tasks" data-tech>Tasks</button>
+      <button type="button" data-view="clients" data-tech>Clients</button>
+      <button type="button" data-view="users" data-admin>Users</button>
+      <button type="button" data-view="audit" data-techadmin>Audit log</button>
+      <button type="button" data-view="admin" data-techadmin>Admin</button>
+    </nav>
+    <main class="main" id="main"></main>
+  </div>
+
+  <dialog id="dlg"><div id="dlgBody"></div></dialog>
+  <script src="/brand.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# runtime data - database, backups, keys, logos (never commit)
+data/
+*.db
+*.db-wal
+*.db-shm
+master.key
+.env
+dist/
+__pycache__/
+*.pyc

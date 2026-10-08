@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up · TikManager</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="auth">
+    <div class="box">
+      <div class="brand">Tik<b>Manager</b></div>
+      <h1>Welcome - set up TikManager</h1>
+      <p class="muted">Create the first administrator. Everything else (Microsoft sign-in for your technicians, branding,
+        clients) is set on the Admin pages afterwards. This link stops working once the account exists.</p>
+      <form id="setupForm" class="auth-form">
+        <label class="field">Your company name <input id="company" maxlength="60" required placeholder="Example IT Services"></label>
+        <label class="field">Your name <input id="name" maxlength="100" autocomplete="name"></label>
+        <label class="field">Your email <input id="email" type="email" autocomplete="username" required></label>
+        <label class="field">Password (at least 14 characters) <input id="password" type="password" autocomplete="new-password" minlength="14" required></label>
+        <label class="field">Confirm password <input id="password2" type="password" autocomplete="new-password" minlength="14" required></label>
+        <label class="field">Staff email domains <input id="domains" placeholder="example.com" spellcheck="false"></label>
+        <p class="small muted">People with these email domains can sign in as technicians once Microsoft sign-in is set up.
+          Leave blank to use your own email's domain.</p>
+        <div class="actions"><button class="btn primary" type="submit">Create administrator</button></div>
+      </form>
+      <p class="status" id="status" role="status"></p>
+    </div>
+  </main>
+  <script src="/setup.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+# TikManager - the only thing listening on the internet. Caddy gets and renews the Let's Encrypt certificate itself.
+{
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			idle 2m
+		}
+		max_header_size 16KB
+	}
+}
+
+__HOST__ {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy 127.0.0.1:8800 {
+		header_up X-Forwarded-For {remote_host}
+	}
+	log {
+		output file /var/log/caddy/tikmanager.log {
+			roll_size 20MiB
+			roll_keep 10
+		}
+	}
+}

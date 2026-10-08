@@ -1,0 +1,42 @@
+[Unit]
+Description=TikManager (MikroTik controller)
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+Requires=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=tikmanager
+Group=tikmanager
+Environment=TM_ENV_FILE=/etc/tikmanager/tikmanager.env
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/tikmanager
+ExecStart=/usr/bin/python3 /opt/tikmanager/server.py
+Restart=on-failure
+RestartSec=5
+
+# Least privilege: only CAP_NET_ADMIN (to add router peers to wg0), nothing else.
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tikmanager
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
