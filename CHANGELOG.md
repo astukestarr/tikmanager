@@ -27,5 +27,5 @@ First public release.
   roles; audit log.
 - **Integrations**: ConnectWise PSA (client import) and IT Glue (router documentation).
 - **Setup and settings**: one-time first-run link; Admin > Settings for staff sign-in, Microsoft sign-in, router and
-  backup settings; branding, with a built-in tiki torch logo and favicon until you upload your own.
+  backup settings; branding, with a built-in TikManager logo (the T drawn as a tiki torch) until you upload your own.
 - **Updates**: version shown in the app, daily check for new releases, one-click upgrade with automatic roll-back.

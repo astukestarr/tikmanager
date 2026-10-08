@@ -34,6 +34,31 @@ Internet
 4. The router is **pending** until a technician approves it and picks its client; only then is its peer added to wg0.
    Re-running the command is safe (it re-registers the same key).
 
+RouterOS checks a whole script before running any of it and rejects all of it over one parameter name it doesn't know,
+even in a branch that never runs. So anything that differs between 7.x versions (e.g. the www service's `address`,
+renamed `available-from` in 7.2x) is built at run time with `:parse` instead of written out in the script.
+
+## Versions and updates
+
+- `version.py` holds the version (semantic: patch = fixes, minor = features, major = admin action needed);
+  `CHANGELOG.md` says what changed; each release is a `vX.Y.Z` tag on GitHub.
+- `updates.py` checks the update repository daily (latest GitHub Release, else the highest `vX.Y.Z` tag) and serves
+  Admin > Settings > Version & updates and the "Update available" badge.
+- The web app runs without root, so it can't install anything itself. **Upgrade now** only writes the wanted version
+  number to `/var/lib/tikmanager/update-request`. The root-owned systemd unit `tikmanager-update.path` notices the file
+  and starts `tikmanager-update.service`, which runs `deploy/self-update.sh` as root:
+  1. reads the repository from `TM_UPDATE_REPO` in the root-owned settings file - never from anything the web app can
+     write - and accepts only a version number (digits and dots) from the request;
+  2. downloads `https://github.com/<repo>/archive/refs/tags/v<version>.tar.gz`, checks it is TikManager, that its
+     `version.py` matches and that its Python compiles;
+  3. backs up the code to `/opt/tikmanager.prev` and the database (SQLite online backup) to
+     `backup-before-<version>.db` (last 3 kept);
+  4. installs with the new version's own `deploy/update.sh` and restarts; if the service isn't running 5 seconds later,
+     restores `/opt/tikmanager.prev` and restarts the old version;
+  5. reports each step in `/var/lib/tikmanager/update-status.json`, which the Version & updates card shows.
+- Database changes must be additive (`DB.migrate()` adds columns/tables), so a rolled-back older version still runs on
+  the upgraded database.
+
 ## What runs where (server modules)
 
 | Module | Does |
@@ -54,7 +79,9 @@ Internet
 | `vpn.py` / `vpninv.py` | site-to-site WireGuard VPNs it builds / VPNs already on routers (read-only) |
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
-| `static/` | the single-page web app (`app.js`), sign-in, invite and first-run pages |
+| `version.py`, `updates.py` | the running version; daily new-release check and the "Upgrade now" request |
+| `deploy/` | installer, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
+| `static/` | the single-page web app (`app.js`), sign-in, invite and first-run pages, built-in logo (`wordmark.svg`) and icon (`logo.svg`) |
 
 ## Accounts and tenants
 
@@ -82,6 +109,8 @@ Internet
 - Router-side: the `tikmanager` user only accepts logins from the controller's tunnel address; management services are
   reachable only through the tunnel.
 - VM: unattended security upgrades, ufw (443/tcp + 51820/udp from anywhere, SSH from the LAN only), fail2ban.
+- Updates: the service user can only *request* a version; the root updater decides where code comes from (root-owned
+  settings file) and installs only a verified release tag (see "Versions and updates").
 
 ## Not built yet (ideas)
 

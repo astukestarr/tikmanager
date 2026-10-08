@@ -21,7 +21,8 @@ There is no test suite; verify changes by:
 2. running the dev server and exercising the page/endpoint in a browser (check the console for errors),
 3. for logic that's hard to reach in the UI, a short Python script against a temp `DB(...)` and `SimRouter` objects.
 
-Deploying to a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `sudo bash deploy/update.sh`.
+Shipping changes: release a new version (below) and upgrade with Admin > Settings > Upgrade now. To try unreleased code
+on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `sudo bash deploy/update.sh`.
 
 ## Ground rules (keep these - they're what makes it safe to expose to the internet)
 
@@ -63,17 +64,25 @@ Deploying to a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the fol
 | Change what the adoption script does | `adoption.py` (it runs on every re-run - keep it idempotent) |
 | Add an admin setting | `appsettings.py` FIELDS + `adminSystem()` |
 | Add an integration | `integrations.py` + Admin > Integrations in `app.js` |
-| Change the default logo / favicon | `static/logo.svg` (uploaded logos on Admin > Branding replace it) |
+| Change the default logo / favicon | `static/wordmark.svg` (logo: the name with the T as a tiki torch), `static/logo.svg` (torch icon, favicon); an uploaded logo on Admin > Branding replaces the wordmark |
 
 ## Releasing a new version
 
 Versions are semantic (`MAJOR.MINOR.PATCH`): patch = fixes only, minor = new features that keep existing data and
-settings working, major = something an administrator has to act on. To release:
-1. Bump `__version__` in `version.py` and add a section at the top of `CHANGELOG.md`.
-2. Commit, then tag and push: `git tag v1.2.0 && git push && git push --tags` (optionally also create a GitHub Release
-   from the tag - its notes are linked from the "What's new" button).
-3. Installations see the update within a day (or at once with "Check for updates") and upgrade with one click
+settings working, major = something an administrator has to act on. **Every change to what runs on the server gets a
+new version** - don't push code changes without one. To release:
+1. Bump `__version__` in `version.py` and add a section at the top of `CHANGELOG.md` (newest first, plain English for
+   the administrators who'll read it before clicking Upgrade; for a major version, the steps they must take).
+2. Commit, then tag and push: `git tag -a v1.2.0 -m "TikManager 1.2.0" && git push && git push --tags` (optionally also
+   create a GitHub Release from the tag - its notes are linked from the "What's new" button).
+3. Check GitHub has it: `git ls-remote --tags origin`, `git show origin/main:version.py`.
+4. Installations see the update within a day (or at once with "Check for updates") and upgrade with one click
    (`updates.py` -> `deploy/self-update.sh`, which runs the new version's `deploy/update.sh`).
+
+Never move or reuse a tag that's already on GitHub: servers only offer a version *newer* than their own, so changed
+code under an old number never reaches them - release a new patch instead. Changes to documentation only (README,
+ARCHITECTURE, CLAUDE.md) don't change what runs, so they're pushed without a new version and show up on GitHub at once;
+they ride along in the next release.
 
 A release must still start against an older database: add new columns/tables in `db.py`'s migrations rather than
 assuming a fresh schema, because the updater rolls back the code (not the data) if the new version fails to start.
