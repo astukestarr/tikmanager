@@ -86,7 +86,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
 | `version.py`, `updates.py` | the running version; daily new-release check and the "Upgrade now" request |
-| `deploy/` | installer, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
+| `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
 | `static/` | the single-page web app (`app.js`), sign-in, invite and first-run pages, built-in logo (`wordmark.svg`) and icon (`logo.svg`) |
 
 ## Accounts and tenants

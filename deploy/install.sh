@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # TikManager one-time install on Ubuntu 26.04 LTS (run as root from the folder that holds the TikManager code):
 #     sudo bash deploy/install.sh --host tikmanager.example.com --lan 192.168.1.0/24
+# Usually started by deploy/get.sh, which downloads the newest release from GitHub on the server itself.
 # It ends by printing a one-time setup link: open it to create the first administrator, then configure everything else
 # (Microsoft sign-in, staff domains, branding...) on the Admin pages. --admins / --domains are optional defaults.
 # Safe to run again. It:
@@ -15,18 +16,21 @@ HOST=""
 LAN=""
 ADMINS=""
 DOMAINS=""
+REPO="astukestarr/tikmanager"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host) HOST="$2"; shift 2 ;;
     --lan) LAN="$2"; shift 2 ;;
     --admins) ADMINS="$2"; shift 2 ;;
     --domains) DOMAINS="$2"; shift 2 ;;
+    --repo) REPO="$2"; shift 2 ;;   # where updates come from (e.g. your fork); written to the settings file
     *) echo "Unknown option $1"; exit 1 ;;
   esac
 done
 [[ $EUID -eq 0 ]] || { echo "Run with sudo."; exit 1; }
 [[ -n "$HOST" ]] || { echo "Give the public name TikManager will answer on (with a DNS record pointing at this server), e.g. --host tikmanager.example.com"; exit 1; }
 [[ -n "$LAN" ]] || { echo "Give your LAN subnet for SSH access, e.g. --lan 192.168.1.0/24"; exit 1; }
+[[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "--repo must look like owner/repository"; exit 1; }
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 [[ -f "$SRC/server.py" ]] || { echo "Run this from the TikManager code folder."; exit 1; }
 
@@ -89,7 +93,7 @@ WG_SERVER_PUBKEY=$PUB
 # One-time first-run link: https://$HOST/setup/<this token> (stops working once an administrator exists)
 TM_SETUP_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)
 # Where new versions come from (GitHub owner/repo). Only change this to a repository you trust: the updater runs as root.
-TM_UPDATE_REPO=astukestarr/tikmanager
+TM_UPDATE_REPO=$REPO
 # Optional defaults - staff sign-in, Microsoft sign-in and the WireGuard address are normally set on Admin > Settings:
 TM_TECH_ADMINS=$ADMINS
 TM_TECH_DOMAINS=$DOMAINS

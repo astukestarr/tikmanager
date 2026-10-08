@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.2.0 - 2026-10-08
+
+- **Install straight on Ubuntu**: `deploy/get.sh` downloads the newest release from GitHub on the server itself and
+  installs it - no Windows PC or file copying needed. It asks for the public name and LAN subnet if you leave them out
+  (and suggests the server's own subnet). See README > Install on a server.
+- **Forks**: `--repo owner/repository` (get.sh and install.sh) installs from your own repository and makes it the
+  server's update source.
+- Existing installations: nothing to do - upgrade with the button as usual.
+
 ## 1.1.1 - 2026-10-08
 
 Security fixes from a review of the whole project. Upgrade with the button as usual.

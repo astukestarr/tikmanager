@@ -28,13 +28,26 @@ Before you start:
 - your firewall forwarding **443/tcp** (and 80/tcp, which helps Let's Encrypt) and **51820/udp** to the VM;
 - SSH access to the VM from your LAN.
 
-First install, from this folder on a Windows PC (asks for the VM user's password and sudo password):
+On the server, download the installer and run it:
+
+    curl -fsSL https://raw.githubusercontent.com/astukestarr/tikmanager/main/deploy/get.sh -o get.sh
+    sudo bash get.sh --host tikmanager.example.com --lan 192.168.1.0/24
+
+Leave out `--host` or `--lan` and it asks (it suggests the server's own subnet for `--lan`). `--host` is the public DNS
+name; `--lan` is the only subnet allowed to SSH to the server. It downloads the newest TikManager release from GitHub
+(`--version 1.2.0` picks one), checks it, and installs WireGuard, Caddy (HTTPS via Let's Encrypt), the firewall,
+fail2ban and the service. It **ends by printing a one-time setup link**. Prefer one line? `curl -fsSL <that URL> | sudo
+bash -s -- --host ... --lan ...` does the same; downloading first lets you read the script before running it.
+
+Running your own fork? Add `--repo yourname/tikmanager`: it installs from your repository, and your servers take their
+updates from it too.
+
+From a Windows PC instead (copies this folder to the server over SSH; asks for the server user's password and sudo
+password):
 
     powershell -ExecutionPolicy Bypass -File .\deploy\push.ps1 -VM youruser@VM-IP -Install -HostName tikmanager.example.com -Lan 192.168.1.0/24
 
-(or copy the folder to the VM and run `sudo bash deploy/install.sh --host tikmanager.example.com --lan 192.168.1.0/24`).
-`-Lan` is the subnet allowed to SSH to the VM. The installer sets up WireGuard, Caddy (HTTPS via Let's Encrypt), the
-firewall, fail2ban and the service, and **ends by printing a one-time setup link**.
+(or copy the folder to the server yourself and run `sudo bash deploy/install.sh --host ... --lan ...`).
 
 ### First run
 
