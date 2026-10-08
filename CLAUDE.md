@@ -63,6 +63,20 @@ Deploying to a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the fol
 | Change what the adoption script does | `adoption.py` (it runs on every re-run - keep it idempotent) |
 | Add an admin setting | `appsettings.py` FIELDS + `adminSystem()` |
 | Add an integration | `integrations.py` + Admin > Integrations in `app.js` |
+| Change the default logo / favicon | `static/logo.svg` (uploaded logos on Admin > Branding replace it) |
+
+## Releasing a new version
+
+Versions are semantic (`MAJOR.MINOR.PATCH`): patch = fixes only, minor = new features that keep existing data and
+settings working, major = something an administrator has to act on. To release:
+1. Bump `__version__` in `version.py` and add a section at the top of `CHANGELOG.md`.
+2. Commit, then tag and push: `git tag v1.2.0 && git push && git push --tags` (optionally also create a GitHub Release
+   from the tag - its notes are linked from the "What's new" button).
+3. Installations see the update within a day (or at once with "Check for updates") and upgrade with one click
+   (`updates.py` -> `deploy/self-update.sh`, which runs the new version's `deploy/update.sh`).
+
+A release must still start against an older database: add new columns/tables in `db.py`'s migrations rather than
+assuming a fresh schema, because the updater rolls back the code (not the data) if the new version fails to start.
 
 ## Style
 

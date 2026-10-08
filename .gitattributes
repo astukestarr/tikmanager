@@ -2,6 +2,7 @@
 *.sh              text eol=lf
 deploy/Caddyfile  text eol=lf
 *.service         text eol=lf
+*.path            text eol=lf
 *.py              text eol=lf
 # everything else: Git decides
 *                 text=auto

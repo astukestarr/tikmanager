@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for TikManager upgrade requests (Admin "Upgrade now")
+
+[Path]
+# the web app (user tikmanager) can only write its data folder; it drops the wanted version here
+PathExists=/var/lib/tikmanager/update-request
+
+[Install]
+WantedBy=multi-user.target

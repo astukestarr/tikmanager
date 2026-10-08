@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="TikManager">
+  <title>TikManager</title>
+  <!-- default logo and favicon: a tiki torch with a carved tiki face. Replace it on Admin > Branding (PNG/JPEG/WebP). -->
+  <!-- flame -->
+  <path fill="#F26B1D" d="M32 2c5 8 13 12 11.5 23C42.6 31 38 34 32 34s-10.6-3-11.5-9C19.6 17 26 14 28 7.5c1 4.5 2.8 6 4 7.5.4-4-.8-8.5 0-13z"/>
+  <path fill="#FFB627" d="M32 12.5c4 5 7.3 8.5 6.3 14C37.6 30 35.2 32 32 32s-5.8-2-6.4-5.5c-.6-4 2.6-6.5 4.2-9.5.9 2 1.8 2.5 2.2 2.5.4-1.5-.4-4.5 0-7z"/>
+  <ellipse cx="32" cy="27.5" rx="3.6" ry="3.8" fill="#FFF0BF"/>
+  <!-- carved tiki head (the torch cup) -->
+  <rect x="17" y="29" width="30" height="4.5" rx="2" fill="#5E3A1A"/>
+  <rect x="19" y="32" width="26" height="17" rx="3" fill="#8A5527"/>
+  <path fill="#5E3A1A" d="M21 34.5h22v2.4c-2.4 0-3.6-1-5-1s-2.6 1-6 1-4.6-1-6-1-2.6 1-5 1z"/>
+  <ellipse cx="26" cy="39.3" rx="3.4" ry="2.4" fill="#F6E3B4"/>
+  <ellipse cx="38" cy="39.3" rx="3.4" ry="2.4" fill="#F6E3B4"/>
+  <circle cx="26" cy="39.5" r="1.3" fill="#2E1B0C"/>
+  <circle cx="38" cy="39.5" r="1.3" fill="#2E1B0C"/>
+  <path fill="#5E3A1A" d="M30.4 37h3.2l1 5h-5.2z"/>
+  <rect x="23.5" y="43.2" width="17" height="4" rx="2" fill="#2E1B0C"/>
+  <path stroke="#F6E3B4" stroke-width="1.1" d="M27 43.4v3.6M30.3 43.4v3.6M33.7 43.4v3.6M37 43.4v3.6"/>
+  <!-- bamboo pole with binding -->
+  <path fill="#C9A267" d="M28.6 49h6.8l-1.1 14h-4.6z"/>
+  <rect x="27.6" y="48.6" width="8.8" height="2.4" rx="1" fill="#5E3A1A"/>
+  <rect x="28.8" y="54.4" width="6.4" height="1.5" rx=".7" fill="#8D6B3A"/>
+  <rect x="29.2" y="59.4" width="5.6" height="1.5" rx=".7" fill="#8D6B3A"/>
+</svg>

@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TikManager</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">Tik<b>Manager</b></div>
+    <div class="brand"><img class="brand-logo" src="/logo.svg" alt=""><span>Tik<b>Manager</b></span></div>
     <span class="pill hidden" id="devBadge">DEV · simulated routers</span>
+    <a class="pill update-pill hidden" id="updatePill" href="#admin">Update available</a>
     <span class="spacer"></span>
     <span class="muted small" id="who"></span>
     <button class="btn" type="button" id="logout">Sign out</button>
@@ -27,6 +29,7 @@
       <button type="button" data-view="users" data-admin>Users</button>
       <button type="button" data-view="audit" data-techadmin>Audit log</button>
       <button type="button" data-view="admin" data-techadmin>Admin</button>
+      <div class="nav-version small muted" id="navVersion"></div>
     </nav>
     <main class="main" id="main"></main>
   </div>

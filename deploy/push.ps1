@@ -15,7 +15,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $stage = Join-Path $env:TEMP "tikmanager-push"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory $stage | Out-Null
-Get-ChildItem $root -Force | Where-Object { $_.Name -notin @("data", ".env", "__pycache__") } | Copy-Item -Destination $stage -Recurse
+Get-ChildItem $root -Force | Where-Object { $_.Name -notin @("data", ".env", "__pycache__", ".git", "dist") } | Copy-Item -Destination $stage -Recurse
 Get-ChildItem $stage -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 Write-Host "Copying to $VM ..."
 # a new folder name every time, so scp never nests the copy inside a leftover folder; removed (with sudo) afterwards

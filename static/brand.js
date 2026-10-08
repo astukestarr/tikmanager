@@ -1,5 +1,5 @@
 "use strict";
-// Applies Admin > Branding to any page: accent colour, logo or product name, page title, sign-in message, support contact.
+// Applies Admin > Branding to any page: accent colour, logo (default: the tiki torch) and product name, page title, sign-in message, support contact.
 (function () {
   function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
   window.applyBrand = function (b) {
@@ -12,11 +12,9 @@
     }
     document.querySelectorAll(".brand").forEach((el) => {
       el.textContent = "";
-      if (b.logo_url) {
-        const img = document.createElement("img");
-        img.src = b.logo_url; img.alt = b.product; img.className = "brand-logo";
-        el.appendChild(img);
-      }
+      const img = document.createElement("img");   // the uploaded logo, or the built-in tiki torch
+      img.src = b.logo_url || "/logo.svg"; img.alt = ""; img.className = "brand-logo";
+      el.appendChild(img);
       const name = document.createElement("span");
       name.textContent = b.product;
       el.appendChild(name);

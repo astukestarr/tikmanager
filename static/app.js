@@ -575,7 +575,8 @@ async function admin(tab = "branding") {
       ${[["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["system", "Settings"]].map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" class="${k === tab ? "active" : ""}">${l}</button>`).join("")}
     </div><div id="adminBody"></div>`;
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => admin(b.dataset.tab)));
-  await ({ branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, system: adminSystem })[tab]();
+  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, system: adminSystem };
+  await (tabs[tab] || adminBranding)();
 }
 
 async function adminBranding() {
@@ -787,6 +788,7 @@ async function adminSystem() {
   const s = await api("/api/admin/system");
   const f = (id, label, val, o = {}) => `<label class="field">${label} <input id="${id}" value="${esc(val || "")}" placeholder="${esc(o.ph || "")}" ${o.type ? `type="${o.type}"` : ""} spellcheck="false" ${o.auto ? `autocomplete="${o.auto}"` : ""}></label>`;
   $("adminBody").innerHTML = `
+    <div class="card" id="verCard"><h2>Version &amp; updates</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>Staff sign-in</h2>
       <p class="muted">Your technicians sign in with Microsoft. Anyone from these email domains becomes a technician at first sign-in;
         the listed emails become administrators. Roles can be changed on the Technicians tab.</p>
@@ -815,6 +817,7 @@ async function adminSystem() {
          ["Data folder", s.data_dir], ["Approved routers", s.routers], ["Stored backup versions", s.backups]]
         .map(([k, v]) => `<div class="kv"><span>${k}</span><span class="mono">${esc(v)}</span></div>`).join("")}</div>
       <p class="small muted">The public address is set when TikManager is installed (the HTTPS certificate depends on it).</p></div>`;
+  versionCard();
   const say = (id, m, ok) => { $(id).textContent = m; $(id).className = `status ${ok ? "ok" : "err"}`; };
   $("cfSave").addEventListener("click", async () => {
     try {
@@ -1200,6 +1203,57 @@ async function runScriptOn(d) {
     catch (e) { $("rsStatus").textContent = e.message; $("rsStatus").className = "status err"; }
   });
 }
+// --- version and updates ------------------------------------------------------------------------------------------
+function showUpdate(u) {   // the "Update available" badge in the top bar (administrators only)
+  const pill = $("updatePill");
+  if (!pill) return;
+  pill.classList.toggle("hidden", !(u && u.available));
+  if (u && u.available) { pill.textContent = `Update ${u.latest} available`; pill.title = `You have ${u.version}. Open Admin > Settings to upgrade.`; }
+  pill.onclick = (e) => { e.preventDefault(); go("admin", "system"); };
+}
+
+async function versionCard() {
+  const el = $("verCard");
+  if (!el) return;
+  let u;
+  try { u = await api("/api/version"); }
+  catch { el.innerHTML = `<h2>Version &amp; updates</h2><p class="muted">Restarting… this page reloads when the new version is up.</p>`; setTimeout(versionCard, 4000); return; }
+  if (u.version !== me.version) { location.reload(); return; }   // the upgrade finished
+  showUpdate(u);
+  const st = u.status || {};
+  const busy = ["requested", "running"].includes(st.state);
+  const result = st.state === "done" ? `<p class="status ok">${esc(st.detail || "")}</p>`
+    : st.state === "failed" ? `<p class="status err">Last upgrade failed: ${esc(st.detail || "")}</p>` : "";
+  el.innerHTML = `<h2>Version &amp; updates</h2>
+    <div class="grid2"><div class="kv"><span>This installation</span><span class="mono">${esc(u.version)}</span></div>
+      <div class="kv"><span>Newest release</span><span class="mono">${esc(u.latest || "—")}</span></div>
+      <div class="kv"><span>Checked</span><span>${u.checked_at ? ago(u.checked_at) : "not yet"}</span></div>
+      <div class="kv"><span>Updates from</span><span class="mono">${esc(u.repo ? `github.com/${u.repo}` : "—")}</span></div></div>
+    ${u.error ? `<p class="small status err">${esc(u.error)}</p>` : ""}
+    ${busy ? `<p class="status">Upgrading to ${esc(st.version)}: ${esc(st.detail || "")}…</p>` : result}
+    ${u.available && !busy ? `<div class="up-box avail"><b>TikManager ${esc(u.latest)} is available.</b>
+        ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener noreferrer">What's new</a>` : ""}
+        <p class="small muted">The server backs up the current version and the database, installs ${esc(u.latest)} and restarts (about a minute).
+          If the new version doesn't start, it goes back to ${esc(u.version)} automatically.</p>
+        ${u.supported ? `<button class="btn primary" type="button" id="verUpgrade">Upgrade now</button>`
+          : `<p class="small">One-click upgrade needs a Linux server set up with the installer. Upgrade from a terminal instead:
+             <span class="mono">sudo bash /opt/tikmanager/deploy/self-update.sh</span></p>`}</div>`
+      : !busy && u.latest && !u.available ? `<p class="small status ok">You're on the newest version.</p>`
+      : !busy && u.checked_at && !u.error ? `<p class="small muted">No releases have been published yet.</p>` : ""}
+    <div class="actions"><button class="btn" type="button" id="verCheck" ${busy ? "disabled" : ""}>Check for updates</button><span class="status" id="verStatus"></span></div>`;
+  $("verCheck")?.addEventListener("click", async () => {
+    $("verStatus").textContent = "Checking…";
+    try { await post("/api/admin/update-check"); versionCard(); } catch (e) { $("verStatus").textContent = e.message; $("verStatus").className = "status err"; }
+  });
+  $("verUpgrade")?.addEventListener("click", async (e) => {
+    if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = `Click again to upgrade to ${u.latest}`; return; }
+    e.target.disabled = true;
+    try { await post("/api/admin/upgrade", { version: u.latest }); versionCard(); }
+    catch (err) { e.target.disabled = false; $("verStatus").textContent = err.message; $("verStatus").className = "status err"; }
+  });
+  if (busy) setTimeout(versionCard, 3000);
+}
+
 // --- shell ------------------------------------------------------------------------------------------------
 function dialog(html) {
   $("dlg").classList.remove("wide");
@@ -1434,7 +1488,7 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
 }
-const VIEWS = { dashboard, routers, sites, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: () => admin() };
+const VIEWS = { dashboard, routers, sites, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   clearInterval(timer);
@@ -1453,6 +1507,8 @@ async function init() {
   me = await api("/api/me");
   $("who").textContent = `${me.name || me.email}${me.org ? ` · ${me.org}` : ""}`;
   $("devBadge").classList.toggle("hidden", !me.dev);
+  $("navVersion").textContent = me.version ? `TikManager ${me.version}` : "";
+  showUpdate(me.update);
   document.querySelectorAll("[data-tech]").forEach((b) => b.classList.toggle("hidden", !isTech()));
   document.querySelectorAll("[data-admin]").forEach((b) => b.classList.toggle("hidden", !(isTech() || me.role === "admin")));
   document.querySelectorAll("[data-techadmin]").forEach((b) => b.classList.toggle("hidden", !(isTech() && me.role === "admin")));
@@ -1463,7 +1519,7 @@ async function init() {
   });
   const route = () => {
     const [h, arg] = location.hash.slice(1).split("/");
-    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
+    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if (h === "admin" && arg) go("admin", arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
   };
   window.addEventListener("hashchange", route);   // links, typed URLs and Back (go() uses replaceState, which doesn't fire this)
   route();

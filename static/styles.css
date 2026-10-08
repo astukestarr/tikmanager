@@ -179,3 +179,8 @@ fieldset.up-when { border: 1px solid var(--border); border-radius: 10px; padding
 .script-box { min-height: 220px; width: 100%; box-sizing: border-box; white-space: pre; }
 .run-out { max-height: 160px; overflow: auto; margin: 0; }
 #tDays, #tOnce, #tTime, #tHours { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* version and updates */
+.nav-version { margin-top: 12px; padding: 10px 12px 4px; border-top: 1px solid var(--border); }
+@media (max-width: 760px) { .nav-version { display: none; } }
+.update-pill { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); text-decoration: none; cursor: pointer; }

@@ -72,6 +72,25 @@ administrator's password account keeps working as a way in if Microsoft sign-in 
 
 Settings saved on the web pages override the settings file; secrets entered there are stored encrypted with a key
 derived from the server's master key and are never shown again.
+
+### Updating TikManager
+
+The version you're running is shown at the bottom of the menu and on Admin > Settings > Version & updates. Once a day
+TikManager checks the GitHub repository for a newer release; administrators then see an **Update available** badge.
+
+- **One click:** Admin > Settings > Version & updates > **Upgrade now**. The server downloads that release, backs up the
+  current code and the database (`/opt/tikmanager.prev`, `/var/lib/tikmanager/backup-before-<version>.db`, last 3 kept), installs
+  it and restarts - about a minute. If the new version doesn't start, it puts the previous one back automatically.
+- **From a terminal:** `sudo bash /opt/tikmanager/deploy/self-update.sh` (newest release) or
+  `sudo bash /opt/tikmanager/deploy/self-update.sh 1.2.0` (a specific one). Progress: `journalctl -u tikmanager-update`.
+- **Your own modified copy:** fork the repository, set `TM_UPDATE_REPO=<you>/<your-fork>` in
+  `/etc/tikmanager/tikmanager.env` and publish your own `vX.Y.Z` tags; or keep copying code over with `deploy/push.ps1`.
+
+Where updates come from is set only in that root-owned file, never on the web pages, so a stolen administrator account
+can't make the server install someone else's code. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+
+The built-in tiki torch logo (`static/logo.svg`) is used until you upload your own on Admin > Branding.
+
 ### If a router registers but never comes online
 
 The router reaches TikManager over HTTPS to register, but monitoring needs its WireGuard tunnel (UDP 51820) to reach the VM.

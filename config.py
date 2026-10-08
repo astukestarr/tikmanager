@@ -54,6 +54,10 @@ class Settings:
     wg_network: str = field(default_factory=lambda: env("WG_NETWORK", "10.77.0.0/16"))
     wg_server_pubkey: str = field(default_factory=lambda: env("WG_SERVER_PUBKEY"))
     syslog_port: int = field(default_factory=lambda: int(env("TM_SYSLOG_PORT", "5514")))
+    # where new versions come from (GitHub owner/repo) - root-owned settings file only, never the web pages, because the
+    # root updater installs whatever this points at
+    update_repo: str = field(default_factory=lambda: env("TM_UPDATE_REPO", "astukestarr/tikmanager"))
+    update_check: bool = field(default_factory=lambda: env("TM_UPDATE_CHECK", "1").lower() not in ("0", "false", "no"))
     # one-time first-run link (/setup/<token>), written by the installer; dead once an admin account exists
     setup_token: str = field(default_factory=lambda: env("TM_SETUP_TOKEN"))
     ping_target: str = field(default_factory=lambda: env("TM_PING_TARGET", "1.1.1.1"))   # routers ping this each minute (WAN latency/loss)

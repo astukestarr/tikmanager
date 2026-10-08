@@ -32,6 +32,8 @@ from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, 
                       token_hash, totp_uri)
 from branding import Branding
 from appsettings import AppSettings
+from updates import Updates
+from version import __version__
 from integrations import IntegrationError, Integrations, norm
 from thumbs import Thumbs
 from vault import Vault
@@ -55,6 +57,7 @@ poller.thumbs = thumbs
 backups = Backups(db, settings, Vault(KEY, dev=settings.dev), poller.client)
 sysconf = AppSettings(db, backups.vault, settings)   # Admin > Settings values over the settings-file defaults
 sysconf.apply()
+updates = Updates(settings)
 upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
@@ -281,13 +284,18 @@ class Handler(BaseHTTPRequestHandler):
                               "encryption": "AES-256-GCM" if backups.vault.available else "not available (dev)",
                               "routers": db.one("SELECT COUNT(*) AS n FROM devices WHERE state='adopted'")["n"],
                               "backups": db.one("SELECT COUNT(*) AS n FROM backups")["n"]})
+        if path == "/api/version":   # current version, newest release, upgrade progress (admins)
+            self.require(tech=True, admin=True)
+            return self.json(updates.info())
         if path == "/api/login/options":
             return self.json({"entra": settings.entra_configured, "dev": settings.dev and settings.host in ("127.0.0.1", "localhost")})
         if path == "/api/me":
             s = self.require()
             org = db.one("SELECT name FROM orgs WHERE id=?", (s["org_id"],)) if s["org_id"] else None
             return self.json({"email": s["email"], "name": s["name"], "kind": s["kind"], "role": s["role"], "org_id": s["org_id"],
-                              "org": org["name"] if org else None, "csrf": s["csrf"], "dev": settings.dev})
+                              "org": org["name"] if org else None, "csrf": s["csrf"], "dev": settings.dev, "version": __version__,
+                              # admins see when a newer release is out (the banner with "Upgrade now")
+                              "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None})
         if path == "/api/orgs":
             s = self.require()
             where, args = self.org_scope(s, column="o.id")
@@ -978,6 +986,19 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "logo changed" if saved["logo_url"] else "logo removed", ip=self.client_ip())
             return self.json({"ok": True, **saved})
+        if path == "/api/admin/update-check":
+            self.require(tech=True, admin=True)
+            updates.check()
+            return self.json(updates.info())
+        if path == "/api/admin/upgrade":   # hand the upgrade to the root updater (tikmanager-update.path)
+            s = self.require(tech=True, admin=True)
+            version = str(self.body().get("version") or "").strip()
+            try:
+                updates.request(version)
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "upgrade requested", f"{__version__} -> {version}", self.client_ip())
+            return self.json({"ok": True, **updates.info()})
         if path == "/api/admin/settings":   # Admin > Settings: staff sign-in, Microsoft sign-in, router settings
             s = self.require(tech=True, admin=True)
             b = self.body()
@@ -1276,6 +1297,7 @@ def main():
     backups.start()
     upgrades.start()
     tasks.start()
+    updates.start()
     integ.start(settings.public_url)
     vpns.start()
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)

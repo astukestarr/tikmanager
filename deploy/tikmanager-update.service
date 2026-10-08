@@ -1,0 +1,9 @@
+[Unit]
+Description=Upgrade TikManager to a released version (requested from the web UI)
+
+[Service]
+Type=oneshot
+# root: it replaces /opt/tikmanager and restarts the service. It reads only a version number from the request file;
+# where the code comes from is fixed in /etc/tikmanager/tikmanager.env (TM_UPDATE_REPO).
+ExecStart=/bin/bash /opt/tikmanager/deploy/self-update.sh
+TimeoutStartSec=15min

@@ -46,8 +46,8 @@ id tikmanager >/dev/null 2>&1 || useradd --system --home /var/lib/tikmanager --s
 install -d -m 0755 /opt/tikmanager
 install -d -m 0750 -o tikmanager -g tikmanager /var/lib/tikmanager
 install -d -m 0750 -o root -g tikmanager /etc/tikmanager
-rsync -a --delete --exclude data --exclude '.env' --exclude '__pycache__' "$SRC/" /opt/tikmanager/ 2>/dev/null || cp -r "$SRC/." /opt/tikmanager/
-rm -rf /opt/tikmanager/data
+rsync -a --delete --exclude data --exclude '.env' --exclude '__pycache__' --exclude .git --exclude dist "$SRC/" /opt/tikmanager/ 2>/dev/null || cp -r "$SRC/." /opt/tikmanager/
+rm -rf /opt/tikmanager/data /opt/tikmanager/.git /opt/tikmanager/dist
 chown -R root:root /opt/tikmanager && chmod -R u=rwX,go=rX /opt/tikmanager   # readable (not writable) by the service; the upload folder may be private
 
 echo "== WireGuard (wg0)"
@@ -86,6 +86,8 @@ WG_NETWORK=10.77.0.0/16
 WG_SERVER_PUBKEY=$PUB
 # One-time first-run link: https://$HOST/setup/<this token> (stops working once an administrator exists)
 TM_SETUP_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)
+# Where new versions come from (GitHub owner/repo). Only change this to a repository you trust: the updater runs as root.
+TM_UPDATE_REPO=astukestarr/tikmanager
 # Optional defaults - staff sign-in, Microsoft sign-in and the WireGuard address are normally set on Admin > Settings:
 TM_TECH_ADMINS=$ADMINS
 TM_TECH_DOMAINS=$DOMAINS
@@ -96,8 +98,11 @@ chown root:tikmanager $ENV && chmod 0640 $ENV
 
 echo "== Service"
 cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/tikmanager.service
+# root updater behind Admin "Upgrade now": the web app drops a version number, this installs that release
+cp /opt/tikmanager/deploy/tikmanager-update.path /opt/tikmanager/deploy/tikmanager-update.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable tikmanager
+systemctl enable --now tikmanager-update.path
 
 echo "== Caddy (HTTPS front door)"
 sed "s|__HOST__|$HOST|g" /opt/tikmanager/deploy/Caddyfile > /etc/caddy/Caddyfile
