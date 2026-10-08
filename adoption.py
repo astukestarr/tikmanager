@@ -74,10 +74,13 @@ def stage2(s, device: dict, api_password: str) -> str:
 /user remove [find name=$tm]
 /user add name=$tm group=$tm password={_q(api_password)} address={srv}/32 comment="TikManager - do not remove"
 # HTTP management for the controller. RouterOS 7.2x renamed the service's "address" to "available-from" - handle both.
+# Both names only appear inside :parse strings: RouterOS checks a whole script before running any of it, and one
+# parameter name it doesn't know makes it reject everything (7.19 ran nothing after creating the interface).
 :local www [/ip service get www disabled]
 :local prop "available-from"
 :local addr ""
-:do {{ :set addr [/ip service get www available-from] }} on-error={{ :set prop "address"; :set addr [/ip service get www address] }}
+:do {{ :local g [:parse ":return [/ip service get www available-from]"]; :set addr [$g] }} on-error={{
+  :set prop "address"; :local g [:parse ":return [/ip service get www address]"]; :set addr [$g] }}
 :local want ""
 :if ($www = true) do={{ /ip service set www disabled=no; :set want "{srv}/32" }} else={{
   :if ([:len $addr] > 0 && [:typeof [:find [:tostr $addr] "{srv}/"]] = "nil") do={{
@@ -86,7 +89,8 @@ def stage2(s, device: dict, api_password: str) -> str:
   }}
 }}
 :if ([:len $want] > 0) do={{
-  :if ($prop = "address") do={{ /ip service set www address=$want }} else={{ /ip service set www available-from=$want }}
+  :local setwww [:parse ("/ip service set www " . $prop . "=\\"" . $want . "\\"")]
+  $setwww
 }}
 /system logging remove [find action=$tm]
 /system logging action remove [find name=$tm]
