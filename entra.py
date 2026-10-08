@@ -92,8 +92,15 @@ class Entra:
             raise AuthError("Sign-in response didn't match this request. Please try again.")
         if c.get("exp", 0) < time.time() - 60:
             raise AuthError("ID token has expired. Please try again.")
+        if not c.get("oid"):
+            raise AuthError("Microsoft didn't say who signed in (no user ID in the token).")
+        # guests (B2B / personal accounts invited into your tenant) carry an 'idp' claim naming their home directory;
+        # only your own organization's accounts may be technicians
+        idp = str(c.get("idp") or "")
+        if idp and tid.lower() not in idp.lower():
+            raise AuthError("Guest accounts can't sign in to TikManager - use an account from your own organization.")
         email = (c.get("preferred_username") or c.get("email") or "").lower()
-        return {"email": email, "name": c.get("name") or email, "oid": c.get("oid")}, pending["return_to"]
+        return {"email": email, "name": c.get("name") or email, "oid": c["oid"]}, pending["return_to"]
 
     def logout_url(self):
         return f"{self.authority}/logout?{urllib.parse.urlencode({'post_logout_redirect_uri': self.s.public_url + '/login'})}"

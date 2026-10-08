@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.1.1 - 2026-10-08
+
+Security fixes from a review of the whole project. Upgrade with the button as usual.
+
+- **Updater**: the root updater no longer writes into the web app's own folder, where a compromised web app could have
+  planted links to make root overwrite or hand over other files. Upgrade progress now lives in
+  `/var/lib/tikmanager-update/`, and database copies taken before an upgrade in `/var/backups/tikmanager/` (root only).
+  The updater also refuses to install an older version than the one installed.
+- **Sign-in**: an account locked after failed attempts can no longer keep trying authenticator codes, and three wrong
+  codes end the sign-in. Signing in with an unknown email takes as long as with a known one.
+- **Microsoft sign-in**: guest accounts are refused, and each technician is tied to their Microsoft account's permanent
+  ID, so a renamed or reused email address doesn't inherit an old account. Admin > Technicians > **Reset sign-in**
+  unlinks an account (and resets its authenticator app).
+- **Error pages** escape everything they show (a crafted sign-in link could put fake text on the page).
+- **Dev sign-in** only works for requests made on the machine itself, never through Caddy, even if dev mode were
+  switched on by mistake.
+- **Client users** no longer receive TikManager's internal notes and bookkeeping fields for their routers.
+
 ## 1.1.0 - 2026-10-08
 
 - **Routers list**: click a column header to sort by it (Status, Client, Router, Site, Model, RouterOS, Uptime, CPU,

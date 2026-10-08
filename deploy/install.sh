@@ -46,6 +46,8 @@ id tikmanager >/dev/null 2>&1 || useradd --system --home /var/lib/tikmanager --s
 install -d -m 0755 /opt/tikmanager
 install -d -m 0750 -o tikmanager -g tikmanager /var/lib/tikmanager
 install -d -m 0750 -o root -g tikmanager /etc/tikmanager
+install -d -m 0750 -o root -g tikmanager /var/lib/tikmanager-update   # the root updater's progress (the service reads it)
+install -d -m 0700 -o root -g root /var/backups/tikmanager             # database copies taken before each upgrade
 rsync -a --delete --exclude data --exclude '.env' --exclude '__pycache__' --exclude .git --exclude dist "$SRC/" /opt/tikmanager/ 2>/dev/null || cp -r "$SRC/." /opt/tikmanager/
 rm -rf /opt/tikmanager/data /opt/tikmanager/.git /opt/tikmanager/dist
 chown -R root:root /opt/tikmanager && chmod -R u=rwX,go=rX /opt/tikmanager   # readable (not writable) by the service; the upload folder may be private

@@ -48,14 +48,20 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
   number to `/var/lib/tikmanager/update-request`. The root-owned systemd unit `tikmanager-update.path` notices the file
   and starts `tikmanager-update.service`, which runs `deploy/self-update.sh` as root:
   1. reads the repository from `TM_UPDATE_REPO` in the root-owned settings file - never from anything the web app can
-     write - and accepts only a version number (digits and dots) from the request;
+     write - and accepts only a version number (digits and dots) from the request, never an older version than the
+     one installed;
   2. downloads `https://github.com/<repo>/archive/refs/tags/v<version>.tar.gz`, checks it is TikManager, that its
      `version.py` matches and that its Python compiles;
-  3. backs up the code to `/opt/tikmanager.prev` and the database (SQLite online backup) to
-     `backup-before-<version>.db` (last 3 kept);
+  3. backs up the code to `/opt/tikmanager.prev` and the database to `/var/backups/tikmanager/backup-before-<version>.db`
+     (root only, last 3 kept);
   4. installs with the new version's own `deploy/update.sh` and restarts; if the service isn't running 5 seconds later,
      restores `/opt/tikmanager.prev` and restarts the old version;
-  5. reports each step in `/var/lib/tikmanager/update-status.json`, which the Version & updates card shows.
+  5. reports each step in `/var/lib/tikmanager-update/status.json` (root-owned, readable by the service), which the
+     Version & updates card shows.
+- The updater never writes, as root, into `/var/lib/tikmanager`: that folder belongs to the service user, and a
+  compromised web app could plant links there that make root overwrite or hand over other files. It only reads the
+  request file there (a regular file, not a link), and the database copy is read by the service's own user and streamed
+  to root.
 - Database changes must be additive (`DB.migrate()` adds columns/tables), so a rolled-back older version still runs on
   the upgraded database.
 
@@ -87,8 +93,10 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 
 - **Organizations** = clients. Every device, backup, event and run belongs to one; every query a client user can make
   is scoped to their organization server-side (`org_scope`, `device_for`).
-- **Technicians** sign in with Microsoft Entra (your tenant only); who may sign in (email domains) and who becomes an
-  admin are set on Admin > Settings. Roles: admin / tech / read-only. A password + authenticator account (the first
+- **Technicians** sign in with Microsoft Entra (your tenant only; guest accounts are refused); who may sign in (email
+  domains) and who becomes an admin are set on Admin > Settings. Each technician is bound to Microsoft's permanent user
+  ID at first sign-in, so a renamed or reused email address doesn't inherit someone else's account (Admin >
+  Technicians > Reset sign-in unlinks it). Roles: admin / tech / read-only. A password + authenticator account (the first
   administrator, created by the one-time setup link) works without Microsoft.
 - **Client users** are invited by email link; password (14+ characters, scrypt) and **mandatory TOTP**. Roles: client
   admin / viewer. Clients see their routers, backups' existence and events, but never configurations or secrets, and
@@ -101,7 +109,8 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 - Sessions: random token (only its hash stored), HttpOnly, Secure, SameSite=Lax, 10 h absolute / 60 min idle; CSRF token
   header and Origin check on every state-changing request; strict Content-Security-Policy (no inline script or style
   attributes - widths are set from JS).
-- Sign-in rate limiting and lockout; audit log of every sign-in and change (secrets are never logged - only which
+- Sign-in rate limiting and lockout (the lock covers the authenticator-code step; three wrong codes end the sign-in);
+  dev sign-in only for requests made directly on the machine itself, never through Caddy; audit log of every sign-in and change (secrets are never logged - only which
   setting changed).
 - Secrets: router API passwords are derived from the master key (`/etc/tikmanager/master.key`, root:tikmanager 0640)
   and never stored; stored router configurations, integration keys and the Microsoft client secret are AES-256-GCM

@@ -92,7 +92,7 @@ updates card checks immediately.
 1. Click the **Update available** badge (or go to Admin > Settings). **What's new** opens that version's notes.
 2. Click **Upgrade now**, then click again to confirm.
 3. The card shows progress. The server downloads the release from GitHub, checks it, backs up the current code
-   (`/opt/tikmanager.prev`) and the database (`/var/lib/tikmanager/backup-before-<version>.db`, the last 3 are kept),
+   (`/opt/tikmanager.prev`) and the database (`/var/backups/tikmanager/backup-before-<version>.db`, readable by root only; the last 3 are kept),
    installs it and restarts TikManager. That takes about a minute; the page says "Restarting..." and reloads by itself
    on the new version.
 4. If the new version doesn't start, the server puts the previous version back automatically and the card says
@@ -103,6 +103,10 @@ updates card checks immediately.
     sudo bash /opt/tikmanager/deploy/self-update.sh            # newest release
     sudo bash /opt/tikmanager/deploy/self-update.sh 1.2.0      # a specific version
     journalctl -u tikmanager-update                            # what the last upgrade did
+
+The updater never installs an older version than the one you have - from the button it can't, and by hand only if you
+insist: `sudo TM_ALLOW_DOWNGRADE=1 bash /opt/tikmanager/deploy/self-update.sh 1.0.0`. To undo the last upgrade, the
+steps below are simpler.
 
 **Servers installed before 1.0.0** don't have the updater yet. Install it once by copying the current code over from a
 Windows PC, after which the button works:
@@ -120,7 +124,7 @@ If you also need the database as it was before the upgrade (newer versions only 
 version normally runs fine on it):
 
     sudo systemctl stop tikmanager
-    sudo cp /var/lib/tikmanager/backup-before-<version>.db /var/lib/tikmanager/tikmanager.db
+    sudo cp /var/backups/tikmanager/backup-before-<version>.db /var/lib/tikmanager/tikmanager.db
     sudo rm -f /var/lib/tikmanager/tikmanager.db-wal /var/lib/tikmanager/tikmanager.db-shm
     sudo chown tikmanager:tikmanager /var/lib/tikmanager/tikmanager.db && sudo systemctl start tikmanager
 
@@ -243,6 +247,6 @@ sign-in, router settings, backup time and retention).
 | WireGuard | `/etc/wireguard/wg0.conf` (controller key); router peers come from the database |
 | Logs | `journalctl -u tikmanager`, `/var/log/caddy/tikmanager.log` |
 | Updater | `tikmanager-update.path` / `.service` (root), log `journalctl -u tikmanager-update` |
-| Before the last upgrade | code `/opt/tikmanager.prev`, database `/var/lib/tikmanager/backup-before-<version>.db` (last 3) |
+| Before the last upgrade | code `/opt/tikmanager.prev`, database `/var/backups/tikmanager/backup-before-<version>.db` (last 3, root only); upgrade progress `/var/lib/tikmanager-update/status.json` |
 
 The service runs as user `tikmanager` with only `CAP_NET_ADMIN` and a read-only filesystem except its data folder.

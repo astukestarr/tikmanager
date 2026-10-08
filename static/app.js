@@ -654,7 +654,8 @@ async function adminTechs() {
     <div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr></thead><tbody>
     ${techs.map((u) => `<tr><td>${esc(u.email)}${u.disabled ? ` <span class="pill">disabled</span>` : ""}</td><td>${esc(u.name)}</td>
       <td><select data-role="${u.id}" ${u.email === me.email ? "disabled" : ""}>${["admin", "tech", "readonly"].map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r === "readonly" ? "Read-only" : r[0].toUpperCase() + r.slice(1)}</option>`).join("")}</select></td>
-      <td>${ago(u.last_login)}</td><td>${u.email === me.email ? "" : `<button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>`}</td></tr>`).join("")}
+      <td>${ago(u.last_login)}</td><td class="nowrap">${u.email === me.email ? "" : `<button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>
+        <button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}" title="Unlinks the Microsoft account (for a renamed or replaced account) and resets the authenticator app">Reset sign-in</button>`}</td></tr>`).join("")}
     </tbody></table></div><span class="status" id="tStatus"></span></div>`;
   document.querySelectorAll("[data-role]").forEach((s) => s.addEventListener("change", async () => {
     try { await post(`/api/users/${s.dataset.role}/role`, { role: s.value }); $("tStatus").textContent = "Saved."; $("tStatus").className = "status ok"; }

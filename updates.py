@@ -5,7 +5,7 @@
 - Upgrading needs root, which the web app deliberately doesn't have. Clicking Upgrade writes the wanted version to
   <data>/update-request; the root-owned systemd unit tikmanager-update.path notices it and runs deploy/self-update.sh,
   which downloads that release, backs up code and database, installs it, restarts, rolls back if the new version doesn't
-  start, and reports progress in <data>/update-status.json.
+  start, and reports progress in /var/lib/tikmanager-update/status.json (root-owned; this service can only read it).
 - Where updates come from is read by self-update.sh from the root-owned settings file only - never from anything the
   web app can change - so a compromised admin account can't make the server install someone else's code.
 """
@@ -36,7 +36,9 @@ class Updates:
         self.s = settings
         self.data = Path(settings.data_dir)
         self.request_file = self.data / "update-request"
-        self.status_file = self.data / "update-status.json"
+        # written by the root updater in its own root-owned folder (never in ours, where links could be planted);
+        # data/update-status.json is where versions before 1.1.1 wrote it, and dev mode reads it from there
+        self.status_files = [Path("/var/lib/tikmanager-update/status.json"), self.data / "update-status.json"]
         self.latest = {"version": None, "url": None, "notes": "", "checked_at": None, "error": None}
         self.lock = threading.Lock()
 
@@ -84,10 +86,13 @@ class Updates:
                 "error": self.latest.get("error"), "repo": self.repo, "supported": self.supported(), "status": self.status()}
 
     def status(self):
-        try:
-            st = json.loads(self.status_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            st = {}
+        st = {}
+        for f in self.status_files:
+            try:
+                st = json.loads(f.read_text(encoding="utf-8"))
+                break
+            except (OSError, ValueError):
+                continue
         if self.request_file.exists():
             st = {"state": "requested", "version": self.request_file.read_text(encoding="utf-8").strip()[:20], "detail": "Waiting for the updater to start"}
         return st

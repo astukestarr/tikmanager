@@ -11,7 +11,10 @@ rsync -a --delete --exclude data --exclude '.env' --exclude '__pycache__' --excl
 rm -rf /opt/tikmanager/data /opt/tikmanager/.git /opt/tikmanager/dist
 chown -R root:root /opt/tikmanager && chmod -R u=rwX,go=rX /opt/tikmanager   # readable (not writable) by the service; the upload folder may be private
 cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/tikmanager.service
-# the root updater behind Admin "Upgrade now" (tikmanager-update.path watches for the web app's request)
+# the root updater behind Admin "Upgrade now" (tikmanager-update.path watches for the web app's request); it reports
+# progress in its own root-owned folder and keeps database copies where only root can reach them
+install -d -m 0750 -o root -g tikmanager /var/lib/tikmanager-update
+install -d -m 0700 -o root -g root /var/backups/tikmanager
 cp /opt/tikmanager/deploy/tikmanager-update.path /opt/tikmanager/deploy/tikmanager-update.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now tikmanager-update.path >/dev/null 2>&1 || true

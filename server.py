@@ -4,6 +4,8 @@
 """
 import base64
 import dataclasses
+import html
+import ipaddress
 import json
 import mimetypes
 import secrets
@@ -108,6 +110,19 @@ class Handler(BaseHTTPRequestHandler):
         if ip == settings.trusted_proxy and self.headers.get("X-Forwarded-For"):
             return self.headers["X-Forwarded-For"].split(",")[-1].strip()
         return ip
+
+    def dev_login_allowed(self):
+        """Dev sign-in: dev mode, a localhost public address, and a request straight from this machine. Behind Caddy every
+        request arrives from 127.0.0.1 too, so the listen address alone proves nothing - a forwarded request (it carries
+        X-Forwarded-For) is never accepted, even if TM_DEV were switched on by mistake on a real server."""
+        if not settings.dev or self.headers.get("X-Forwarded-For") or self.headers.get("Forwarded"):
+            return False
+        host = urllib.parse.urlparse(settings.public_url).hostname or ""
+        try:
+            local = ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            local = False
+        return local and host in ("localhost", "127.0.0.1", "::1")
 
     def send(self, status, body: bytes, ctype="application/json", headers=()):
         self.send_response(status)
@@ -240,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
             elif e.status == 401:
                 self.redirect("/login")
             else:
-                self.send(e.status, f"<!doctype html><title>TikManager</title><p>{e}</p>".encode(), "text/html; charset=utf-8")
+                self.send(e.status, f"<!doctype html><title>TikManager</title><p>{html.escape(str(e))}</p>".encode(), "text/html; charset=utf-8")
         except Exception:  # noqa: BLE001
             traceback.print_exc()
             self.json({"error": "Something went wrong on the server."}, 500)
@@ -288,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, admin=True)
             return self.json(updates.info())
         if path == "/api/login/options":
-            return self.json({"entra": settings.entra_configured, "dev": settings.dev and settings.host in ("127.0.0.1", "localhost")})
+            return self.json({"entra": settings.entra_configured, "dev": self.dev_login_allowed()})
         if path == "/api/me":
             s = self.require()
             org = db.one("SELECT name FROM orgs WHERE id=?", (s["org_id"],)) if s["org_id"] else None
@@ -466,8 +481,10 @@ class Handler(BaseHTTPRequestHandler):
             d["last_upgrade"] = db.one("""SELECT status, detail, finished_at FROM upgrades WHERE device_id=? AND status IN ('done','failed')
                                           ORDER BY finished_at DESC LIMIT 1""", (d["id"],))
             d["events"] = db.q("SELECT ts, kind, detail FROM events WHERE device_id=? ORDER BY ts DESC LIMIT 50", (d["id"],))
-            if s["kind"] != "tech":
-                d.pop("wg_pubkey", None)
+            if s["kind"] != "tech":   # clients see their router, not TikManager's internal bookkeeping about it
+                for k in ("wg_pubkey", "token_expires", "notes", "api_port", "created_by", "thumb_tried", "itg_config_id",
+                          "itg_synced_at", "itg_error", "vpn_inv_at", "ros_checked", "name_custom"):
+                    d.pop(k, None)
             return self.json(d)
         if m := re.fullmatch(r"/api/devices/(\d+)/series", path):   # chart data: traffic for one interface + WAN health
             s = self.require()
@@ -1051,19 +1068,29 @@ class Handler(BaseHTTPRequestHandler):
             who, ret = entra.complete(q, read_cookie(self.headers.get("Cookie"), STATE_COOKIE))
         except AuthError as e:
             db.audit("", "sign-in failed (Microsoft)", ip=self.client_ip(), detail=str(e))
-            return self.send(403, f"<!doctype html><title>TikManager</title><p>{e}</p><p><a href='/login'>Back</a></p>".encode(), "text/html; charset=utf-8")
+            # the message can carry text from the callback URL (error_description) - always escaped
+            return self.send(403, f"<!doctype html><title>TikManager</title><p>{html.escape(str(e))}</p><p><a href='/login'>Back</a></p>".encode(),
+                             "text/html; charset=utf-8")
         email = who["email"]
         admins = {x.strip().lower() for x in settings.tech_admins.split(",") if x.strip()}
         domains = {x.strip().lower().lstrip("@") for x in settings.tech_domains.split(",") if x.strip()}
-        user = db.one("SELECT * FROM users WHERE email=?", (email,))
+        # the account is tied to Microsoft's permanent user ID: if an email address is later renamed or reused, the new
+        # holder doesn't inherit the old technician account
+        user = db.one("SELECT * FROM users WHERE entra_oid=?", (who["oid"],)) or db.one("SELECT * FROM users WHERE email=?", (email,))
         if user and user["kind"] != "tech":
             raise HttpError(403, "That address belongs to a client account - sign in with your password instead.")
+        if user and user["entra_oid"] and user["entra_oid"] != who["oid"]:
+            db.audit(email, "sign-in refused (different Microsoft account)", ip=self.client_ip())
+            raise HttpError(403, f"{email} is linked to a different Microsoft account. An administrator can use "
+                                 "Reset sign-in for it on Admin > Technicians.")
+        if user and not user["entra_oid"]:
+            db.run("UPDATE users SET entra_oid=? WHERE id=?", (who["oid"], user["id"]))
         if not user:
             if email not in admins and email.split("@")[-1] not in domains:
                 db.audit(email, "sign-in refused (not a technician)", ip=self.client_ip())
                 raise HttpError(403, f"{email} isn't allowed to sign in to TikManager.")
-            uid = db.run("INSERT INTO users (email, name, kind, role, created_at) VALUES (?,?,?,?,?)",
-                         (email, who["name"], "tech", "admin" if email in admins else "tech", now()))
+            uid = db.run("INSERT INTO users (email, name, kind, role, created_at, entra_oid) VALUES (?,?,?,?,?,?)",
+                         (email, who["name"], "tech", "admin" if email in admins else "tech", now(), who["oid"]))
             user = db.one("SELECT * FROM users WHERE id=?", (uid,))
         if user["disabled"]:
             raise HttpError(403, "Your TikManager account is disabled.")
@@ -1079,7 +1106,8 @@ class Handler(BaseHTTPRequestHandler):
         u = db.one("SELECT * FROM users WHERE email=? AND password_hash IS NOT NULL", (email,))
         if u and u["locked_until"] > now():
             raise HttpError(429, "This account is locked for a few minutes after too many failed attempts.")
-        if not u or u["disabled"] or not check_password(pw, u["password_hash"]):
+        ok = check_password(pw, u["password_hash"] if u else None)   # always hashes, so timing doesn't reveal which emails exist
+        if not u or u["disabled"] or not ok:
             if u:
                 fails = u["failed"] + 1
                 db.run("UPDATE users SET failed=?, locked_until=? WHERE id=?", (fails, now() + LOCK_SECONDS if fails >= MAX_FAILS else 0, u["id"]))
@@ -1097,6 +1125,12 @@ class Handler(BaseHTTPRequestHandler):
         if not p or now() - p["created"] > 600:
             raise HttpError(401, "That sign-in expired - start again.")
         u = db.one("SELECT * FROM users WHERE id=?", (p["user_id"],))
+        if not u or u["disabled"]:
+            raise HttpError(401, "That sign-in expired - start again.")
+        if u["locked_until"] > now():   # the lock covers the code step too, not just the password
+            with pending_lock:
+                pending_logins.pop(str(b.get("ticket") or ""), None)
+            raise HttpError(429, "This account is locked for a few minutes after too many failed attempts.")
         if b.get("want_secret"):   # enrollment step 1: show the secret for the authenticator app
             if not p["enroll_secret"]:
                 raise HttpError(400, "MFA is already set up for this account.")
@@ -1106,6 +1140,11 @@ class Handler(BaseHTTPRequestHandler):
             fails = u["failed"] + 1
             db.run("UPDATE users SET failed=?, locked_until=? WHERE id=?", (fails, now() + LOCK_SECONDS if fails >= MAX_FAILS else 0, u["id"]))
             db.audit(u["email"], "sign-in failed (MFA code)", ip=ip)
+            with pending_lock:   # a few wrong codes end this sign-in: guessing means starting over with the password
+                p["code_fails"] = p.get("code_fails", 0) + 1
+                if p["code_fails"] >= 3:
+                    pending_logins.pop(str(b.get("ticket") or ""), None)
+                    raise HttpError(401, "Too many wrong codes - sign in again.")
             raise HttpError(401, "That code didn't match - check the time on your phone and try again.")
         with pending_lock:
             pending_logins.pop(str(b.get("ticket")), None)
@@ -1154,7 +1193,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.json({"ok": True})
 
     def login_dev(self):
-        if not (settings.dev and settings.host in ("127.0.0.1", "localhost")):
+        if not self.dev_login_allowed():
             raise HttpError(404, "Not found.")
         u = db.one("SELECT * FROM users WHERE email='dev@local'")
         if not u:
@@ -1200,8 +1239,8 @@ class Handler(BaseHTTPRequestHandler):
             db.run("UPDATE users SET disabled=? WHERE id=?", (1 if action == "disable" else 0, uid))
             if action == "disable":
                 sessions.end_all_for(uid)
-        elif action == "reset-mfa":
-            db.run("UPDATE users SET totp_enabled=0, totp_secret=NULL WHERE id=?", (uid,))
+        elif action == "reset-mfa":   # technicians: also unlinks the Microsoft account (renamed / replaced account)
+            db.run("UPDATE users SET totp_enabled=0, totp_secret=NULL, entra_oid=NULL WHERE id=?", (uid,))
             sessions.end_all_for(uid)
         elif action == "resend":
             if u["kind"] != "client" or u["password_hash"]:
