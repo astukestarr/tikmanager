@@ -475,3 +475,7 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .pill.sec-k-config_change { border-color: var(--accent); color: var(--accent); }
 .pill.sec-k-login_failed, .pill.sec-k-mfa_failed, .pill.sec-k-sudo_failed, .pill.sec-k-rate_limited, .pill.sec-k-adoption_rejected { border-color: var(--bad); color: var(--bad); }
 @media (max-width: 700px) { .sec-kpis { grid-template-columns: 1fr; } }
+.obs { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.obs h3 { margin: 0; font-size: 15px; }
+.obs-grade { display: inline-grid; place-items: center; min-width: 38px; height: 30px; padding: 0 8px; border-radius: 8px; font-weight: 800; font-size: 16px; color: #fff; }
+.obs-good { background: var(--good); } .obs-warn { background: var(--warn); } .obs-bad { background: var(--bad); }

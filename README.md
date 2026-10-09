@@ -437,6 +437,11 @@ TikManager server (SSH, as a user with sudo), then click **Run check** again.
 | Service sandbox changed | `sudo rm -rf /etc/systemd/system/tikmanager.service.d`, `sudo cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/`, `sudo systemctl daemon-reload && sudo systemctl restart tikmanager` |
 | No database copy / old copy | `sudo systemctl stop tikmanager && sudo tar czf /root/tikmanager-$(date +%F).tgz /var/lib/tikmanager /etc/tikmanager; sudo systemctl start tikmanager`, then download it to a safe place and delete it from the server - it contains the master key |
 
+**Website security grade**: Admin > Version & updates also shows the grade Mozilla's
+[HTTP Observatory](https://developer.mozilla.org/en-US/observatory) gives TikManager's public address (security headers,
+cookies, HTTPS redirects), checked weekly, after every upgrade and on **Scan now**. Only the host name is sent to
+Mozilla. Set `TM_OBSERVATORY=0` in `/etc/tikmanager/tikmanager.env` to turn it off.
+
 How it's built to be safe (tunnels, encryption, least privilege, the updater): [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Where things live on the server

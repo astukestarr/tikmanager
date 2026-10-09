@@ -31,6 +31,7 @@ from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from firewall import Firewall, FirewallError
 from secevents import SecurityEvents
+from observatory import Observatory
 import vpninv
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -83,6 +84,7 @@ tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 firewall = Firewall(db, poller.client, backups)
+observatory = Observatory(db, settings)   # Mozilla Observatory grade of the public URL
 secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubuntu server, routers
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
@@ -348,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
                               "backups": db.one("SELECT COUNT(*) AS n FROM backups")["n"]})
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)
-            return self.json(updates.info())
+            return self.json({**updates.info(), "observatory": observatory.info()})
         if path == "/api/login/options":
             return self.json({"entra": settings.entra_configured, "dev": self.dev_login_allowed()})
         if path == "/api/me":
@@ -1151,6 +1153,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "logo changed" if saved["logo_url"] else "logo removed", ip=self.client_ip())
             return self.json({"ok": True, **saved})
+        if path == "/api/admin/observatory-scan":   # Mozilla Observatory scan of the public URL, now
+            s = self.require(tech=True, admin=True)
+            try:
+                res = observatory.scan()
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "Mozilla Observatory scan", observatory.host, self.client_ip(), detail=res.get("grade") or res.get("error") or "")
+            return self.json({**updates.info(), "observatory": observatory.info()})
         if path == "/api/admin/security-check":   # ask the root helper to run the read-only server check now
             s = self.require(tech=True, admin=True)
             try:
@@ -1158,7 +1168,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "server security check requested", ip=self.client_ip())
-            return self.json(updates.info())
+            return self.json({**updates.info(), "observatory": observatory.info()})
         if path == "/api/admin/update-check":
             self.require(tech=True, admin=True)
             updates.check()
@@ -1507,6 +1517,7 @@ def main():
     integ.start(settings.public_url)
     vpns.start()
     secev.start()
+    observatory.start()
     if settings.dev:
         secev.seed_dev()
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)

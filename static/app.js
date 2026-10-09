@@ -1331,6 +1331,12 @@ async function versionCard() {
     b.setAttribute("aria-expanded", String(open));
     b.textContent = open ? "Hide steps" : "How to fix";
   }));
+  $("obsScan")?.addEventListener("click", async () => {
+    $("obsScan").disabled = true;
+    $("obsScan").textContent = "Scanning…";
+    try { await post("/api/admin/observatory-scan"); versionCard(); }
+    catch (e) { $("obsScan").disabled = false; $("obsScan").textContent = "Scan now"; $("secStatus").textContent = e.message; $("secStatus").className = "status err"; }
+  });
   $("secRun")?.addEventListener("click", async () => {
     $("secRun").disabled = true;
     try { await post("/api/admin/security-check"); versionCard(); }
@@ -1428,6 +1434,19 @@ const SEC_FIXES = {
 };
 SEC_FIXES.sandbox = SEC_FIXES.caps = SEC_FIXES.service_user;
 
+// Mozilla HTTP Observatory grade of the public address (observatory.py): weekly, after upgrades, or Scan now
+function obsBox(o) {
+  if (!o.supported) return `<div class="obs"><h3>Website security grade</h3><p class="small muted">Mozilla's Observatory can grade TikManager's HTTPS
+    security settings once it has a public address (not in dev mode).</p></div>`;
+  const g = (o.grade || "").toUpperCase(), tone = g.startsWith("A") ? "good" : g.startsWith("B") || g.startsWith("C") ? "warn" : "bad";
+  return `<div class="obs"><div class="row"><h3>Website security grade</h3>
+      ${g ? `<span class="obs-grade obs-${tone}">${esc(g)}</span><span class="small muted">${o.score} points · ${o.passed} of ${o.total} tests passed${o.failed ? ` · <b>${o.failed} failed</b>` : ""} · checked ${ago(o.checked_at)}</span>`
+        : o.error ? `<span class="status err small">${esc(o.error)}</span>` : `<span class="small muted">Not scanned yet.</span>`}
+      <span class="spacer"></span><button class="btn" type="button" id="obsScan">Scan now</button></div>
+    <p class="small muted">Mozilla's HTTP Observatory checks ${esc(o.host)} from the internet - security headers, cookies, HTTPS redirects - weekly and after every
+      upgrade. Only the address is sent to Mozilla.${o.url ? ` <a href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">Full report</a>` : ""}</p></div>`;
+}
+
 // the read-only server check (deploy/check.sh), run as root daily, after upgrades and on request
 function securityBox(s, u = {}) {
   const bad = (s.results || []).filter((r) => r.status !== "pass").sort((a, b) => (a.status === "fail" ? 0 : 1) - (b.status === "fail" ? 0 : 1)), ok = (s.results || []).filter((r) => r.status === "pass");
@@ -1457,6 +1476,7 @@ function securityBox(s, u = {}) {
       changes anything - each item says what to do.</p>
     ${bad.length ? `<ul class="sec-list">${bad.map(row).join("")}</ul>` : ""}
     ${ok.length ? `<details><summary class="small">${ok.length} passed</summary><ul class="sec-list">${ok.map(row).join("")}</ul></details>` : ""}
+    ${obsBox(u.observatory || {})}
     <details class="sec-best"><summary><b>Security best practices</b> <span class="small muted">- what the check can't see for you</span></summary>
       <ul class="small">
         <li><b>Keep a copy of <span class="mono">/etc/tikmanager/master.key</span> and the database off this server</b> (password manager or offline

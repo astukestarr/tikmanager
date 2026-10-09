@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.11.0 - 2026-10-09
+
+- **Website security grade** on Admin > Version & updates: TikManager asks Mozilla's HTTP Observatory to check its
+  public address from the internet - security headers, cookies, HTTPS redirects - weekly, after every upgrade, and
+  when you click **Scan now**, and shows the grade (A+ to F), the points, how many tests passed and a link to
+  Mozilla's full report. Only the host name is sent to Mozilla (it's public already). Skipped in dev mode and for
+  addresses the internet can't reach; `TM_OBSERVATORY=0` turns it off.
+
 ## 1.10.0 - 2026-10-09
 
 - **Security** (new page, technicians): sign-in attempts on everything someone could try to get into, in one place -

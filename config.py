@@ -58,6 +58,7 @@ class Settings:
     # root updater installs whatever this points at
     update_repo: str = field(default_factory=lambda: env("TM_UPDATE_REPO", "astukestarr/tikmanager"))
     update_check: bool = field(default_factory=lambda: env("TM_UPDATE_CHECK", "1").lower() not in ("0", "false", "no"))
+    observatory: str = field(default_factory=lambda: env("TM_OBSERVATORY", "1"))   # weekly Mozilla Observatory scan of the public URL
     # one-time first-run link (/setup/<token>), written by the installer; dead once an admin account exists
     setup_token: str = field(default_factory=lambda: env("TM_SETUP_TOKEN"))
     ping_target: str = field(default_factory=lambda: env("TM_PING_TARGET", "1.1.1.1"))   # routers ping this each minute (WAN latency/loss)
