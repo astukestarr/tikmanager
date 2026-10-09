@@ -30,6 +30,7 @@ from routeros import RouterError
 from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from firewall import Firewall, FirewallError
+from secevents import SecurityEvents
 import vpninv
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -82,6 +83,7 @@ tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 firewall = Firewall(db, poller.client, backups)
+secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubuntu server, routers
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -271,6 +273,7 @@ class Handler(BaseHTTPRequestHandler):
         sid, _ = sessions.create(user["id"], self.client_ip())
         db.run("UPDATE users SET last_login=?, failed=0, locked_until=0 WHERE id=?", (now(), user["id"]))
         db.audit(user["email"], "sign-in", ip=self.client_ip(), org_id=user.get("org_id"))
+        secev.record("tikmanager", "login_ok", user["email"], self.client_ip(), "microsoft" if user["kind"] == "tech" else "password + MFA")
         return cookie(SESSION_COOKIE, sid, SESSION_SECONDS, settings.secure_cookies)
 
     # --- routing ------------------------------------------------------------------------------------------
@@ -494,6 +497,13 @@ class Handler(BaseHTTPRequestHandler):
                            CASE u.status WHEN 'running' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END, COALESCE(u.finished_at, u.scheduled_at) DESC
                            LIMIT 300""", (now() - 30 * 86400,))
             return self.json({"routers": routers, "jobs": jobs, "channels": list(UPGRADE_CHANNELS)})
+        if path == "/api/security":   # sign-in attempts and other security events (TikManager, Ubuntu server, routers)
+            self.require(tech=True)
+            try:
+                hours = max(1, min(24 * 90, int(q.get("hours") or 24)))
+            except ValueError:
+                hours = 24
+            return self.json(secev.summary(hours, q.get("source", "")[:20], q.get("kind", "")[:20], q.get("q", "")[:100]))
         if path == "/api/discovered":   # MikroTik neighbours of your routers that aren't in TikManager yet
             self.require(tech=True)
             devs = db.q("""SELECT id, name, identity, org_id, state, interfaces, networks, wan_ip, tunnel_ip, public_ip, neighbors, neighbors_at
@@ -1214,6 +1224,7 @@ class Handler(BaseHTTPRequestHandler):
             who, ret = entra.complete(q, read_cookie(self.headers.get("Cookie"), STATE_COOKIE))
         except AuthError as e:
             db.audit("", "sign-in failed (Microsoft)", ip=self.client_ip(), detail=str(e))
+            secev.record("tikmanager", "login_failed", "", self.client_ip(), "microsoft", str(e)[:200])
             # the message can carry text from the callback URL (error_description) - always escaped
             return self.send(403, f"<!doctype html><title>TikManager</title><p>{html.escape(str(e))}</p><p><a href='/login'>Back</a></p>".encode(),
                              "text/html; charset=utf-8")
@@ -1246,6 +1257,7 @@ class Handler(BaseHTTPRequestHandler):
     def login_password(self):
         ip = self.client_ip()
         if not login_limit.allow(ip):
+            secev.record("tikmanager", "rate_limited", "", ip, "sign-in", "too many sign-in attempts from this address", throttle=True)
             raise HttpError(429, "Too many sign-in attempts - wait a few minutes.")
         b = self.body()
         email, pw = str(b.get("email") or "").strip().lower(), str(b.get("password") or "")
@@ -1254,9 +1266,12 @@ class Handler(BaseHTTPRequestHandler):
             raise HttpError(429, "This account is locked for a few minutes after too many failed attempts.")
         ok = check_password(pw, u["password_hash"] if u else None)   # always hashes, so timing doesn't reveal which emails exist
         if not u or u["disabled"] or not ok:
+            secev.record("tikmanager", "login_failed", email, ip, "password", "" if u else "no such account")
             if u:
                 fails = u["failed"] + 1
                 db.run("UPDATE users SET failed=?, locked_until=? WHERE id=?", (fails, now() + LOCK_SECONDS if fails >= MAX_FAILS else 0, u["id"]))
+                if fails == MAX_FAILS:
+                    secev.record("tikmanager", "locked", email, ip, "password", f"locked for {LOCK_SECONDS // 60} minutes after {fails} failed attempts")
             db.audit(email, "sign-in failed", ip=ip)
             raise HttpError(401, "Wrong email or password.")
         return self.json({"ticket": new_ticket(u["id"], enroll=not u["totp_enabled"]), "mfa": "verify" if u["totp_enabled"] else "enroll"})
@@ -1264,6 +1279,7 @@ class Handler(BaseHTTPRequestHandler):
     def login_mfa(self):
         ip = self.client_ip()
         if not login_limit.allow(ip):
+            secev.record("tikmanager", "rate_limited", "", ip, "sign-in", "too many sign-in attempts from this address", throttle=True)
             raise HttpError(429, "Too many sign-in attempts - wait a few minutes.")
         b = self.body()
         with pending_lock:
@@ -1286,6 +1302,9 @@ class Handler(BaseHTTPRequestHandler):
             fails = u["failed"] + 1
             db.run("UPDATE users SET failed=?, locked_until=? WHERE id=?", (fails, now() + LOCK_SECONDS if fails >= MAX_FAILS else 0, u["id"]))
             db.audit(u["email"], "sign-in failed (MFA code)", ip=ip)
+            secev.record("tikmanager", "mfa_failed", u["email"], ip, "MFA code")
+            if fails == MAX_FAILS:
+                secev.record("tikmanager", "locked", u["email"], ip, "MFA code", f"locked for {LOCK_SECONDS // 60} minutes after {fails} failed attempts")
             with pending_lock:   # a few wrong codes end this sign-in: guessing means starting over with the password
                 p["code_fails"] = p.get("code_fails", 0) + 1
                 if p["code_fails"] >= 3:
@@ -1424,8 +1443,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def check_enroll(self, t):
         if not adopt_limit.allow(self.client_ip()):
+            secev.record("tikmanager", "rate_limited", "", self.client_ip(), "adoption", "too many adoption requests from this address", throttle=True)
             raise HttpError(429, "Too many requests.")
         if not secrets.compare_digest(t, self.enroll_token()):
+            secev.record("tikmanager", "adoption_rejected", "", self.client_ip(), "adoption", "an old or wrong adoption command was used", throttle=True)
             raise HttpError(404, "This adoption command is no longer valid - copy the current one from TikManager.")
 
     def controller_settings(self):
@@ -1485,6 +1506,9 @@ def main():
     updates.start()
     integ.start(settings.public_url)
     vpns.start()
+    secev.start()
+    if settings.dev:
+        secev.seed_dev()
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)
     srv.daemon_threads = True
     print(f"TikManager on http://{settings.host}:{settings.port} (public URL {settings.public_url})" + ("  [DEV MODE: simulated routers]" if settings.dev else ""))

@@ -141,10 +141,12 @@ cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/tikmanager.serv
 cp /opt/tikmanager/deploy/tikmanager-update.path /opt/tikmanager/deploy/tikmanager-update.service /etc/systemd/system/
 # read-only server security check (deploy/check.sh), shown on Admin > Version & updates: daily and on request
 cp /opt/tikmanager/deploy/tikmanager-check.service /opt/tikmanager/deploy/tikmanager-check.path /opt/tikmanager/deploy/tikmanager-check.timer /etc/systemd/system/
+# this server's sign-in attempts (SSH, sudo, fail2ban) for the Security page, collected every 5 minutes (read-only)
+cp /opt/tikmanager/deploy/tikmanager-authlog.service /opt/tikmanager/deploy/tikmanager-authlog.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable tikmanager
 systemctl enable --now tikmanager-update.path
-systemctl enable --now tikmanager-check.path tikmanager-check.timer
+systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer
 
 echo "== Caddy (HTTPS front door)"
 sed "s|__HOST__|$HOST|g" /opt/tikmanager/deploy/Caddyfile > /etc/caddy/Caddyfile

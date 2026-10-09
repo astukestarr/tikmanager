@@ -136,6 +136,13 @@ CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY, ts REAL NOT NULL, user TEXT, org_id INTEGER, action TEXT NOT NULL,
   target TEXT, ip TEXT, detail TEXT
 );
+-- sign-in attempts and other security events from TikManager itself, the Ubuntu server and the routers (secevents.py)
+CREATE TABLE IF NOT EXISTS sec_events (
+  id INTEGER PRIMARY KEY, ts REAL NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL,   -- source: tikmanager / server / router
+  user TEXT, ip TEXT, device_id INTEGER, via TEXT, detail TEXT, uid TEXT UNIQUE          -- uid: de-duplicates imported events
+);
+CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
+CREATE INDEX IF NOT EXISTS sec_events_ip ON sec_events(ip, ts);
 """
 
 

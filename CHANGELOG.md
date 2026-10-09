@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.10.0 - 2026-10-09
+
+- **Security** (new page, technicians): sign-in attempts on everything someone could try to get into, in one place -
+  - **TikManager itself**: failed passwords, wrong MFA codes, failed Microsoft sign-ins, accounts locked after too
+    many failures, addresses refused for too many attempts, old or wrong adoption commands - and successful sign-ins.
+  - **Its Ubuntu server**: SSH sign-ins (failed and accepted), sudo password failures and fail2ban blocks, collected
+    every 5 minutes by a small read-only root service (`tikmanager-authlog.*`, set up by the installer and this upgrade).
+  - **Routers**: Winbox / SSH / WebFig / API login failures and logins, and who changed the configuration ("changed
+    by alan@10.0.20.15"). Routers already send their log to TikManager over the tunnel (since adoption); TikManager now
+    receives it - on the tunnel address only - and leaves out its own routine logins.
+  - Totals for 24 hours / 7 days / 30 days, the **top addresses trying to get in** (where they tried, which usernames,
+    whether fail2ban blocked them), routers with the most failures, a searchable event list, and **Worth a look**
+    flags: password guessing (10+ tries in an hour), one address trying several systems, a successful sign-in right
+    after a run of failures, and TikManager's own router login failing. Kept 90 days.
+
 ## 1.9.2 - 2026-10-09
 
 - **Automatic restarts and Caddy updates**: the installer and every upgrade now set Ubuntu's automatic security updates

@@ -1,0 +1,14 @@
+[Unit]
+Description=Collect this server's sign-in attempts for TikManager's Security page (read-only)
+
+[Service]
+Type=oneshot
+# root, because the system journal and fail2ban's log are root-only; it only reads them and writes
+# /var/lib/tikmanager-update/auth-events.json for the web app. Nothing comes from the web app.
+ExecStart=/usr/bin/python3 /opt/tikmanager/deploy/collect-auth.py
+TimeoutStartSec=3min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tikmanager-update
+ProtectHome=yes

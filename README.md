@@ -11,7 +11,7 @@ SQLite, WireGuard and Caddy. No build step, no package manager.
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -258,6 +258,22 @@ MAC, which router saw it on which port, and its uptime. Each router's neighbours
 counts as already in TikManager when one of its MACs, its IP or its identity matches a router TikManager has (or is
 waiting to approve) - except the factory identity "MikroTik". Routers only see devices on their own networks that have
 discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on the page gives you the command to run.
+
+## Security: sign-in attempts everywhere
+
+**Security** (technicians) shows every attempt to sign in to TikManager, its Ubuntu server and your routers, and who
+changed router configuration:
+- **TikManager**: failed passwords and MFA codes, failed Microsoft sign-ins, lock-outs, addresses refused for too many
+  attempts, wrong adoption commands, and successful sign-ins.
+- **Ubuntu server**: SSH sign-ins, sudo password failures and fail2ban blocks - read every 5 minutes by
+  `tikmanager-authlog.timer` (root, read-only: the web app can't read the system journal itself).
+- **Routers**: login failures and logins (Winbox, SSH, WebFig, API) and "changed by" lines from the log each router sends
+  TikManager over its tunnel (set up at adoption; received on the tunnel address only). TikManager's own routine
+  REST logins are left out.
+
+It totals them for 24 hours, 7 days or 30 days, lists the top addresses trying to get in, and flags what's worth a look:
+password guessing, one address trying several systems, a success right after failures (check it was really them), and
+TikManager's own router login failing (someone guessing it, or its password changed). Events are kept 90 days.
 
 ## Clients and their users
 

@@ -2096,6 +2096,57 @@ async function sites() {
 const subnetsView = { org: "", q: "", problems: false };
 const ipNum = (ip) => ip.split(".").reduce((a, o) => a * 256 + Number(o), 0);
 
+// --- Security: sign-in attempts on TikManager, its Ubuntu server and the routers ----------------------------------
+const secView = { hours: 24, source: "", kind: "", q: "" };
+const SEC_SOURCE = { tikmanager: "TikManager", server: "Ubuntu server", router: "Router" };
+const SEC_KIND = { login_failed: "Failed sign-in", mfa_failed: "Wrong MFA code", sudo_failed: "sudo password wrong", locked: "Account locked",
+  rate_limited: "Too many attempts", adoption_rejected: "Bad adoption command", login_ok: "Signed in", banned: "Blocked (fail2ban)", config_change: "Config changed" };
+
+async function securityPage() {
+  const s = await api(`/api/security?hours=${secView.hours}&source=${encodeURIComponent(secView.source)}&kind=${encodeURIComponent(secView.kind)}&q=${encodeURIComponent(secView.q)}`);
+  const tile = (src, icon) => {
+    const t = s.totals[src];
+    return `<div class="tile ${t.failed ? "warn" : "good"}"><div class="l">${esc(SEC_SOURCE[src])}</div><div class="v">${t.failed}</div>
+      <div class="small muted">failed attempt${t.failed === 1 ? "" : "s"} · ${t.ok} sign-in${t.ok === 1 ? "" : "s"}${src === "server" ? ` · ${t.banned} blocked` : ""}${src === "router" ? ` · ${t.changes} change${t.changes === 1 ? "" : "s"}` : ""}</div></div>`;
+  };
+  $("main").innerHTML = `<h1>Security</h1>
+    <p class="muted">Sign-in attempts on TikManager itself, its Ubuntu server (SSH, sudo, fail2ban) and your routers (Winbox, SSH, WebFig, API) -
+      and who changed router configuration. Kept 90 days.</p>
+    <div class="row"><div class="seg" role="group" aria-label="Period">${[[24, "24 hours"], [168, "7 days"], [720, "30 days"]].map(([h, l]) =>
+      `<button type="button" data-h="${h}" class="${secView.hours === h ? "on" : ""}">${l}</button>`).join("")}</div></div>
+    <div class="tiles sec-kpis">${tile("tikmanager")}${tile("server")}${tile("router")}</div>
+    ${s.flags.length ? `<div class="card"><h2>Worth a look</h2><ul class="sec-flags">${s.flags.map((f) =>
+      `<li class="flag-${esc(f.level)}">${esc(f.text)}${f.ip ? ` <button class="linkish" type="button" data-ip="${esc(f.ip)}">show</button>` : ""}</li>`).join("")}</ul></div>` : ""}
+    <div class="grid2">
+      <div class="card"><h2>Top addresses trying to get in</h2>${s.top_ips.length ? `<div class="table-wrap"><table><thead><tr><th>Address</th><th>Attempts</th><th>Tried</th><th>Usernames</th><th>Last</th></tr></thead><tbody>
+        ${s.top_ips.map((a) => `<tr><td class="mono"><button class="linkish mono" type="button" data-ip="${esc(a.ip)}">${esc(a.ip)}</button>${a.banned ? ` <span class="pill">blocked</span>` : ""}</td>
+          <td>${a.count}</td><td class="small">${esc(a.targets.join(", "))}</td><td class="small mono">${esc(a.users.join(", "))}</td><td class="small nowrap">${ago(a.last)}</td></tr>`).join("")}
+        </tbody></table></div>` : `<p class="muted">No failed attempts in this period.</p>`}</div>
+      <div class="card"><h2>Routers with failed sign-ins</h2>${s.routers.length ? `<table><tbody>${s.routers.map((r) =>
+        `<tr><td>${esc(r.name)}</td><td class="num">${r.count}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None in this period.</p>`}
+        <p class="small muted">Router logins and changes come from the log each router sends TikManager over its tunnel. Routers adopted before 1.10.0 already send it.</p></div>
+    </div>
+    <div class="card"><div class="row"><h2>Events</h2><span class="spacer"></span>
+        <select id="secSrc" aria-label="Where"><option value="">Everywhere</option>${Object.entries(SEC_SOURCE).map(([k, l]) => `<option value="${k}" ${secView.source === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <select id="secKind" aria-label="What"><option value="">Everything</option><option value="failed" ${secView.kind === "failed" ? "selected" : ""}>Failures only</option>
+          ${Object.entries(SEC_KIND).map(([k, l]) => `<option value="${k}" ${secView.kind === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <input id="secQ" type="search" placeholder="Address, user, router" aria-label="Search events" value="${esc(secView.q)}"></div>
+      ${s.events.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Where</th><th>What</th><th>User</th><th>From</th><th>How</th><th>Details</th></tr></thead><tbody>
+        ${s.events.map((e) => `<tr class="${e.kind === "login_ok" || e.kind === "config_change" ? "" : "sec-row-bad"}"><td class="nowrap small">${when(e.ts)}</td>
+          <td class="small">${e.device_id ? `<a href="#router/${e.device_id}" data-dev="${e.device_id}">${esc(e.device || "router")}</a>` : esc(SEC_SOURCE[e.source] || e.source)}</td>
+          <td><span class="pill sec-k-${esc(e.kind)}">${esc(SEC_KIND[e.kind] || e.kind)}</span></td><td class="mono small">${esc(e.user || "")}</td>
+          <td class="mono small">${esc(e.ip || "")}</td><td class="small">${esc(e.via || "")}</td><td class="small muted">${esc(e.detail || "")}</td></tr>`).join("")}</tbody></table></div>
+        ${s.total_events > s.events.length ? `<p class="small muted">Newest 500 of ${s.total_events.toLocaleString()} - narrow it down with the filters.</p>` : ""}`
+        : `<p class="muted">Nothing in this period.</p>`}</div>`;
+  const reload = () => securityPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
+  $("main").querySelectorAll("[data-h]").forEach((b) => b.addEventListener("click", () => { secView.hours = +b.dataset.h; reload(); }));
+  $("main").querySelectorAll("[data-ip]").forEach((b) => b.addEventListener("click", () => { secView.q = b.dataset.ip; secView.source = ""; secView.kind = ""; reload(); }));
+  $("main").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
+  $("secSrc").addEventListener("change", () => { secView.source = $("secSrc").value; reload(); });
+  $("secKind").addEventListener("change", () => { secView.kind = $("secKind").value; reload(); });
+  $("secQ").addEventListener("change", () => { secView.q = $("secQ").value.trim(); reload(); });
+}
+
 // --- Discovered: MikroTik devices your routers see next to them (IP > Neighbors) that aren't in TikManager yet ----------
 const discView = { org: "", q: "" };
 
@@ -2388,7 +2439,7 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
 }
-const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

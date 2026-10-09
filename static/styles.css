@@ -462,3 +462,16 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .sec-fix p { margin: 4px 0; }
 .sec-cmd { margin: 6px 0; padding: 8px 10px; border-radius: 6px; background: var(--panel); border: 1px solid var(--border); font-size: 12px;
   white-space: pre-wrap; word-break: break-all; user-select: all; }
+
+/* Security page */
+.sec-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
+.sec-flags { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sec-flags li { padding: 8px 12px; border-radius: 8px; border-left: 4px solid var(--warn); background: var(--bg); font-size: 13.5px; }
+.sec-flags li.flag-bad { border-left-color: var(--bad); }
+.linkish { all: unset; cursor: pointer; color: var(--accent); }
+.linkish:hover, .linkish:focus-visible { text-decoration: underline; }
+.pill.sec-k-login_ok { border-color: var(--good); color: var(--good); }
+.pill.sec-k-banned, .pill.sec-k-locked { border-color: var(--info); color: var(--info); }
+.pill.sec-k-config_change { border-color: var(--accent); color: var(--accent); }
+.pill.sec-k-login_failed, .pill.sec-k-mfa_failed, .pill.sec-k-sudo_failed, .pill.sec-k-rate_limited, .pill.sec-k-adoption_rejected { border-color: var(--bad); color: var(--bad); }
+@media (max-width: 700px) { .sec-kpis { grid-template-columns: 1fr; } }
