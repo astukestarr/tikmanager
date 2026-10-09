@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.5.1 - 2026-10-09
+
+- **Router upgrades**: downloading a new RouterOS could fail with "HTTP 400: Session closed" on routers with a slower
+  internet connection - RouterOS ends any single API request after about a minute, and a big download takes longer.
+  The download now runs as a background job on the router while TikManager watches its progress (up to 15 minutes).
+  A failed download never reboots the router; just run the upgrade again.
+
 ## 1.5.0 - 2026-10-09
 
 - **Geographic map** (Site map > Map): every router where it is, from the whole country down to town level - state

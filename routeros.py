@@ -282,16 +282,38 @@ class RouterOS:
         return {"channel": u.get("channel") or "", "installed": u.get("installed-version") or "",
                 "latest": u.get("latest-version") or "", "status": u.get("status") or ""}
 
-    def download_update(self):
-        """Download the new packages (the router installs them on its next reboot)."""
-        self._req("POST", "/system/package/update/download", {}, timeout=900)
-        u = self.get("/system/package/update") or {}
-        if isinstance(u, list):
-            u = u[0] if u else {}
-        status = u.get("status") or ""
-        if status and not any(w in status.lower() for w in ("reboot", "downloaded")):
-            raise RouterError(f"Download didn't finish: {status}")
-        return status
+    def download_update(self, wait=900):
+        """Download the new packages (the router installs them on its next reboot).
+        RouterOS's REST API closes any request after about 60 seconds ("Session closed"), and a big download over a slow
+        WAN takes longer - so the download runs as a background job on the router (/execute without as-string returns
+        at once) and its progress is read every few seconds until it says Downloaded, for up to `wait` seconds."""
+        def state():
+            u = self.get("/system/package/update") or {}
+            if isinstance(u, list):
+                u = u[0] if u else {}
+            return str(u.get("status") or "")
+
+        done = lambda s: any(w in s.lower() for w in ("downloaded", "reboot"))
+        if done(state()):   # already downloaded (e.g. a retry)
+            return state()
+        self._req("POST", "/execute", {"script": "/system package update download"}, timeout=30)
+        start, seen, status = time.time(), False, ""
+        while time.time() - start < wait:
+            time.sleep(5)
+            try:
+                status = state()
+            except RouterError:
+                continue   # a slow moment over the tunnel - keep watching
+            low = status.lower()
+            if done(status):
+                return status
+            if "error" in low or "fail" in low or "could not" in low:
+                raise RouterError(f"The router couldn't download the update: {status}")
+            seen = seen or "download" in low or "%" in low
+            if not seen and time.time() - start > 120:
+                raise RouterError(f"The router didn't start downloading (status: {status or 'none'})")
+        raise RouterError(f"The download didn't finish in {wait // 60} minutes (last status: {status or 'none'}) - the router "
+                          "keeps what it has; try again, or check its internet connection")
 
     def routerboard_upgrade(self):
         """Stage the RouterBOARD firmware that matches the installed RouterOS (applied on the next reboot)."""
