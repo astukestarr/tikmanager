@@ -22,6 +22,7 @@ FIELDS = {   # name -> secret?
     "cw": {"site": False, "company": False, "public_key": False, "private_key": True, "client_id": False, "codebase": False,
            "show_types": False, "active_only": False},   # which company types / statuses the import list shows
     "itg": {"region": False, "api_key": True, "config_type_id": False, "config_status_id": False, "sync": False},
+    "teams": {"webhook": True},   # a Teams Workflows "post to a channel when a webhook request is received" URL (alerts.py)
 }
 DEFAULTS = {"cw": {"site": "api-na.myconnectwise.net", "codebase": "v4_6_release", "active_only": "1"}, "itg": {"region": "us", "sync": "1"}}
 
@@ -66,14 +67,15 @@ class Integrations:
 
     def configured(self, kind):
         c = self.config(kind)
-        return all(c.get(k) for k in (("site", "company", "public_key", "private_key", "client_id") if kind == "cw" else ("api_key",)))
+        need = {"cw": ("site", "company", "public_key", "private_key", "client_id"), "teams": ("webhook",)}.get(kind, ("api_key",))
+        return all(c.get(k) for k in need)
 
     def save(self, kind, data):
         c = self._raw(kind)
         for k, secret in FIELDS[kind].items():
             if k not in data:
                 continue
-            v = str(data.get(k) or "").strip()[:4000 if k == "show_types" else 300]
+            v = str(data.get(k) or "").strip()[:4000 if k in ("show_types", "webhook") else 300]
             if secret and not v:
                 continue   # blank = keep the saved secret
             c[k] = v
@@ -84,6 +86,10 @@ class Integrations:
             c["site"] = re.sub(r"^https?://", "", c["site"]).strip("/")
             if not re.fullmatch(r"[A-Za-z0-9.-]+", c["site"]):
                 raise ValueError("The site is a host name like api-na.myconnectwise.net.")
+        if kind == "teams" and c.get("webhook") and c["webhook"] != "demo":
+            u = urllib.parse.urlparse(c["webhook"])
+            if u.scheme != "https" or not (u.hostname or "").endswith((".logic.azure.com", ".powerplatform.com", ".webhook.office.com")):
+                raise ValueError("Paste the HTTPS URL from the Teams workflow \"Post to a channel when a webhook request is received\".")
         if kind == "itg" and c.get("region", "us") not in ITG_REGIONS:
             raise ValueError("Pick the IT Glue region.")
         blob, enc = self.vault.seal(json.dumps(c).encode(), f"integration:{kind}")
@@ -124,7 +130,7 @@ class Integrations:
         return self.s.dev and (c.get("site") if kind == "cw" else c.get("api_key")) == "demo"
 
     # --- ConnectWise PSA --------------------------------------------------------------------------------------
-    def _cw(self, path, params=None):
+    def _cw(self, path, params=None, method="GET", body=None):
         c = self.config("cw")
         if not self.configured("cw"):
             raise IntegrationError("ConnectWise PSA isn't set up yet.")
@@ -132,7 +138,54 @@ class Integrations:
         url = f"https://{c['site']}/{(c.get('codebase') or 'v4_6_release').strip('/')}/apis/3.0{path}"
         if params:
             url += "?" + urllib.parse.urlencode(params)
-        return self._http("GET", url, {"Authorization": f"Basic {token}", "clientId": c["client_id"]})
+        return self._http(method, url, {"Authorization": f"Basic {token}", "clientId": c["client_id"], "Content-Type": "application/json"}, body)
+
+    # tickets for alerts (alerts.py): the API member needs Service Desk > Service Tickets add / edit / inquire
+    def cw_boards(self):
+        if self._demo("cw"):
+            return [{"id": 1, "name": "Help Desk"}, {"id": 2, "name": "Network Alerts"}]
+        return [{"id": b["id"], "name": b.get("name", "")} for b in self._cw("/service/boards", {"conditions": "inactiveFlag=false", "fields": "id,name", "pageSize": 200}) or []]
+
+    def cw_statuses(self, board_id):
+        if self._demo("cw"):
+            return [{"id": 11, "name": "New", "closed": False}, {"id": 12, "name": "In Progress", "closed": False}, {"id": 19, "name": ">Closed", "closed": True}]
+        return [{"id": s["id"], "name": s.get("name", ""), "closed": bool(s.get("closedStatus"))}
+                for s in self._cw(f"/service/boards/{int(board_id)}/statuses", {"fields": "id,name,closedStatus", "pageSize": 200}) or []]
+
+    def cw_priorities(self):
+        if self._demo("cw"):
+            return [{"id": 4, "name": "Priority 1 - Emergency"}, {"id": 8, "name": "Priority 3 - Normal"}]
+        return [{"id": p["id"], "name": p.get("name", "")} for p in self._cw("/service/priorities", {"fields": "id,name", "pageSize": 100}) or []]
+
+    def cw_ticket(self, company_id, board_id, summary, text, status_id=None, priority_id=None):
+        """Open a service ticket; returns its number."""
+        if self._demo("cw"):
+            return 90000 + int(time.time()) % 10000
+        body = {"summary": summary[:100], "board": {"id": int(board_id)}, "company": {"id": int(company_id)}, "initialDescription": text[:8000]}
+        if status_id:
+            body["status"] = {"id": int(status_id)}
+        if priority_id:
+            body["priority"] = {"id": int(priority_id)}
+        return (self._cw("/service/tickets", method="POST", body=body) or {}).get("id")
+
+    def cw_close(self, ticket_id, text, closed_status_id=None):
+        """Add an internal note, and close the ticket if a closed status is set."""
+        if self._demo("cw"):
+            return
+        self._cw(f"/service/tickets/{int(ticket_id)}/notes", method="POST", body={"text": text[:8000], "internalAnalysisFlag": True})
+        if closed_status_id:
+            self._cw(f"/service/tickets/{int(ticket_id)}", method="PATCH",
+                     body=[{"op": "replace", "path": "status", "value": {"id": int(closed_status_id)}}])
+
+    def teams_post(self, card):
+        """Post an Adaptive Card to the Teams workflow webhook."""
+        url = self.config("teams").get("webhook")
+        if not url:
+            raise IntegrationError("No Teams webhook saved.")
+        if url == "demo" and self.s.dev:
+            return
+        self._http("POST", url, {"Content-Type": "application/json"},
+                   {"type": "message", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None, "content": card}]})
 
     def cw_test(self):
         if self._demo("cw"):

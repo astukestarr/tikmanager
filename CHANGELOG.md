@@ -3,6 +3,22 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.12.0 - 2026-10-09
+
+- **Alerts** (new page): TikManager now tells you when something's wrong - as a **ConnectWise ticket** and / or a
+  **Teams message** - when a problem starts, and closes the ticket (internal note + the closed status you pick) and
+  posts "resolved" when it clears. Alert on: a router offline for N minutes (not while it's being upgraded), a failed
+  configuration backup, Security-page warnings (password guessing, one address trying several systems, a sign-in
+  right after failures, TikManager's own router login failing), a FAIL from the server security check, the website
+  security grade dropping below A - and optionally high CPU or a new RouterOS version.
+  - Tickets go to the client's linked ConnectWise company; a default company (e.g. your own) is used for unlinked
+    clients and for TikManager / server problems. You pick the board, new and closed statuses and priority. The
+    ConnectWise API member needs **Service Desk > Service Tickets: Add, Edit and Inquire**.
+  - Teams: in the channel, ... > Workflows > "Post to a channel when a webhook request is received", and paste the URL.
+  - No storms: when more than 5 routers go offline in the same minute (most likely TikManager's own connection), one
+    grouped alert is sent instead of one each.
+  - **Send a test ticket / Send a test to Teams** buttons; open and resolved alerts (7 days) are listed on the page.
+
 ## 1.11.1 - 2026-10-09
 
 - **Updates are found from tags, not GitHub Releases**: the newest version is now always the highest `vX.Y.Z` tag, and a

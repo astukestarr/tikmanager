@@ -23,7 +23,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -270,6 +270,20 @@ MAC, which router saw it on which port, and its uptime. Each router's neighbours
 counts as already in TikManager when one of its MACs, its IP or its identity matches a router TikManager has (or is
 waiting to approve) - except the factory identity "MikroTik". Routers only see devices on their own networks that have
 discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on the page gives you the command to run.
+
+## Alerts: ConnectWise tickets and Teams
+
+**Alerts** (technicians; administrators change the settings) - when something's wrong, TikManager opens a
+**ConnectWise ticket** and / or posts to **Teams**, and closes the ticket / posts "resolved" when it clears:
+- **What**: a router offline for N minutes (not during an upgrade), a failed backup, Security-page warnings, a FAIL
+  from the server security check, the website grade dropping below A; optionally high CPU and new RouterOS versions.
+- **ConnectWise**: tickets go to the client's linked company (Clients page) or a default company you choose; pick the
+  board, the status for new tickets, the status when it clears (or leave it open with a note) and the priority. The
+  API member needs Service Desk > Service Tickets: Add, Edit and Inquire.
+- **Teams**: in the channel, **...** > **Workflows** > **Post to a channel when a webhook request is received**; paste
+  the URL it gives you. It's stored encrypted like the other integration keys.
+- When more than 5 routers drop in the same minute you get one grouped alert, not a ticket each.
+- **Send a test ticket** / **Send a test to Teams** check the setup.
 
 ## Security: sign-in attempts everywhere
 

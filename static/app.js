@@ -2116,6 +2116,74 @@ async function sites() {
 const subnetsView = { org: "", q: "", problems: false };
 const ipNum = (ip) => ip.split(".").reduce((a, o) => a * 256 + Number(o), 0);
 
+// --- Alerts: problems TikManager noticed, sent as ConnectWise tickets / Teams messages (alerts.py) -------------------
+async function alertsPage() {
+  const a = await api("/api/alerts");
+  const st = a.settings;
+  const where = (r) => r.device_id ? `<a href="#router/${r.device_id}" data-dev="${r.device_id}">${esc(r.device || "router")}</a>${r.org ? ` <span class="muted small">· ${esc(r.org)}</span>` : ""}` : `<span class="muted">TikManager</span>`;
+  const sent = (r) => [r.cw_ticket ? `<span class="pill">Ticket #${esc(r.cw_ticket)}</span>` : "", r.cw_note ? `<span class="small status warn">${esc(r.cw_note)}</span>` : "",
+    r.teams_note ? `<span class="small status warn">${esc(r.teams_note)}</span>` : ""].filter(Boolean).join(" ");
+  const row = (r) => `<tr><td class="nowrap small">${when(r.opened_at)}</td><td>${esc(r.title)}<div class="small muted">${esc((r.detail || "").slice(0, 180))}</div></td>
+    <td class="small">${where(r)}</td><td class="small">${r.resolved_at ? `resolved after ${Math.max(1, Math.round((r.resolved_at - r.opened_at) / 60))} min` : `<b>open</b> ${ago(r.opened_at)}`}</td><td>${sent(r)}</td></tr>`;
+  const channels = [st.cw.on ? "ConnectWise tickets" : "", st.teams.on ? "Teams" : ""].filter(Boolean);
+  $("main").innerHTML = `<h1>Alerts</h1>
+    <p class="muted">Problems TikManager notices, ${channels.length ? `sent as ${channels.join(" and ")}` : "<b>not sent anywhere yet</b> - set up ConnectWise or Teams below"} -
+      opened when a problem starts and closed when it clears.</p>
+    <div class="card"><h2>Open (${a.open.length})</h2>${a.open.length ? `<div class="table-wrap"><table><thead><tr><th>Since</th><th>Problem</th><th>Where</th><th>Status</th><th>Sent</th></tr></thead>
+      <tbody>${a.open.map(row).join("")}</tbody></table></div>` : `<p class="muted">Nothing's wrong right now.</p>`}</div>
+    <div class="card"><h2>Resolved in the last 7 days (${a.recent.length})</h2>${a.recent.length ? `<div class="table-wrap"><table><thead><tr><th>Started</th><th>Problem</th><th>Where</th><th>Status</th><th>Sent</th></tr></thead>
+      <tbody>${a.recent.map(row).join("")}</tbody></table></div>` : `<p class="muted">None.</p>`}</div>
+    ${a.can_edit ? `<div class="card" id="alSettings"><h2>Settings</h2>
+      <h3 class="al-h">What to alert on</h3><div class="al-kinds">${Object.entries(a.kinds).map(([k, m]) => `<label class="chk al-kind"><input type="checkbox" data-kind="${k}" ${st.kinds[k].on ? "checked" : ""}> ${esc(m.label)}
+        ${m.threshold ? `<span class="small muted"> - ${m.threshold === "percent" ? "above" : "after"} <input type="number" class="al-th" data-th="${k}" value="${esc(st.kinds[k][m.threshold])}" min="1" max="${m.threshold === "percent" ? 100 : 1440}"> ${m.threshold === "percent" ? "%" : "minutes"}</span>` : ""}</label>`).join("")}</div>
+      <h3 class="al-h">ConnectWise tickets</h3>
+      ${a.cw_ready ? `<label class="chk"><input type="checkbox" id="alCwOn" ${st.cw.on ? "checked" : ""}> Open a ticket for each problem, and close it when it clears</label>
+        <div class="grid2" id="alCwFields"><p class="small muted">Loading boards…</p></div>
+        <p class="small muted">Tickets go to the client's linked ConnectWise company (Clients page); the default company is used for clients that aren't linked and for
+          TikManager / server problems. The ConnectWise API member needs <b>Service Desk > Service Tickets: Add, Edit and Inquire</b>.</p>`
+        : `<p class="small muted">Connect ConnectWise PSA on Admin > Integrations first.</p>`}
+      <h3 class="al-h">Microsoft Teams</h3>
+      <label class="chk"><input type="checkbox" id="alTeamsOn" ${st.teams.on ? "checked" : ""}> Post each problem (and when it clears) to a Teams channel</label>
+      <label class="field">Workflow webhook URL ${a.teams_ready ? `<span class="small status ok">saved - leave blank to keep it</span>` : ""}
+        <input id="alTeamsUrl" type="password" autocomplete="off" placeholder="https://...logic.azure.com/... or ...powerplatform.com/..."></label>
+      <p class="small muted">In Teams: the channel's <b>...</b> > <b>Workflows</b> > <b>Post to a channel when a webhook request is received</b>, then paste the URL it gives you.</p>
+      <div class="actions"><button class="btn primary" type="button" id="alSave">Save</button>
+        ${a.cw_ready ? `<button class="btn" type="button" data-test="cw">Send a test ticket</button>` : ""}
+        <button class="btn" type="button" data-test="teams" ${a.teams_ready ? "" : "disabled"}>Send a test to Teams</button><span class="status" id="alStatus"></span></div></div>` : ""}`;
+  $("main").querySelectorAll("[data-dev]").forEach((x) => x.addEventListener("click", (e) => { e.preventDefault(); go("router", x.dataset.dev); }));
+  if (!a.can_edit) return;
+  const status = (m, c = "") => { $("alStatus").textContent = m; $("alStatus").className = `status ${c}`; };
+  const cwFields = async (board) => {
+    if (!$("alCwFields")) return;
+    try {
+      const o = await api(`/api/admin/alerts/cw-options?board=${board || ""}`);
+      const sel = (id, list, cur, blank) => `<select id="${id}">${blank ? `<option value="">${blank}</option>` : ""}${list.map((x) => `<option value="${x.id}" ${String(x.id) === String(cur) ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`;
+      $("alCwFields").innerHTML = `<label class="field">Board ${sel("alBoard", o.boards, board, "pick a board")}</label>
+        <label class="field">Default company ${sel("alCompany", o.companies, st.cw.company_id, "pick a company")}</label>
+        <label class="field">Status for new tickets ${sel("alStatusNew", o.statuses.filter((x) => !x.closed), st.cw.status_id, "board default")}</label>
+        <label class="field">Status when it clears ${sel("alStatusClosed", o.statuses.filter((x) => x.closed), st.cw.closed_status_id, "leave open (add a note only)")}</label>
+        <label class="field">Priority ${sel("alPriority", o.priorities, st.cw.priority_id, "board default")}</label>`;
+      $("alBoard").addEventListener("change", () => { st.cw.board_id = $("alBoard").value; cwFields($("alBoard").value); });
+    } catch (e) { $("alCwFields").innerHTML = `<p class="status err small">${esc(e.message)}</p>`; }
+  };
+  cwFields(st.cw.board_id);
+  $("alSave").addEventListener("click", async () => {
+    const kinds = {};
+    $("main").querySelectorAll("[data-kind]").forEach((c) => { kinds[c.dataset.kind] = { on: c.checked }; });
+    $("main").querySelectorAll("[data-th]").forEach((i) => { const k = i.dataset.th; kinds[k][a.kinds[k].threshold] = i.value; });
+    const body = { kinds, teams: { on: $("alTeamsOn").checked } };
+    if ($("alTeamsUrl").value.trim()) body.teams_webhook = $("alTeamsUrl").value.trim();
+    if ($("alCwOn")) body.cw = { on: $("alCwOn").checked, board_id: $("alBoard")?.value, company_id: $("alCompany")?.value, status_id: $("alStatusNew")?.value,
+      closed_status_id: $("alStatusClosed")?.value, priority_id: $("alPriority")?.value };
+    try { await post("/api/admin/alerts/settings", body); await alertsPage(); $("alStatus").textContent = "Saved."; $("alStatus").className = "status ok"; }
+    catch (e) { status(e.message, "err"); }
+  });
+  $("main").querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", async () => {
+    status("Sending…");
+    try { status((await post("/api/admin/alerts/test", { channel: b.dataset.test })).detail, "ok"); } catch (e) { status(e.message, "err"); }
+  }));
+}
+
 // --- Security: sign-in attempts on TikManager, its Ubuntu server and the routers ----------------------------------
 const secView = { hours: 24, source: "", kind: "", q: "" };
 const SEC_SOURCE = { tikmanager: "TikManager", server: "Ubuntu server", router: "Router" };
@@ -2459,7 +2527,7 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
 }
-const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

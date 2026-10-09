@@ -172,24 +172,24 @@ class SecurityEvents:
         for a in ips.values():
             peak = max(a["hours"].values())
             if peak >= 10:
-                flags.append({"level": "warn", "ip": a["ip"], "text": f"{a['ip']} tried to sign in {a['count']} times ({peak} in one hour) - "
+                flags.append({"level": "warn", "ip": a["ip"], "key": f"guess:{a['ip']}", "text": f"{a['ip']} tried to sign in {a['count']} times ({peak} in one hour) - "
                                                                    f"password guessing on {', '.join(sorted(a['targets'])[:4])}"})
             if len(a["targets"]) >= 3:
-                flags.append({"level": "warn", "ip": a["ip"], "text": f"{a['ip']} tried {len(a['targets'])} different systems: {', '.join(sorted(a['targets'])[:6])}"})
+                flags.append({"level": "warn", "ip": a["ip"], "key": f"spread:{a['ip']}", "text": f"{a['ip']} tried {len(a['targets'])} different systems: {', '.join(sorted(a['targets'])[:6])}"})
         for r in rows:   # a success right after a run of failures from the same address (or for the same user there)
             if r["kind"] != "login_ok":
                 continue
             before = [f for f in fails if r["ts"] - 3600 <= f["ts"] < r["ts"] and f["source"] == r["source"] and f["device_id"] == r["device_id"]
                       and ((r["ip"] and f["ip"] == r["ip"]) or (r["user"] and f["user"] == r["user"]))]
             if len(before) >= 5:
-                flags.append({"level": "bad", "ip": r["ip"], "text": f"{r['user'] or 'someone'} signed in to {where(r)} from {r['ip'] or 'an unknown address'} "
+                flags.append({"level": "bad", "ip": r["ip"], "key": f"success:{r['source']}:{r['device_id']}:{r['user']}:{r['ip']}", "text": f"{r['user'] or 'someone'} signed in to {where(r)} from {r['ip'] or 'an unknown address'} "
                                                                      f"after {len(before)} failed attempts in the hour before - check it was really them"})
         tm = {}
         for r in fails:
             if r["source"] == "router" and r["user"] == "tikmanager":
                 tm[where(r)] = tm.get(where(r), 0) + 1
         for name, n in tm.items():
-            flags.append({"level": "warn", "ip": "", "text": f"Sign-in as TikManager's own user failed {n} time(s) on {name} - someone is guessing it, "
+            flags.append({"level": "warn", "ip": "", "key": f"tmuser:{name}", "text": f"Sign-in as TikManager's own user failed {n} time(s) on {name} - someone is guessing it, "
                                                              "or its password was changed on the router"})
         top = sorted(ips.values(), key=lambda a: -a["count"])[:25]
         for a in top:

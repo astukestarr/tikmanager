@@ -32,6 +32,7 @@ from vpn import VpnError, Vpns
 from firewall import Firewall, FirewallError
 from secevents import SecurityEvents
 from observatory import Observatory
+from alerts import Alerts
 import vpninv
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -86,6 +87,7 @@ vpns = Vpns(db, poller.client, backups)
 firewall = Firewall(db, poller.client, backups)
 observatory = Observatory(db, settings)   # Mozilla Observatory grade of the public URL
 secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubuntu server, routers
+alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWise tickets / Teams when something's wrong
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -499,6 +501,18 @@ class Handler(BaseHTTPRequestHandler):
                            CASE u.status WHEN 'running' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END, COALESCE(u.finished_at, u.scheduled_at) DESC
                            LIMIT 300""", (now() - 30 * 86400,))
             return self.json({"routers": routers, "jobs": jobs, "channels": list(UPGRADE_CHANNELS)})
+        if path == "/api/alerts":   # open and recent alerts; the settings (admins change them)
+            s = self.require(tech=True)
+            return self.json({**alerts.view(), "settings": alerts.settings(), "can_edit": s["role"] == "admin",
+                              "cw_ready": integ.configured("cw"), "teams_ready": integ.configured("teams")})
+        if path == "/api/admin/alerts/cw-options":   # boards / statuses / priorities / companies for ticket settings
+            self.require(tech=True, admin=True)
+            try:
+                board = q.get("board", "")
+                return self.json({"boards": integ.cw_boards(), "statuses": integ.cw_statuses(int(board)) if board.isdigit() else [],
+                                  "priorities": integ.cw_priorities(), "companies": [{"id": c["id"], "name": c["name"]} for c in integ.cw_companies()]})
+            except IntegrationError as e:
+                raise HttpError(502, str(e)) from None
         if path == "/api/security":   # sign-in attempts and other security events (TikManager, Ubuntu server, routers)
             self.require(tech=True)
             try:
@@ -1153,6 +1167,22 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "logo changed" if saved["logo_url"] else "logo removed", ip=self.client_ip())
             return self.json({"ok": True, **saved})
+        if path == "/api/admin/alerts/settings":
+            s = self.require(tech=True, admin=True)
+            try:
+                saved = alerts.save(self.body())
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "alert settings changed", ip=self.client_ip())
+            return self.json({"ok": True, "settings": saved, "teams_ready": integ.configured("teams")})
+        if path == "/api/admin/alerts/test":
+            s = self.require(tech=True, admin=True)
+            try:
+                msg = alerts.test(str(self.body().get("channel") or ""))
+            except (ValueError, IntegrationError) as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "test alert sent", ip=self.client_ip(), detail=msg)
+            return self.json({"ok": True, "detail": msg})
         if path == "/api/admin/observatory-scan":   # Mozilla Observatory scan of the public URL, now
             s = self.require(tech=True, admin=True)
             try:
@@ -1518,6 +1548,7 @@ def main():
     vpns.start()
     secev.start()
     observatory.start()
+    alerts.start()
     if settings.dev:
         secev.seed_dev()
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)

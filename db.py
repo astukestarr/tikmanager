@@ -143,6 +143,13 @@ CREATE TABLE IF NOT EXISTS sec_events (
 );
 CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
 CREATE INDEX IF NOT EXISTS sec_events_ip ON sec_events(ip, ts);
+-- alerts (alerts.py): one row per problem while it lasts; key identifies the problem (e.g. offline:12)
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL, kind TEXT NOT NULL, device_id INTEGER, org_id INTEGER,
+  title TEXT NOT NULL, detail TEXT, opened_at REAL NOT NULL, resolved_at REAL,
+  cw_ticket INTEGER, cw_note TEXT, teams_note TEXT
+);
+CREATE INDEX IF NOT EXISTS alerts_open ON alerts(resolved_at, key);
 """
 
 
