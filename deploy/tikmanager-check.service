@@ -1,0 +1,15 @@
+[Unit]
+Description=TikManager server security check (read-only; results on Admin > Version & updates)
+
+[Service]
+Type=oneshot
+# root, because the firewall, SSH settings and key files are root-only; check.sh only reads. From the web app it takes
+# nothing but the existence of the request file (which it removes) - what runs and where results go is fixed here.
+ExecStartPre=/bin/rm -f /var/lib/tikmanager/security-check-request
+ExecStart=/bin/bash /opt/tikmanager/deploy/check.sh --json /var/lib/tikmanager-update/security.json
+SuccessExitStatus=1
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only

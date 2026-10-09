@@ -374,7 +374,9 @@ TikManager can change every router it manages, so treat the server like the keys
 - Ubuntu installs its own security updates automatically (unattended-upgrades); check Caddy now and then with
   `sudo apt upgrade` - it comes from Caddy's own package repository.
 
-**Check the server**: run the read-only security check now and then (and after changing anything on the server):
+**Check the server**: TikManager runs a read-only security check of its own server daily, after every upgrade and
+when you click **Run check** on **Admin > Version & updates**, where the results are shown (set up by the installer, or
+by upgrading to 1.9.0). You can also run it in a terminal:
 
     sudo bash /opt/tikmanager/deploy/check.sh
 

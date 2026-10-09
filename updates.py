@@ -39,6 +39,10 @@ class Updates:
         # written by the root updater in its own root-owned folder (never in ours, where links could be planted);
         # data/update-status.json is where versions before 1.1.1 wrote it, and dev mode reads it from there
         self.status_files = [Path("/var/lib/tikmanager-update/status.json"), self.data / "update-status.json"]
+        # the read-only server security check (deploy/check.sh, run as root by tikmanager-check.service): results in the
+        # root-owned folder; dev mode reads data/security.json. The web app can only ask for a run (an empty file).
+        self.security_files = [Path("/var/lib/tikmanager-update/security.json"), self.data / "security.json"]
+        self.security_request = self.data / "security-check-request"
         self.latest = {"version": None, "url": None, "notes": "", "checked_at": None, "error": None}
         self.lock = threading.Lock()
 
@@ -83,7 +87,35 @@ class Updates:
         cur, new = vtuple(__version__), vtuple(self.latest.get("version"))
         return {"version": __version__, "latest": self.latest.get("version"), "available": bool(cur and new and new > cur),
                 "url": self.latest.get("url"), "notes": self.latest.get("notes"), "checked_at": self.latest.get("checked_at"),
-                "error": self.latest.get("error"), "repo": self.repo, "supported": self.supported(), "status": self.status()}
+                "error": self.latest.get("error"), "repo": self.repo, "supported": self.supported(), "status": self.status(),
+                "security": self.security()}
+
+    def security_supported(self):
+        return os.name == "posix" and Path("/etc/systemd/system/tikmanager-check.path").exists()
+
+    def security(self):
+        """Latest server security check: {at, fails, warns, results: [{status, section, text}], running, supported}."""
+        out = {"supported": self.security_supported(), "running": self.security_request.exists()}
+        for f in self.security_files:
+            try:
+                if f.stat().st_size > 512 * 1024:
+                    continue
+                d = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            rows = [{"status": str(r.get("status"))[:8], "section": str(r.get("section"))[:60], "text": str(r.get("text"))[:600]}
+                    for r in (d.get("results") or [])[:200] if isinstance(r, dict)]
+            out.update(at=d.get("at"), fails=int(d.get("fails") or 0), warns=int(d.get("warns") or 0), results=rows)
+            break
+        return out
+
+    def request_security(self):
+        if not self.security_supported():
+            raise ValueError("The server security check needs a Linux installation made with deploy/install.sh (1.9.0 or later). "
+                             "Run it by hand: sudo bash /opt/tikmanager/deploy/check.sh")
+        if self.security_request.exists():
+            raise ValueError("A security check is already running.")
+        self.security_request.write_text("", encoding="utf-8")
 
     def status(self):
         st = {}

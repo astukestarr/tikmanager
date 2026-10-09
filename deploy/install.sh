@@ -10,6 +10,7 @@
 #   - creates the controller's WireGuard key and wg0 (10.77.0.1/16, UDP 51820)
 #   - writes /etc/tikmanager/tikmanager.env, the master key, the Caddy site and the systemd service
 #   - firewall: 80+443/tcp and 51820/udp from anywhere, SSH only from your LAN, syslog only over the tunnel
+#   - a daily read-only security check of this server (deploy/check.sh; results on Admin > Version & updates)
 set -euo pipefail
 
 HOST=""
@@ -106,9 +107,12 @@ echo "== Service"
 cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/tikmanager.service
 # root updater behind Admin "Upgrade now": the web app drops a version number, this installs that release
 cp /opt/tikmanager/deploy/tikmanager-update.path /opt/tikmanager/deploy/tikmanager-update.service /etc/systemd/system/
+# read-only server security check (deploy/check.sh), shown on Admin > Version & updates: daily and on request
+cp /opt/tikmanager/deploy/tikmanager-check.service /opt/tikmanager/deploy/tikmanager-check.path /opt/tikmanager/deploy/tikmanager-check.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable tikmanager
 systemctl enable --now tikmanager-update.path
+systemctl enable --now tikmanager-check.path tikmanager-check.timer
 
 echo "== Caddy (HTTPS front door)"
 sed "s|__HOST__|$HOST|g" /opt/tikmanager/deploy/Caddyfile > /etc/caddy/Caddyfile
@@ -131,6 +135,7 @@ systemctl enable --now fail2ban
 systemctl restart tikmanager
 sleep 2
 systemctl --no-pager --lines=5 status tikmanager || true
+systemctl start --no-block tikmanager-check.service >/dev/null 2>&1 || true   # first security check (Admin > Version & updates)
 echo
 TOKEN=$(sed -n 's/^TM_SETUP_TOKEN=//p' $ENV)
 echo "Done. TikManager: https://$HOST   Controller WireGuard public key: $PUB"

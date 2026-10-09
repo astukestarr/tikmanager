@@ -16,8 +16,12 @@ cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/tikmanager.serv
 install -d -m 0750 -o root -g tikmanager /var/lib/tikmanager-update
 install -d -m 0700 -o root -g root /var/backups/tikmanager
 cp /opt/tikmanager/deploy/tikmanager-update.path /opt/tikmanager/deploy/tikmanager-update.service /etc/systemd/system/
+# the read-only server security check (deploy/check.sh) behind Admin > Version & updates: daily, on request, after upgrades
+cp /opt/tikmanager/deploy/tikmanager-check.service /opt/tikmanager/deploy/tikmanager-check.path /opt/tikmanager/deploy/tikmanager-check.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now tikmanager-update.path >/dev/null 2>&1 || true
+systemctl enable --now tikmanager-check.path tikmanager-check.timer >/dev/null 2>&1 || true
 systemctl restart tikmanager
 sleep 2
+systemctl start --no-block tikmanager-check.service >/dev/null 2>&1 || true
 systemctl --no-pager --lines=5 status tikmanager

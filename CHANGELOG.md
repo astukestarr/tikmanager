@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.9.0 - 2026-10-09
+
+- **Server security on Admin > Version & updates.** The read-only server check (`deploy/check.sh`) now runs by itself
+  - daily, after every upgrade, and when an administrator clicks **Run check** - and its results show on the page:
+  what to fix, what to look at, and what passed. It runs as root through a small fixed service
+  (`tikmanager-check.*`, like the upgrade helper): the web app can only ask for a run and read the results; it can't
+  change what runs. Set up by the installer, and on existing servers by this upgrade.
+- **Security best practices** list under it: the things a script can't check for you (an off-server copy of the
+  master key, blocking the server from your LAN, MFA, replacing the adoption command, ...).
+- Fixed: the **Check for updates** button on the Version & updates card could act on the top-bar button instead (both
+  had the same ID since 1.6.1).
+
 ## 1.8.1 - 2026-10-09
 
 Security checkup of everything added since 1.1.1 (firewall / NAT / address-list editing, Discovered, maps and address

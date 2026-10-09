@@ -4,17 +4,25 @@
 # Confirms what install.sh set up is still in place (firewall, SSH, updates, file permissions, service sandbox,
 # open ports, certificate) and points out common weak spots. Each line is PASS, WARN (worth a look) or FAIL (fix it).
 # Exit code: 0 = no FAIL, 1 = at least one FAIL.
+#     --json FILE   also write the results as JSON to FILE (how tikmanager-check.service reports to Admin > Version &
+#                   updates; it runs this after every upgrade, daily, and when an administrator clicks "Run check").
 set -uo pipefail
 [[ $EUID -eq 0 ]] || { echo "Run with sudo (it only reads, but some files are root-only)."; exit 1; }
+OUT=""
+[[ "${1:-}" == "--json" && -n "${2:-}" ]] && OUT=$2
+RES=$(mktemp)
+trap 'rm -f "$RES"' EXIT
 
 ENV=/etc/tikmanager/tikmanager.env
-fails=0; warns=0
-pass() { printf '  \e[32mPASS\e[0m  %s\n' "$1"; }
-warn() { printf '  \e[33mWARN\e[0m  %s\n' "$1"; warns=$((warns + 1)); }
-fail() { printf '  \e[31mFAIL\e[0m  %s\n' "$1"; fails=$((fails + 1)); }
+fails=0; warns=0; SECTION=""
+record() { printf '%s\t%s\t%s\n' "$1" "$SECTION" "${2//$'\n'/ / }" >> "$RES"; }
+section() { echo "== $1"; SECTION=$1; }
+pass() { printf '  \e[32mPASS\e[0m  %s\n' "$1"; record pass "$1"; }
+warn() { printf '  \e[33mWARN\e[0m  %s\n' "$1"; warns=$((warns + 1)); record warn "$1"; }
+fail() { printf '  \e[31mFAIL\e[0m  %s\n' "$1"; fails=$((fails + 1)); record fail "$1"; }
 envval() { grep -E "^$1=" "$ENV" 2>/dev/null | tail -1 | cut -d= -f2-; }
 
-echo "== Firewall (ufw)"
+section "Firewall (ufw)"
 if ufw status 2>/dev/null | grep -q "Status: active"; then
   pass "ufw is on"
   ufw status verbose | grep -q "deny (incoming)" && pass "incoming traffic is denied unless allowed" || fail "ufw doesn't deny incoming by default (ufw default deny incoming)"
@@ -25,7 +33,7 @@ else
   fail "ufw is off - re-run install.sh or: ufw --force enable"
 fi
 
-echo "== SSH"
+section "SSH"
 if command -v sshd >/dev/null; then
   cfg=$(sshd -T 2>/dev/null)
   [[ $(awk '/^permitrootlogin /{print $2}' <<<"$cfg") == "no" ]] && pass "root can't sign in over SSH" || warn "root may sign in over SSH (set PermitRootLogin no)"
@@ -35,7 +43,7 @@ else
   pass "no SSH server installed"
 fi
 
-echo "== Updates"
+section "Updates"
 if systemctl is-enabled --quiet unattended-upgrades 2>/dev/null && grep -qs 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades; then
   pass "security updates install automatically"
 else
@@ -46,7 +54,7 @@ pending=$(apt-get -s upgrade 2>/dev/null | grep -c '^Inst .*security' || true)
 [[ -f /var/run/reboot-required ]] && warn "a reboot is needed to finish updates (kernel / libraries)" || pass "no reboot pending"
 if [[ -r /etc/os-release ]]; then . /etc/os-release; pass "running $PRETTY_NAME"; fi
 
-echo "== Network"
+section "Network"
 [[ $(sysctl -n net.ipv4.ip_forward) == 0 ]] && pass "IP forwarding is off (routers can't reach each other or your LAN through this server)" || fail "IP forwarding is on - routers could route through this server (sysctl net.ipv4.ip_forward=0)"
 gw=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
 lan=$(ufw status 2>/dev/null | awk '/^22\/tcp/ && $3 !~ /Anywhere/ {print $3; exit}')
@@ -72,7 +80,7 @@ bad=$(awk '$2 !~ /^(127\.0\.0\.1|\[::1\]|10\.77\.0\.1):/ && $2 !~ /:(22|80|443|5
 appbind=$(envval TM_HOST)
 [[ "${appbind:-127.0.0.1}" == "127.0.0.1" ]] && pass "the TikManager app only listens locally (behind Caddy)" || fail "TM_HOST is $appbind - set TM_HOST=127.0.0.1 so the app is only reachable through Caddy (HTTPS)"
 
-echo "== HTTPS"
+section "HTTPS"
 host=$(envval TM_PUBLIC_URL | sed -E 's#https?://##; s#/.*##')
 systemctl is-active --quiet caddy && pass "Caddy is running" || fail "Caddy isn't running (systemctl status caddy)"
 if [[ -n "$host" ]]; then
@@ -85,7 +93,7 @@ if [[ -n "$host" ]]; then
   fi
 fi
 
-echo "== Files"
+section "Files"
 perm() {   # path, wanted mode, wanted owner:group
   [[ -e "$1" ]] || { fail "$1 is missing"; return; }
   got=$(stat -c '%a %U:%G' "$1")
@@ -103,7 +111,7 @@ id -nG tikmanager 2>/dev/null | grep -qwE 'sudo|adm|admin|wheel' && fail "the ti
 repo=$(envval TM_UPDATE_REPO)
 pass "updates come from github.com/${repo:-astukestarr/tikmanager} (only change TM_UPDATE_REPO to a repository you control)"
 
-echo "== Service sandbox"
+section "Service sandbox"
 if systemctl is-active --quiet tikmanager; then pass "tikmanager is running"; else fail "tikmanager isn't running (systemctl status tikmanager)"; fi
 [[ $(systemctl show tikmanager -p User --value) == "tikmanager" ]] && pass "runs as the tikmanager account, not root" || fail "the service doesn't run as the tikmanager account"
 for kv in NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes PrivateTmp=yes; do
@@ -113,7 +121,7 @@ done
 caps=$(systemctl show tikmanager -p CapabilityBoundingSet --value)
 [[ "$caps" == "cap_net_admin" ]] && pass "only CAP_NET_ADMIN (for WireGuard peers)" || warn "the service has extra capabilities: $caps"
 
-echo "== Backups of this server"
+section "Backups of this server"
 last=$(ls -1t /var/backups/tikmanager/*.db* 2>/dev/null | head -1)
 if [[ -n "$last" ]]; then
   age=$(( ($(date +%s) - $(stat -c %Y "$last")) / 86400 ))
@@ -124,4 +132,16 @@ fi
 
 echo
 echo "Done: $fails to fix, $warns to look at."
+if [[ -n "$OUT" ]]; then   # for the web app: written atomically, readable by the service, never executed
+  tmp=$(mktemp "$(dirname "$OUT")/.security.XXXXXX")
+  python3 - "$RES" "$tmp" "$fails" "$warns" <<'PY'
+import json, sys, time
+rows = []
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    st, sec, msg = (line.rstrip("\n").split("\t", 2) + ["", ""])[:3]
+    rows.append({"status": st, "section": sec, "text": msg})
+json.dump({"at": time.time(), "fails": int(sys.argv[3]), "warns": int(sys.argv[4]), "results": rows}, open(sys.argv[2], "w"))
+PY
+  chown root:tikmanager "$tmp" && chmod 0640 "$tmp" && mv -f "$tmp" "$OUT"
+fi
 [[ $fails -eq 0 ]]

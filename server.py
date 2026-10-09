@@ -1141,6 +1141,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "logo changed" if saved["logo_url"] else "logo removed", ip=self.client_ip())
             return self.json({"ok": True, **saved})
+        if path == "/api/admin/security-check":   # ask the root helper to run the read-only server check now
+            s = self.require(tech=True, admin=True)
+            try:
+                updates.request_security()
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "server security check requested", ip=self.client_ip())
+            return self.json(updates.info())
         if path == "/api/admin/update-check":
             self.require(tech=True, admin=True)
             updates.check()

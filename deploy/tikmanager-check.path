@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for TikManager security check requests (Admin "Run check")
+
+[Path]
+# the web app (user tikmanager) can only write its data folder; it drops an empty request file here
+PathExists=/var/lib/tikmanager/security-check-request
+
+[Install]
+WantedBy=multi-user.target

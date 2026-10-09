@@ -442,3 +442,17 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .gm-list-item:hover, .gm-list-item:focus-visible { background: var(--accent-soft); }
 .gm-list-item small { display: block; color: var(--muted); font-size: 11.5px; }
 .geo-dupe { margin-top: 10px; }
+
+/* server security check (Admin > Version & updates) */
+.sec-box { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.sec-box h3 { margin: 0; font-size: 15px; }
+.sec-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.sec-list li { display: grid; grid-template-columns: 52px 150px 1fr; gap: 10px; align-items: baseline; font-size: 13px; }
+.sec-tag { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 1px 6px; text-align: center; }
+.sec-fail .sec-tag { background: var(--bad); color: #fff; } .sec-warn .sec-tag { background: var(--warn); color: #fff; }
+.sec-pass .sec-tag { background: var(--good); color: #fff; }
+.pill.sec-pill-fail { border-color: var(--bad); color: var(--bad); } .pill.sec-pill-warn { border-color: var(--warn); color: var(--warn); }
+.pill.sec-pill-ok { border-color: var(--good); color: var(--good); }
+@media (max-width: 700px) { .sec-list li { grid-template-columns: 52px 1fr; } .sec-list li .muted { display: none; } }
+.sec-best { margin-top: 10px; }
+.sec-best ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }

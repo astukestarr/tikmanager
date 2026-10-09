@@ -1318,14 +1318,20 @@ async function versionCard() {
     ${u.available && !busy ? `<div class="up-box avail"><b>TikManager ${esc(u.latest)} is available.</b>
         ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener noreferrer">What's new</a>` : ""}
         <p class="small muted">The server backs up the current version and the database, installs ${esc(u.latest)} and restarts (about a minute).
-          If the new version doesn't start, it goes back to ${esc(u.version)} automatically.</p>
+          If the new version doesn't start, it goes back to ${esc(u.version)} automatically. The server security check below runs again afterwards.</p>
         ${u.supported ? `<button class="btn primary" type="button" id="verUpgrade">Upgrade now</button>`
           : `<p class="small">One-click upgrade needs a Linux server set up with the installer. Upgrade from a terminal instead:
              <span class="mono">sudo bash /opt/tikmanager/deploy/self-update.sh</span></p>`}</div>`
       : !busy && u.latest && !u.available ? `<p class="small status ok">You're on the newest version.</p>`
       : !busy && u.checked_at && !u.error ? `<p class="small muted">No releases have been published yet.</p>` : ""}
-    <div class="actions"><button class="btn" type="button" id="verCheck" ${busy ? "disabled" : ""}>Check for updates</button><span class="status" id="verStatus"></span></div>`;
-  $("verCheck")?.addEventListener("click", async () => {
+    <div class="actions"><button class="btn" type="button" id="verCheckCard" ${busy ? "disabled" : ""}>Check for updates</button><span class="status" id="verStatus"></span></div>
+    ${securityBox(u.security || {})}`;
+  $("secRun")?.addEventListener("click", async () => {
+    $("secRun").disabled = true;
+    try { await post("/api/admin/security-check"); versionCard(); }
+    catch (e) { $("secRun").disabled = false; $("secStatus").textContent = e.message; $("secStatus").className = "status err"; }
+  });
+  $("verCheckCard")?.addEventListener("click", async () => {
     $("verStatus").textContent = "Checking…";
     try { await post("/api/admin/update-check"); versionCard(); } catch (e) { $("verStatus").textContent = e.message; $("verStatus").className = "status err"; }
   });
@@ -1335,7 +1341,44 @@ async function versionCard() {
     try { await post("/api/admin/upgrade", { version: u.latest }); versionCard(); }
     catch (err) { e.target.disabled = false; $("verStatus").textContent = err.message; $("verStatus").className = "status err"; }
   });
-  if (busy) setTimeout(versionCard, 3000);
+  if (busy || u.security?.running) setTimeout(versionCard, 4000);
+}
+
+// the read-only server check (deploy/check.sh), run as root daily, after upgrades and on request
+function securityBox(s) {
+  const bad = (s.results || []).filter((r) => r.status !== "pass").sort((a, b) => (a.status === "fail" ? 0 : 1) - (b.status === "fail" ? 0 : 1)), ok = (s.results || []).filter((r) => r.status === "pass");
+  const row = (r) => `<li class="sec-${esc(r.status)}"><span class="sec-tag">${esc(r.status.toUpperCase())}</span><span class="small muted">${esc(r.section)}</span>
+      <span>${esc(r.text)}</span></li>`;
+  const head = s.running ? `<span class="status">Running the check…</span>`
+    : s.at ? `<span class="small muted">Checked ${ago(s.at)}</span>
+        ${s.fails ? `<span class="pill sec-pill-fail">${s.fails} to fix</span>` : ""}${s.warns ? `<span class="pill sec-pill-warn">${s.warns} to look at</span>` : ""}
+        ${!s.fails && !s.warns ? `<span class="pill sec-pill-ok">All checks passed</span>` : ""}`
+    : `<span class="small muted">Not run yet.</span>`;
+  return `<div class="sec-box"><div class="row"><h3>Server security</h3>${head}<span class="spacer"></span>
+      ${s.supported ? `<button class="btn" type="button" id="secRun" ${s.running ? "disabled" : ""}>Run check</button>` : ""}</div>
+    <p class="small muted">A read-only check of this server: firewall, SSH, automatic updates, open ports, HTTPS certificate, key-file permissions,
+      the service's sandbox, and whether the server can reach your LAN. It runs daily, after every upgrade and when you click Run check; it never
+      changes anything - each item says what to do.</p>
+    ${bad.length ? `<ul class="sec-list">${bad.map(row).join("")}</ul>` : ""}
+    ${ok.length ? `<details><summary class="small">${ok.length} passed</summary><ul class="sec-list">${ok.map(row).join("")}</ul></details>` : ""}
+    <details class="sec-best"><summary><b>Security best practices</b> <span class="small muted">- what the check can't see for you</span></summary>
+      <ul class="small">
+        <li><b>Keep a copy of <span class="mono">/etc/tikmanager/master.key</span> and the database off this server</b> (password manager or offline
+          storage). Without the key, saved router passwords and configuration backups can't be decrypted.</li>
+        <li><b>Block this server from your LAN</b> on your network firewall (a DMZ); only 443/tcp and 51820/udp should reach it from the internet.
+          The check spot-tests this, but the real control is your firewall.</li>
+        <li><b>Technicians sign in with Microsoft and MFA</b> in your tenant; give read-only to people who only need to look, and remove leavers
+          in Entra ID straight away.</li>
+        <li><b>Replace the adoption command</b> (Adopt routers > Replace command) after adopting a batch of routers - until then it works for any router.</li>
+        <li><b>Install TikManager updates</b> when the banner appears; security fixes are called out in the changelog.</li>
+        <li><b>Test firewall changes before keeping them</b> - press Keep only once you've checked the site still works.</li>
+        <li><b>Running your own fork?</b> Turn on two-factor authentication for the GitHub account and protect its <span class="mono">v*</span>
+          tags - whoever can publish a release there can update your servers.</li>
+        <li><b>SSH with keys only</b>, from your LAN only, and keep the Ubuntu account that has sudo to the people who need it.</li>
+      </ul></details>
+    ${s.supported ? "" : `<p class="small">This server doesn't have the scheduled check yet (it's set up by the installer and by upgrades from 1.9.0). Run it by hand:
+      <span class="mono">sudo bash /opt/tikmanager/deploy/check.sh</span></p>`}
+    <p class="status" id="secStatus"></p></div>`;
 }
 
 // --- shell ------------------------------------------------------------------------------------------------

@@ -87,7 +87,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
 | `version.py`, `updates.py` | the running version; hourly new-release check and the "Upgrade now" request |
-| `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, read-only server security check `check.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
+| `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, read-only server security check `check.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), `tikmanager-check.*` (runs `check.sh` as root daily / on request / after upgrades and writes results the app reads), Caddy and systemd files |
 | `discovered.py` | the Discovered page: MikroTik neighbours (stored by the poller every 15 min) that match no router TikManager has |
 | `topology.py` | the network map behind a router: Internet, networks, switches / APs, device groups, routes (from `RouterOS.topology()`) |
 | `tools/build_map.py` | rebuilds the built-in map data (`static/map/*.json`) from public-domain sources - run by hand, never by the server |
