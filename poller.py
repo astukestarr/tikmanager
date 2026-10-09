@@ -93,6 +93,11 @@ class Poller:
                 self.db.run("INSERT INTO iface_metrics (device_id, ts, name, rx_bps, tx_bps) VALUES (?,?,?,?,?)", (d["id"], now, n, irx, itx))
         if now - (d.get("vpn_inv_at") or 0) > INVENTORY_SECONDS:   # VPNs configured on the router (read-only)
             self.collect_vpns(d, cl)
+        if now - (d.get("neighbors_at") or 0) > INVENTORY_SECONDS and hasattr(cl, "mikrotik_neighbors"):   # for Discovered
+            try:
+                self.db.run("UPDATE devices SET neighbors=?, neighbors_at=? WHERE id=?", (json.dumps(cl.mikrotik_neighbors()), now, d["id"]))
+            except RouterError:
+                pass
         if not d["online"]:
             self.db.event(d["id"], d["org_id"], "online", f"RouterOS {st['version']}, up {st['uptime']}")
         # product picture: matched once (retried daily if MikroTik's catalog had no match)

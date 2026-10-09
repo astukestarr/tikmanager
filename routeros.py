@@ -140,6 +140,14 @@ class RouterOS:
                         "expires": _dur_s(l.get("expires-after")), "comment": l.get("comment") or ""})
         return out
 
+    NEIGHBOR_KEYS = ("interface", "address", "address4", "mac-address", "identity", "platform", "board", "version",
+                     "software-id", "uptime", "discovered-by", "interface-name")
+
+    def mikrotik_neighbors(self):
+        """MikroTik devices this router sees next to it (/ip neighbor print: MNDP / LLDP / CDP), for Discovered."""
+        return [{k: n.get(k) for k in self.NEIGHBOR_KEYS if n.get(k) not in (None, "")}
+                for n in self.get("/ip/neighbor") or [] if "mikrotik" in str(n.get("platform") or "").lower()]
+
     def topology(self):
         """What the network map needs, read live (read-only): routing table, discovered neighbours (MNDP / LLDP / CDP:
         switches, access points, other routers), ARP and bridge host tables, DHCP leases and the router's addresses."""
@@ -810,6 +818,18 @@ class SimRouter:
     def set_identity(self, name):
         self.name = name   # the poller builds SimRouter with the stored name, so the new identity "sticks" once saved
         return name
+
+    def mikrotik_neighbors(self):
+        lan = self.networks()[0]["network"].rsplit(".", 1)[0]
+        r = random.Random(self.id * 7)
+        mac = lambda p: p + ":" + ":".join(f"{r.randint(0, 255):02X}" for _ in range(3))
+        out = [{"interface": "ether3", "address": f"{lan}.3", "mac-address": mac("4C:5E:0C"), "identity": f"AP-{self.name[:8]}",
+                "platform": "MikroTik", "board": "cAP ax", "version": "7.19.4 (stable)", "software-id": f"{r.randint(1000, 9999)}-ABCD",
+                "uptime": "12d4h", "discovered-by": "mndp"}]
+        if self.id % 2:
+            out.append({"interface": "ether4", "address": f"{lan}.4", "mac-address": mac("D4:01:C3"), "identity": "MikroTik",
+                        "platform": "MikroTik", "board": "hEX S", "version": "6.49.10 (long-term)", "uptime": "203d1h", "discovered-by": "mndp"})
+        return out
 
     def networks(self):
         lan = "192.168.88" if self.id % 3 == 0 else f"192.168.{self.id * 10}"   # every third one keeps the MikroTik default (overlaps)

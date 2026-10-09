@@ -11,7 +11,7 @@ SQLite, WireGuard and Caddy. No build step, no package manager.
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -249,6 +249,15 @@ stays current without anyone keeping a spreadsheet.
   own; worth knowing before connecting two networks).
 - Search by subnet, name, router or client - or type an IP address to find the subnet it belongs to.
 - **Export CSV** downloads what's shown. Client users see only their own subnets.
+
+## Discovered: MikroTiks not in TikManager yet
+
+**Discovered** (technicians) lists the MikroTik devices your routers see next to them in **IP > Neighbors** (MNDP / LLDP /
+CDP) that aren't in TikManager: identity, model, RouterOS version (v6 is flagged - TikManager needs RouterOS 7), IP and
+MAC, which router saw it on which port, and its uptime. Each router's neighbours are read every 15 minutes. A device
+counts as already in TikManager when one of its MACs, its IP or its identity matches a router TikManager has (or is
+waiting to approve) - except the factory identity "MikroTik". Routers only see devices on their own networks that have
+discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on the page gives you the command to run.
 
 ## Clients and their users
 

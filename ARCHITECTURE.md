@@ -88,6 +88,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
 | `version.py`, `updates.py` | the running version; hourly new-release check and the "Upgrade now" request |
 | `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, read-only server security check `check.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
+| `discovered.py` | the Discovered page: MikroTik neighbours (stored by the poller every 15 min) that match no router TikManager has |
 | `topology.py` | the network map behind a router: Internet, networks, switches / APs, device groups, routes (from `RouterOS.topology()`) |
 | `tools/build_map.py` | rebuilds the built-in map data (`static/map/*.json`) from public-domain sources - run by hand, never by the server |
 | `static/` | the single-page web app (`app.js`), the geographic map (`geomap.js`, drawn on a canvas from `map/*.json`), sign-in, invite and first-run pages, `theme.js` (each person's colour theme and light/dark mode, applied before the page draws), built-in logo (`wordmark.svg`) and icon (`logo.svg`) |

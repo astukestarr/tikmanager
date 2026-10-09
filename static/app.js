@@ -1957,6 +1957,44 @@ async function sites() {
 const subnetsView = { org: "", q: "", problems: false };
 const ipNum = (ip) => ip.split(".").reduce((a, o) => a * 256 + Number(o), 0);
 
+// --- Discovered: MikroTik devices your routers see next to them (IP > Neighbors) that aren't in TikManager yet ----------
+const discView = { org: "", q: "" };
+
+async function discoveredPage() {
+  const r = await api("/api/discovered");
+  const orgs = [...new Map(r.devices.flatMap((x) => x.seen.map((s) => [s.org_id, s.org || "Unassigned"]))).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  $("main").innerHTML = `<h1>Discovered</h1>
+    <p class="muted">MikroTik devices your routers see next to them (IP &gt; Neighbors: MNDP / LLDP / CDP) that aren't in TikManager. A device counts as
+      already here when its MAC, IP or identity matches a router TikManager has (or is waiting to approve).</p>
+    <div class="card"><div class="row">
+      <select id="dOrg" aria-label="Client"><option value="">All clients</option>${orgs.map(([id, n]) => `<option value="${id}" ${String(id) === discView.org ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <input id="dQ" type="search" placeholder="Search identity, model, IP, MAC" aria-label="Search" value="${esc(discView.q)}">
+      <span class="spacer"></span>
+      <span class="small muted">${r.read} of ${r.routers} routers read${r.oldest ? ` · oldest ${ago(r.oldest)}` : ""} · every 15 minutes</span>
+      <button class="btn primary" type="button" id="dAdopt">Adopt routers</button></div>
+      <div id="dList"></div></div>
+    <p class="small muted">Routers only see neighbours on their own networks, and only devices that announce themselves (IP &gt; Neighbors &gt;
+      Discovery Settings on both ends). Neighbours behind another router or on a port with discovery turned off won't show.</p>`;
+  const draw = () => {
+    const q = discView.q.toLowerCase();
+    const rows = r.devices.filter((x) => (!discView.org || x.seen.some((s) => String(s.org_id) === discView.org))
+      && (!q || `${x.identity} ${x.board} ${x.address} ${x.mac} ${x.version}`.toLowerCase().includes(q)));
+    $("dList").innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Identity</th><th>Model</th><th>RouterOS</th><th>IP address</th>
+        <th>MAC address</th><th>Seen by</th><th>Up</th></tr></thead><tbody>
+      ${rows.map((x) => `<tr><td><b>${esc(x.identity || "(no identity)")}</b>${x.identity === "MikroTik" ? ` <span class="pill" title="Still has the factory identity">default</span>` : ""}</td>
+        <td>${esc(x.board)}</td><td class="small">${esc(x.version)}${/^6\./.test(x.version) ? ` <span class="pill" title="TikManager needs RouterOS 7 (REST API)">needs v7</span>` : ""}</td>
+        <td class="mono">${esc(x.address)}</td><td class="mono small">${esc(x.mac)}</td>
+        <td class="small">${x.seen.map((s) => `<a href="#router/${s.device_id}" data-dev="${s.device_id}">${esc(s.router)}</a> <span class="muted">· ${esc(s.org)}${s.interface ? ` · ${esc(s.interface)}` : ""}</span>`).join("<br>")}</td>
+        <td class="small nowrap">${esc(x.uptime)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted">${r.devices.length ? "Nothing matches." : r.read ? "Every MikroTik your routers can see is already in TikManager." : "Neighbours are read every 15 minutes - check back shortly."}</p>`;
+    $("dList").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
+  };
+  draw();
+  $("dOrg").addEventListener("change", () => { discView.org = $("dOrg").value; draw(); });
+  $("dQ").addEventListener("input", () => { discView.q = $("dQ").value.trim(); draw(); });
+  $("dAdopt").addEventListener("click", showAdoption);
+}
+
 async function subnetsPage() {
   const rows = await api("/api/sites");   // the same client-scoped data as the site map
   const list = rows.flatMap((d) => d.networks.map((n) => {
@@ -2211,7 +2249,7 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
 }
-const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

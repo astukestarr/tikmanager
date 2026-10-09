@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.8.0 - 2026-10-09
+
+- **Discovered** (new page, technicians): MikroTik devices your routers see next to them in IP > Neighbors (MNDP / LLDP /
+  CDP) that aren't in TikManager - routers, switches and access points you could adopt. Each shows its identity,
+  model, RouterOS version (flagged when it's still on v6), IP and MAC, which routers saw it on which port, and how long
+  it's been up. A device already counts as in TikManager when its MAC, IP or identity matches a router TikManager has
+  or is waiting to approve (the factory identity "MikroTik" alone doesn't count). Neighbours are read every 15
+  minutes; filter by client or search.
+
 ## 1.7.0 - 2026-10-09
 
 - **Address lists** - a third tab on a router's Firewall & NAT card, like WebFig's Address Lists: pick a list (with how

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import adoption
 import topology
+import discovered as discovered_mod
 from config import ROOT, master_key, settings
 from db import DB
 from entra import STATE_COOKIE, AuthError, Entra
@@ -492,6 +493,14 @@ class Handler(BaseHTTPRequestHandler):
                            CASE u.status WHEN 'running' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END, COALESCE(u.finished_at, u.scheduled_at) DESC
                            LIMIT 300""", (now() - 30 * 86400,))
             return self.json({"routers": routers, "jobs": jobs, "channels": list(UPGRADE_CHANNELS)})
+        if path == "/api/discovered":   # MikroTik neighbours of your routers that aren't in TikManager yet
+            self.require(tech=True)
+            devs = db.q("""SELECT id, name, identity, org_id, state, interfaces, networks, wan_ip, tunnel_ip, public_ip, neighbors, neighbors_at
+                           FROM devices WHERE state IN ('adopted', 'pending')""")
+            orgs = {o["id"]: o["name"] for o in db.q("SELECT id, name FROM orgs")}
+            polled = [d for d in devs if d["state"] == "adopted"]
+            return self.json({"devices": discovered_mod.discovered(devs, orgs), "routers": len(polled),
+                              "read": sum(1 for d in polled if d["neighbors_at"]), "oldest": min((d["neighbors_at"] for d in polled if d["neighbors_at"]), default=None)})
         if path == "/api/adoption":
             s = self.require(tech=True)
             return self.json({"command": adoption.command(settings, self.enroll_token()), "pending": db.one(

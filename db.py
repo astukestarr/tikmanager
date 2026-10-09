@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS devices (
   ros_channel TEXT, ros_latest TEXT, ros_checked REAL,   -- newest RouterOS on the router's update channel (checked twice a day)
   itg_config_id TEXT, itg_synced_at REAL, itg_error TEXT,   -- IT Glue configuration this router is documented as
   vpn_inv TEXT, vpn_inv_at REAL,
+  neighbors TEXT, neighbors_at REAL,       -- MikroTik devices next to it (/ip neighbor), for Discovered
   lat REAL, lon REAL, location TEXT,       -- where it is (map): typed in, picked on the map, or from the router's GPS
   loc_source TEXT,                          -- manual / gps (manual always wins)
   api_port INTEGER,                         -- the router's www (REST) port, reported when it runs the adoption command                         -- VPNs already configured on the router (raw, whitelisted fields)
@@ -176,7 +177,8 @@ class DB:
                              ("ros_channel", "TEXT"), ("ros_latest", "TEXT"), ("ros_checked", "REAL"),
                              ("itg_config_id", "TEXT"), ("itg_synced_at", "REAL"), ("itg_error", "TEXT"),
                              ("vpn_inv", "TEXT"), ("vpn_inv_at", "REAL"), ("api_port", "INTEGER"),
-                             ("lat", "REAL"), ("lon", "REAL"), ("location", "TEXT"), ("loc_source", "TEXT")):
+                             ("lat", "REAL"), ("lon", "REAL"), ("location", "TEXT"), ("loc_source", "TEXT"),
+                             ("neighbors", "TEXT"), ("neighbors_at", "REAL")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")
             if info["org_id"][3] == 1 or "name_custom" not in info:   # org_id NOT NULL (old schema)
