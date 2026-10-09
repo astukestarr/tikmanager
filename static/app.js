@@ -1486,29 +1486,53 @@ async function loadFirewall(d, note) {
   const card = $("fwCard");
   if (!card) return;
   clearInterval(fwTimer);
-  const v = rView.fw || (rView.fw = { sec: "filter", chain: "" });
-  let f;
-  try { f = await api(`/api/devices/${d.id}/firewall`); }
-  catch (e) { card.innerHTML = `<h2>Firewall &amp; NAT</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  const v = rView.fw || (rView.fw = { sec: "filter", chain: "", list: "", q: "" });
+  let f, entries = [];
+  try {
+    f = await api(`/api/devices/${d.id}/firewall`);
+    if (v.sec === "address-list") {
+      if (!f.address_lists.includes(v.list)) v.list = f.address_lists[0] || "";
+      if (v.list) entries = (await api(`/api/devices/${d.id}/firewall/address-list?list=${encodeURIComponent(v.list)}`)).entries;
+    }
+  } catch (e) { card.innerHTML = `<h2>Firewall &amp; NAT</h2><p class="status err">${esc(e.message)}</p>`; return; }
   if (!$("fwCard")) return;
-  const rules = f[v.sec], chains = [...new Set(rules.map((r) => r.chain))];
+  const isList = v.sec === "address-list";
+  const rules = isList ? [] : f[v.sec], chains = [...new Set(rules.map((r) => r.chain))];
   if (v.chain && !chains.includes(v.chain)) v.chain = "";
   const shown = rules.filter((r) => !v.chain || r.chain === v.chain);
+  const ql = v.q.toLowerCase();
+  const shownEntries = entries.filter((e) => !ql || `${e.address} ${e.comment || ""}`.toLowerCase().includes(ql));
   const edit = f.can_edit, p = f.pending;
+  const tabs = [["filter", "Filter", f.filter.length], ["nat", "NAT", f.nat.length], ["address-list", "Address lists", f.address_lists.length]];
   card.innerHTML = `<div class="row"><h2>Firewall &amp; NAT</h2>
-      <div class="seg" role="group" aria-label="Rule set">${[["filter", "Filter"], ["nat", "NAT"]].map(([k, l]) =>
-        `<button type="button" data-fwsec="${k}" class="${v.sec === k ? "on" : ""}">${l} (${f[k].length})</button>`).join("")}</div>
-      <select id="fwChain" aria-label="Chain"><option value="">All chains</option>${chains.map((c) => `<option ${c === v.chain ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+      <div class="seg" role="group" aria-label="Rule set">${tabs.map(([k, l, n]) =>
+        `<button type="button" data-fwsec="${k}" class="${v.sec === k ? "on" : ""}">${l} (${n})</button>`).join("")}</div>
+      ${isList ? `<select id="fwList" aria-label="Address list">${f.address_lists.map((l) => `<option value="${esc(l)}" ${l === v.list ? "selected" : ""}>${esc(l)} (${f.address_list_counts[l] || 0})</option>`).join("")}</select>
+        <input id="fwQ" type="search" placeholder="Search address or comment" aria-label="Search the list" value="${esc(v.q)}">`
+        : `<select id="fwChain" aria-label="Chain"><option value="">All chains</option>${chains.map((c) => `<option ${c === v.chain ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`}
       <span class="spacer"></span>
-      ${edit ? `<button class="btn primary" type="button" id="fwAdd">Add rule</button>` : ""}
+      ${edit ? `<button class="btn primary" type="button" id="fwAdd">${isList ? "Add address" : "Add rule"}</button>` : ""}
       <button class="btn" type="button" id="fwRefresh">Refresh</button></div>
     ${p ? `<div class="fw-pending"><div><b>Testing ${p.changes.length} change${p.changes.length === 1 ? "" : "s"}</b> -
-        <span id="fwLeft">${p.seconds == null ? "the router puts the rules back soon" : `the router puts the rules back in <b>${fwClock(p.seconds)}</b>`}</span> unless you keep them.
+        <span id="fwLeft">${p.seconds == null ? "the router undoes them soon" : `the router undoes them in <b>${fwClock(p.seconds)}</b>`}</span> unless you keep them.
         <ul class="small">${p.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></div>
         ${edit ? `<div class="fw-pending-acts"><button class="btn primary" type="button" id="fwKeep">Keep changes</button>
           <button class="btn" type="button" id="fwUndo">Undo now</button></div>` : ""}</div>` : ""}
     <p class="status" id="fwStatus"></p>
-    <div class="table-wrap"><table class="fw-table"><thead><tr><th>#</th><th>Chain</th><th>Action</th><th>Match</th>${v.sec === "nat" ? "<th>Translate to</th>" : ""}
+    ${isList ? `<div class="table-wrap"><table class="fw-table"><thead><tr><th>Address</th><th>Comment</th><th>Timeout</th><th>Added</th>${edit ? "<th></th>" : ""}</tr></thead><tbody>
+      ${shownEntries.slice(0, 1000).map((e) => `<tr class="${e.disabled === "true" ? "fw-off" : ""}">
+        <td class="mono">${esc(e.address)}${e.disabled === "true" ? ` <span class="small muted">(off)</span>` : ""}</td>
+        <td class="muted small">${esc(e.comment || "")}${e.dynamic === "true" ? ` <span class="pill" title="Added by a firewall rule; removed when the timeout runs out">dynamic</span>` : ""}</td>
+        <td class="small nowrap">${esc(e.timeout || (e.dynamic === "true" ? "" : "permanent"))}</td>
+        <td class="small nowrap muted">${esc(e["creation-time"] || "")}</td>
+        ${edit ? `<td class="fw-acts nowrap">${e.dynamic === "true" ? "" : `
+          <button class="btn" type="button" data-al="${e.disabled === "true" ? "enable" : "disable"}" data-id="${esc(e[".id"])}">${e.disabled === "true" ? "Enable" : "Disable"}</button>
+          <button class="btn" type="button" data-al="edit" data-id="${esc(e[".id"])}">Edit</button>`}
+          <button class="btn" type="button" data-al="remove" data-id="${esc(e[".id"])}">Remove</button></td>` : ""}</tr>`).join("")}
+      ${shownEntries.length ? "" : `<tr><td colspan="5" class="muted">${f.address_lists.length ? (v.q ? "Nothing matches." : "This list is empty.") : "No address lists on this router yet - Add address creates one."}</td></tr>`}
+      </tbody></table></div>
+      ${shownEntries.length > 1000 ? `<p class="small muted">Showing the first 1,000 of ${shownEntries.length.toLocaleString()} - search to narrow it down.</p>` : ""}`
+    : `<div class="table-wrap"><table class="fw-table"><thead><tr><th>#</th><th>Chain</th><th>Action</th><th>Match</th>${v.sec === "nat" ? "<th>Translate to</th>" : ""}
       <th>Comment</th><th>Traffic</th>${edit ? "<th></th>" : ""}</tr></thead><tbody>
       ${shown.map((r) => { const i = rules.indexOf(r); return `<tr class="${r.disabled === "true" ? "fw-off" : ""} ${r.invalid === "true" ? "fw-bad" : ""}">
         <td class="muted">${i + 1}</td><td class="mono">${esc(r.chain)}</td>
@@ -1524,22 +1548,24 @@ async function loadFirewall(d, note) {
           <button class="btn" type="button" data-fw="${r.disabled === "true" ? "enable" : "disable"}" data-id="${esc(r[".id"])}">${r.disabled === "true" ? "Enable" : "Disable"}</button>
           <button class="btn" type="button" data-fw="edit" data-id="${esc(r[".id"])}">Edit</button>
           <button class="btn" type="button" data-fw="remove" data-id="${esc(r[".id"])}">Delete</button>`}</td>` : ""}</tr>`; }).join("")}
-      ${shown.length ? "" : `<tr><td colspan="8" class="muted">No rules${v.chain ? ` in ${esc(v.chain)}` : ""}.</td></tr>`}</tbody></table></div>
-    <p class="small muted">Changes are tested first, like Safe Mode in Winbox: before the first one TikManager saves the current rules on the router and
+      ${shown.length ? "" : `<tr><td colspan="8" class="muted">No rules${v.chain ? ` in ${esc(v.chain)}` : ""}.</td></tr>`}</tbody></table></div>`}
+    <p class="small muted">Changes are tested first, like Safe Mode in Winbox: before the first one TikManager saves an undo script on the router and
       starts a ${f.test_minutes}-minute timer. Press <b>Keep changes</b> once you've checked everything still works - otherwise (or if a change cuts
-      TikManager off) the router puts the rules back by itself. TikManager's own rules and dynamic rules are locked.</p>`;
+      TikManager off) the router undoes the changes by itself. TikManager's own rules and dynamic rules are locked.</p>`;
   const status = (msg, cls = "") => { $("fwStatus").textContent = msg; $("fwStatus").className = `status ${cls}`; };
   if (note) status(note[0], note[1]);
-  card.querySelectorAll("[data-fwsec]").forEach((b) => b.addEventListener("click", () => { v.sec = b.dataset.fwsec; v.chain = ""; loadFirewall(d); }));
-  $("fwChain").addEventListener("change", () => { v.chain = $("fwChain").value; loadFirewall(d); });
+  card.querySelectorAll("[data-fwsec]").forEach((b) => b.addEventListener("click", () => { v.sec = b.dataset.fwsec; v.chain = ""; v.q = ""; loadFirewall(d); }));
+  $("fwChain")?.addEventListener("change", () => { v.chain = $("fwChain").value; loadFirewall(d); });
+  $("fwList")?.addEventListener("change", () => { v.list = $("fwList").value; v.q = ""; loadFirewall(d); });
+  $("fwQ")?.addEventListener("change", () => { v.q = $("fwQ").value.trim(); loadFirewall(d); });
   $("fwRefresh").addEventListener("click", () => loadFirewall(d));
   if (p && p.seconds != null) {
     const end = Date.now() + p.seconds * 1000;
     fwTimer = setInterval(() => {
       if (!$("fwLeft")) { clearInterval(fwTimer); return; }
       const left = Math.max(0, Math.round((end - Date.now()) / 1000));
-      $("fwLeft").innerHTML = left ? `the router puts the rules back in <b>${fwClock(left)}</b>` : "time's up - the router is putting the rules back";
-      if (!left) { clearInterval(fwTimer); setTimeout(() => loadFirewall(d, ["The changes weren't kept, so the router put the rules back.", "warn"]), 8000); }
+      $("fwLeft").innerHTML = left ? `the router undoes them in <b>${fwClock(left)}</b>` : "time's up - the router is undoing them";
+      if (!left) { clearInterval(fwTimer); setTimeout(() => loadFirewall(d, ["The changes weren't kept, so the router undid them.", "warn"]), 8000); }
     }, 1000);
   }
   const send = async (url, body, busy) => {
@@ -1552,16 +1578,27 @@ async function loadFirewall(d, note) {
     const r = await send(`/api/devices/${d.id}/firewall`, { section: v.sec, ...body }, busy);
     if (!r) return false;
     await loadFirewall(d, r.reachable ? [`Done - ${r.summary}. Check that everything still works, then press Keep changes.`, "ok"]
-      : ["TikManager can't reach the router after this change. Unless it comes back, the router will put the rules back by itself when the timer runs out.", "err"]);
+      : ["TikManager can't reach the router after this change. Unless it comes back, the router will undo it by itself when the timer runs out.", "err"]);
     return true;
   };
   $("fwKeep")?.addEventListener("click", async () => {
     if (await send(`/api/devices/${d.id}/firewall/keep`, {}, "Keeping the changes...")) loadFirewall(d, ["Changes kept.", "ok"]);
   });
   $("fwUndo")?.addEventListener("click", async () => {
-    if (await send(`/api/devices/${d.id}/firewall/undo`, {}, "Putting the rules back...")) loadFirewall(d, ["Undone - the rules are back as they were.", "ok"]);
+    if (await send(`/api/devices/${d.id}/firewall/undo`, {}, "Undoing the changes...")) loadFirewall(d, ["Undone - everything is back as it was.", "ok"]);
   });
-  $("fwAdd")?.addEventListener("click", () => fwDialog(d, f, v.sec, null, change, v.chain));
+  $("fwAdd")?.addEventListener("click", () => isList ? alDialog(f, v.list, null, (body, busy) => { if (body.rule?.list) v.list = body.rule.list; return change(body, busy); })
+    : fwDialog(d, f, v.sec, null, change, v.chain));
+  card.querySelectorAll("[data-al]").forEach((b) => b.addEventListener("click", () => {
+    const op = b.dataset.al, e = entries.find((x) => x[".id"] === b.dataset.id);
+    if (!e) return;
+    if (op === "edit") return alDialog(f, v.list, e, (body, busy) => { if (body.rule?.list) v.list = body.rule.list; return change({ ...body, list: e.list }, busy); });
+    if (op === "remove") {
+      if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.textContent = "Sure?"; return; }
+      return change({ op, id: e[".id"], list: e.list }, `Removing ${e.address}...`);
+    }
+    return change({ op, id: e[".id"], list: e.list }, `${op === "enable" ? "Enabling" : "Disabling"} ${e.address}...`);
+  }));
   card.querySelectorAll("[data-fw]").forEach((b) => b.addEventListener("click", async () => {
     const op = b.dataset.fw, r = rules.find((x) => x[".id"] === b.dataset.id);
     if (!r) return;
@@ -1581,6 +1618,60 @@ async function loadFirewall(d, note) {
     const after = rules[rules.indexOf(shown[k + 1]) + 1];
     return change({ op: "move", id: r[".id"], before: after ? after[".id"] : null }, "Moving the rule...");
   }));
+}
+
+// an address-list entry: list (pick or new), address, timeout, comment - like WebFig's Address Lists form
+function alDialog(f, list, e, change) {
+  const cur = e || { list, disabled: "false" };
+  const lists = [...new Set([...(f.address_lists || []), ...(cur.list ? [cur.list] : [])])];
+  rView.hold = true;
+  dialog(`<h2>${e ? "Edit address" : "Add address"}</h2>
+    <form id="alForm" class="fw-form">
+      <div class="fw-row on"><span class="fw-lbl">Enabled</span><span class="fw-val"><input type="checkbox" name="enabled" ${cur.disabled === "true" ? "" : "checked"} aria-label="Enabled"></span></div>
+      <div class="fw-row on"><span class="fw-lbl">List</span><span class="fw-val"><select name="list">${lists.map((l) => `<option value="${esc(l)}" ${l === cur.list ? "selected" : ""}>${esc(l)}</option>`).join("")}
+        <option value="__new" ${lists.length ? "" : "selected"}>New list…</option></select>
+        <input name="list-new" class="${lists.length ? "hidden" : ""}" placeholder="list name" maxlength="63" spellcheck="false"></span></div>
+      <div class="fw-row on"><span class="fw-lbl">Address</span><span class="fw-val"><input name="address" value="${esc(cur.address || "")}" required spellcheck="false"
+        placeholder="203.0.113.7, 10.0.0.0/24, 10.0.0.1-10.0.0.9 or a DNS name"></span></div>
+      <div class="fw-row on"><span class="fw-lbl">Timeout</span><span class="fw-val"><input name="timeout" value="${esc(e ? "" : "")}" spellcheck="false"
+        placeholder="blank = permanent (e.g. 1d, 2h30m)" ${e ? "disabled title=\"Set when the address is added\"" : ""}></span></div>
+      <div class="fw-row on"><span class="fw-lbl">Comment</span><span class="fw-val"><input name="comment" value="${esc(cur.comment || "")}" maxlength="200"></span></div>
+      <p class="small muted">Rules that use this list match the new address straight away. The change is tested first: the router undoes it in
+        ${f.test_minutes} minutes unless you keep it - so removing your own address from an allow list can't lock you out for good.</p>
+      <p class="status err" id="alErr"></p>
+      <div class="row"><span class="spacer"></span><button class="btn" type="button" data-close>Cancel</button>
+        <button class="btn primary" type="submit">${e ? "Save and test" : "Add and test"}</button></div>
+    </form>`);
+  $("dlg").classList.add("fw-dlg");
+  $("dlg").addEventListener("close", () => { rView.hold = false; $("dlg").classList.remove("fw-dlg"); }, { once: true });
+  const form = $("alForm");
+  form.elements.list.addEventListener("change", () => {
+    form.elements["list-new"].classList.toggle("hidden", form.elements.list.value !== "__new");
+    if (form.elements.list.value === "__new") form.elements["list-new"].focus();
+  });
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const vals = {
+      list: form.elements.list.value === "__new" ? form.elements["list-new"].value.trim() : form.elements.list.value,
+      address: form.elements.address.value.trim(), comment: form.elements.comment.value.trim(),
+      disabled: form.elements.enabled.checked ? "false" : "true",
+    };
+    if (!vals.list) { $("alErr").textContent = "Type the new list's name."; return; }
+    if (!vals.address) { $("alErr").textContent = "Type an address."; return; }
+    let body;
+    if (e) {
+      const diff = {};
+      for (const [k, val] of Object.entries(vals)) if (val !== (e[k] ?? (k === "disabled" ? "false" : ""))) diff[k] = val;
+      if (!Object.keys(diff).length) { $("alErr").textContent = "Nothing changed."; return; }
+      body = { op: "edit", id: e[".id"], rule: diff };
+    } else {
+      if (form.elements.timeout.value.trim()) vals.timeout = form.elements.timeout.value.trim();
+      body = { op: "add", rule: Object.fromEntries(Object.entries(vals).filter(([k, val]) => val !== "" && !(k === "disabled" && val === "false"))) };
+    }
+    form.querySelector("[type=submit]").disabled = true;
+    $("dlg").close();
+    await change(body, e ? `Saving ${vals.address}...` : `Adding ${vals.address} to ${vals.list}...`);
+  });
 }
 
 // the rule editor, laid out like WebFig: match fields are added with +, each with - (remove) and ! (not)

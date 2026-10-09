@@ -82,7 +82,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `backups.py` + `vault.py` | nightly `/export show-sensitive`, deduplicated, gzip + AES-256-GCM |
 | `upgrades.py` | RouterOS / RouterBOARD upgrade jobs (backup first, wait for reboot) |
 | `tasks.py` | script library, groups, scheduled script runs and firmware updates |
-| `firewall.py` | filter / NAT rule changes, tested like Safe Mode: restore script + scheduler on the router, Keep / Undo, locked rules |
+| `firewall.py` | filter / NAT rule and address-list changes, tested like Safe Mode: undo script + scheduler on the router, Keep / Undo, locked rules |
 | `vpn.py` / `vpninv.py` | site-to-site WireGuard VPNs it builds / VPNs already on routers (read-only) |
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |

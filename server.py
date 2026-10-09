@@ -511,6 +511,15 @@ class Handler(BaseHTTPRequestHandler):
                 topo_cache[key] = hit
             # client users see their network, but not the full routing table (other networks an MSP connected)
             return self.json({**topology.build(hit[1], d, full=s["kind"] == "tech"), "read_at": hit[0]})
+        if m := re.fullmatch(r"/api/devices/(\d+)/firewall/address-list", path):   # one address list's entries, read live
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            try:
+                return self.json({"entries": firewall.entries(d, q.get("list", ""))})
+            except FirewallError as e:
+                raise HttpError(400, str(e)) from None
         if m := re.fullmatch(r"/api/devices/(\d+)/firewall", path):   # filter + NAT rules, read live
             s = self.require(tech=True)
             d = self.device_for(s, m.group(1))

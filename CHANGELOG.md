@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.7.0 - 2026-10-09
+
+- **Address lists** - a third tab on a router's Firewall & NAT card, like WebFig's Address Lists: pick a list (with how
+  many entries it has), search it, and add, edit, enable / disable or remove addresses. **Add address** can create a
+  new list; an entry can be moved to another list. Entries added by rules (dynamic, with a timeout) can be removed -
+  e.g. to unblock an address a port-scan rule caught - but not edited.
+- Address-list changes are **tested like rule changes** (Keep / Undo, undone by the router itself after 5 minutes if
+  not kept), so removing your own address from an allow list can't lock you out for good. Lists can be huge, so they
+  aren't copied: each change adds its own reverse step to the undo script. Rule and address-list changes can be mixed
+  in one test.
+
 ## 1.6.5 - 2026-10-09
 
 - **Firewall rule editor: Chain and Jump target are pulldowns** of every chain on the router (the built-in ones plus

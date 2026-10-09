@@ -233,6 +233,11 @@ state, NAT targets, jump / reject / address-list options, log, comment); other s
 alone. Each change, keep and undo is in the audit log and the router's events. Very large rule sets (where the
 restore script would be over 60 KB) are refused - change those in Winbox with Safe Mode.
 
+**Address lists** (third tab): pick a list, search it, and add, edit, enable / disable or remove addresses - **Add
+address** can also start a new list. Entries a rule added by itself (dynamic, with a timeout) can be removed but not
+edited. These changes are tested the same way: the undo script re-adds what was removed, removes what was added and
+sets edited entries back.
+
 ## Subnets in use
 
 **Subnets** lists every LAN subnet on every approved router, grouped by client: subnet, name (the interface comment),

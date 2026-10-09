@@ -271,7 +271,7 @@ class RouterOS:
         return out
 
     # --- firewall filter / NAT rules (firewall.py drives these, with an automatic undo) -------------------------------
-    FW_MENUS = {"filter": "/ip/firewall/filter", "nat": "/ip/firewall/nat"}
+    FW_MENUS = {"filter": "/ip/firewall/filter", "nat": "/ip/firewall/nat", "address-list": "/ip/firewall/address-list"}
 
     def fw_rules(self, section):
         return self.get(self.FW_MENUS[section]) or []
@@ -280,8 +280,16 @@ class RouterOS:
         """What the rule editor offers in its pulldowns: address lists (only each entry's list name is read - lists can
         be large), interfaces and interface lists."""
         names = lambda path, key="name": sorted({x.get(key) for x in self.optional(lambda: self.get(path), []) or [] if x.get(key)})
-        return {"address_lists": names("/ip/firewall/address-list?.proplist=list", "list"),
+        counts = {}
+        for x in self.optional(lambda: self.get("/ip/firewall/address-list?.proplist=list"), []) or []:
+            if x.get("list"):
+                counts[x["list"]] = counts.get(x["list"], 0) + 1
+        return {"address_lists": sorted(counts), "address_list_counts": counts,
                 "interfaces": names("/interface?.proplist=name"), "interface_lists": names("/interface/list?.proplist=name")}
+
+    def al_entries(self, name):
+        """The entries of one address list (like /ip firewall address-list print where list=...)."""
+        return self.get(f"/ip/firewall/address-list?list={urllib.parse.quote(name)}") or []
 
     def fw_add(self, section, props, before=None):
         body = dict(props)
@@ -534,6 +542,14 @@ class SimRouter:
                 {"chain": "dstnat", "action": "dst-nat", "protocol": "tcp", "dst-port": "3389", "in-interface-list": "WAN",
                  "to-addresses": lan.rsplit(".", 1)[0] + ".20", "to-ports": "3389", "comment": "RDP to server"},
             ]
+            alist = [
+                {"list": "trusted-admins", "address": "198.51.100.10", "comment": "Office static IP", "creation-time": "2026-09-14 10:02:11"},
+                {"list": "trusted-admins", "address": "203.0.113.0/28", "comment": "Datacenter", "creation-time": "2026-09-14 10:03:40"},
+                {"list": "office-ips", "address": "203.0.113.0/28", "creation-time": "2026-08-01 08:00:00"},
+                {"list": "blocklist", "address": "192.0.2.66", "dynamic": "true", "timeout": "1d03:12:44", "creation-time": "2026-10-08 06:47:16"},
+                {"list": "blocklist", "address": "192.0.2.201", "dynamic": "true", "timeout": "13:40:02", "creation-time": "2026-10-09 01:19:58"},
+                {"list": "blocklist", "address": "spam.example.net", "comment": "Known spammer", "creation-time": "2026-07-20 12:00:00"},
+            ]
             r = random.Random(self.id)
             st["fw"] = {}
             st["fw_next"] = 1
@@ -543,6 +559,10 @@ class SimRouter:
                     st["fw"][sec].append({".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", "invalid": "false",
                                           "bytes": str(r.randint(0, 9 * 10 ** 9)), "packets": str(r.randint(0, 9 * 10 ** 6)), **x})
                     st["fw_next"] += 1
+            st["fw"]["address-list"] = []
+            for x in alist:
+                st["fw"]["address-list"].append({".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", **x})
+                st["fw_next"] += 1
             st["sched"], st["undo"] = {}, {}
         return st
 
@@ -550,8 +570,14 @@ class SimRouter:
         self._fw_expire()
         return [dict(x) for x in self._fw()["fw"][section]]
 
+    def al_entries(self, name):
+        return [dict(x) for x in self._fw()["fw"]["address-list"] if x.get("list") == name]
+
     def fw_options(self):
-        return {"address_lists": ["blocklist", "office-ips", "trusted-admins"],
+        counts = {}
+        for x in self._fw()["fw"]["address-list"]:
+            counts[x["list"]] = counts.get(x["list"], 0) + 1
+        return {"address_lists": sorted(counts), "address_list_counts": counts,
                 "interfaces": ["bridge", "ether1", "ether2", "ether3", "ether4", "ether5", "tikmanager", "wlan1"], "interface_lists": ["LAN", "WAN"]}
 
     def _fw_find(self, section, rid):
@@ -563,7 +589,12 @@ class SimRouter:
 
     def fw_add(self, section, props, before=None):
         st = self._fw()
-        rule = {".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", "invalid": "false", "bytes": "0", "packets": "0", **props}
+        if section == "address-list":
+            if any(x["list"] == props.get("list") and x["address"] == props.get("address") for x in st["fw"][section]):
+                raise RouterError("HTTP 400: failure: already have such entry")
+            rule = {".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", "creation-time": time.strftime("%Y-%m-%d %H:%M:%S"), **props}
+        else:
+            rule = {".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", "invalid": "false", "bytes": "0", "packets": "0", **props}
         st["fw_next"] += 1
         rules = st["fw"][section]
         if before:
@@ -595,7 +626,7 @@ class SimRouter:
 
     def undo_arm(self, name, script=None, delay="5m"):
         st = self._fw()
-        if script is not None:
+        if script is not None and name not in st["undo"]:   # the state before the test's first change
             st["undo"][name] = copy.deepcopy(st["fw"])
         st["sched"][name] = time.time() + int(delay.rstrip("m")) * 60
 
