@@ -1598,7 +1598,12 @@ const FW_GENERAL = [   // [field, kind]; null = divider
 function fwDialog(d, f, sec, rule, change, chain = "") {
   const fields = f.fields[sec], rules = f[sec];
   const cur = rule || { chain: chain || (sec === "nat" ? "dstnat" : "input"), action: sec === "nat" ? "dst-nat" : "accept" };
-  const chains = [...new Set([...(sec === "nat" ? ["srcnat", "dstnat"] : ["input", "forward", "output"]), ...rules.map((r) => r.chain)])];
+  const chains = [...new Set([...(sec === "nat" ? ["srcnat", "dstnat"] : ["input", "forward", "output"]), ...rules.map((r) => r.chain),
+    ...rules.map((r) => r["jump-target"]).filter(Boolean)])];
+  // a pulldown of every chain on the router, or "New chain..." to type one
+  const chainPick = (name, sel, blank) => `<select name="${name}" data-chain>${blank != null ? opt("", blank, sel || "") : ""}
+      ${[...chains, ...(sel && !chains.includes(sel) ? [sel] : [])].map((c) => opt(c, c, sel)).join("")}<option value="__new">New chain…</option></select>
+    <input name="${name}-new" class="hidden" placeholder="chain name" spellcheck="false" maxlength="40">`;
   const opt = (v, label, sel) => `<option value="${esc(v)}" ${v === sel ? "selected" : ""}>${esc(label ?? v)}</option>`;
   const choose = (name, values, sel, blank) => {   // a pulldown that keeps a value the router no longer offers
     const list = [...values];
@@ -1634,11 +1639,11 @@ function fwDialog(d, f, sec, rule, change, chain = "") {
       <div class="fw-row on"><span class="fw-lbl">Enabled</span><span class="fw-val"><input type="checkbox" name="enabled" ${cur.disabled === "true" ? "" : "checked"} aria-label="Enabled"></span></div>
       <div class="fw-row on"><span class="fw-lbl">Comment</span><span class="fw-val"><input name="comment" value="${esc(cur.comment || "")}" maxlength="200"></span></div>
       <h3 class="fw-sec">General</h3>
-      <div class="fw-row on"><span class="fw-lbl">Chain</span><span class="fw-val"><input name="chain" list="fwChains" value="${esc(cur.chain || "")}" required spellcheck="false"></span></div>
+      <div class="fw-row on"><span class="fw-lbl">Chain</span><span class="fw-val">${chainPick("chain", cur.chain || "")}</span></div>
       ${FW_GENERAL.map((x) => x ? row(x) : `<hr class="fw-hr">`).join("")}
       <h3 class="fw-sec">Action</h3>
       ${plain("action", choose("action", f.actions[sec], cur.action))}
-      ${plain("jump-target", `<input name="jump-target" list="fwChains" value="${esc(cur["jump-target"] || "")}" spellcheck="false">`)}
+      ${plain("jump-target", chainPick("jump-target", cur["jump-target"] || "", "pick a chain"))}
       ${plain("reject-with", choose("reject-with", ["icmp-network-unreachable", "icmp-host-unreachable", "icmp-port-unreachable", "icmp-protocol-unreachable",
         "icmp-net-prohibited", "icmp-host-prohibited", "icmp-admin-prohibited", "tcp-reset"], cur["reject-with"] || "", "default"))}
       ${plain("address-list", `<input name="address-list" list="fwLists" value="${esc(cur["address-list"] || "")}" placeholder="pick or type a new list" spellcheck="false">`)}
@@ -1649,7 +1654,6 @@ function fwDialog(d, f, sec, rule, change, chain = "") {
       ${plain("log-prefix", `<input name="log-prefix" value="${esc(cur["log-prefix"] || "")}" maxlength="50">`)}
       ${rule ? "" : `<h3 class="fw-sec">Position</h3><div class="fw-row on"><span class="fw-lbl">Place</span><span class="fw-val"><select name="before"><option value="">At the end</option>
         ${rules.map((r, i) => `<option value="${esc(r[".id"])}">Above #${i + 1}: ${esc(`${r.chain} ${r.action} ${r.comment || fwMatch(r)}`).slice(0, 90)}</option>`).join("")}</select></span></div>`}
-      <datalist id="fwChains">${chains.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
       <datalist id="fwLists">${(f.address_lists || []).map((l) => `<option value="${esc(l)}">`).join("")}</datalist>
       <datalist id="fwProtos">${FW_PROTOS.map((x) => `<option value="${x}">`).join("")}</datalist>
       <p class="small muted">Fields left out match anything; tick ! to match everything except the value. The change is tested first: the router puts
@@ -1673,6 +1677,12 @@ function fwDialog(d, f, sec, rule, change, chain = "") {
     el.querySelector(".fw-add").addEventListener("click", () => { el.classList.add("on"); el.querySelector("input:not([type=checkbox]), select")?.focus(); refresh(); });
     el.querySelector(".fw-del").addEventListener("click", () => { el.classList.remove("on"); refresh(); });
   });
+  form.querySelectorAll("[data-chain]").forEach((s) => s.addEventListener("change", () => {
+    const box = form.elements[`${s.name}-new`];
+    box.classList.toggle("hidden", s.value !== "__new");
+    if (s.value === "__new") box.focus();
+  }));
+  const chainVal = (name) => form.elements[name].value === "__new" ? form.elements[`${name}-new`].value.trim() : form.elements[name].value;
   form.elements.action.addEventListener("change", refresh);
   form.elements.protocol?.addEventListener("input", refresh);
   form.querySelector("[data-not=protocol]")?.addEventListener("change", refresh);
@@ -1690,8 +1700,12 @@ function fwDialog(d, f, sec, rule, change, chain = "") {
       }
       vals[k] = v;
     });
-    form.querySelectorAll("[data-act]").forEach((el) => { const k = el.dataset.act; vals[k] = el.classList.contains("hidden") ? "" : form.elements[k].value.trim(); });
-    vals.chain = form.elements.chain.value.trim();
+    form.querySelectorAll("[data-act]").forEach((el) => {
+      const k = el.dataset.act;
+      vals[k] = el.classList.contains("hidden") ? "" : k === "jump-target" ? chainVal(k) : form.elements[k].value.trim();
+    });
+    vals.chain = chainVal("chain");
+    if (!vals.chain) { $("fwFormErr").textContent = "Type the new chain's name."; return; }
     vals.comment = form.elements.comment.value.trim();
     vals.disabled = form.elements.enabled.checked ? "false" : "true";
     vals.log = form.elements.log.checked ? "true" : "false";

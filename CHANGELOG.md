@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.6.5 - 2026-10-09
+
+- **Firewall rule editor: Chain and Jump target are pulldowns** of every chain on the router (the built-in ones plus
+  any custom chains its rules use or jump to), with **New chain…** to type a new one. Before, the chain box only
+  suggested names matching what was already in it, so only the current chain was offered.
+
 ## 1.6.4 - 2026-10-09
 
 - **Open pages pick up a new version by themselves.** A browser tab opened before TikManager was upgraded kept running
