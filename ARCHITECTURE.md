@@ -42,7 +42,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 
 - `version.py` holds the version (semantic: patch = fixes, minor = features, major = admin action needed);
   `CHANGELOG.md` says what changed; each release is a `vX.Y.Z` tag on GitHub.
-- `updates.py` checks the update repository hourly (latest GitHub Release, else the highest `vX.Y.Z` tag) and serves
+- `updates.py` checks the update repository hourly (the highest `vX.Y.Z` tag; a GitHub Release for that version adds its notes) and serves
   Admin > Settings > Version & updates and the "Update available" badge.
 - The web app runs without root, so it can't install anything itself. **Upgrade now** only writes the wanted version
   number to `/var/lib/tikmanager/update-request`. The root-owned systemd unit `tikmanager-update.path` notices the file

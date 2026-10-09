@@ -8,6 +8,18 @@ page with one click.
 Python 3 standard library only on the server (plus Ubuntu's `python3-cryptography` for encrypting stored configs),
 SQLite, WireGuard and Caddy. No build step, no package manager.
 
+| Every router at a glance | One router: health, traffic, upgrades |
+|---|---|
+| ![Routers list](docs/screenshots/routers.jpg) | ![Router page](docs/screenshots/router.jpg) |
+| **Firewall rules, edited like WebFig - with automatic undo** | **Where every router is** |
+| ![Firewall rule editor](docs/screenshots/firewall-rule.jpg) | ![Site map](docs/screenshots/site-map.jpg) |
+| **Sign-in attempts on TikManager, its server and every router** | |
+| ![Security page](docs/screenshots/security.jpg) | |
+
+*(Screenshots from dev mode with simulated routers.)*
+
+MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report it privately: [SECURITY.md](SECURITY.md).
+
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)

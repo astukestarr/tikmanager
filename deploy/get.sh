@@ -71,13 +71,9 @@ python3 -c 'import ipaddress,sys; ipaddress.ip_network(sys.argv[1], strict=False
   || { echo "\"$LAN\" isn't a subnet like 192.168.1.0/24 - run again with --lan."; exit 1; }
 
 UA="User-Agent: TikManager-installer"
-if [[ -z "$VER" ]]; then   # newest GitHub Release, else the highest vX.Y.Z tag
-  VER=$(curl -fsSL -H "$UA" "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)
-  if [[ -z "$VER" ]]; then
-    VER=$(curl -fsSL -H "$UA" "https://api.github.com/repos/$REPO/tags?per_page=100" \
-          | python3 -c 'import json,re,sys; t=[x["name"].lstrip("v") for x in json.load(sys.stdin) if re.fullmatch(r"v?\d+\.\d+\.\d+", x["name"])]; print(max(t, key=lambda v: tuple(map(int, v.split(".")))) if t else "")')
-  fi
+if [[ -z "$VER" ]]; then   # the highest vX.Y.Z tag (every version is tagged; GitHub Releases are optional notes)
+  VER=$(curl -fsSL -H "$UA" "https://api.github.com/repos/$REPO/tags?per_page=100" \
+        | python3 -c 'import json,re,sys; t=[x["name"].lstrip("v") for x in json.load(sys.stdin) if re.fullmatch(r"v?\d+\.\d+\.\d+", x["name"])]; print(max(t, key=lambda v: tuple(map(int, v.split(".")))) if t else "")')
 fi
 [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Couldn't find a release to install in github.com/$REPO."; exit 1; }
 

@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.11.1 - 2026-10-09
+
+- **Updates are found from tags, not GitHub Releases**: the newest version is now always the highest `vX.Y.Z` tag, and a
+  GitHub Release for that version only adds its notes ("What's new"). Before, once a Release had been published, a
+  later version pushed without its own Release would not have been offered. Applies to the update check, the one-click
+  upgrade and the installer.
+- MIT license, a security policy (`SECURITY.md`: report problems privately on GitHub), screenshots in the README, and
+  `tools/release_notes.py` (prints a version's changelog section for its GitHub Release).
+
 ## 1.11.0 - 2026-10-09
 
 - **Website security grade** on Admin > Version & updates: TikManager asks Mozilla's HTTP Observatory to check its

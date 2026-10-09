@@ -56,13 +56,9 @@ VER="${1:-}"
 FROM_WEB=0
 if [[ -z "$VER" && -f "$REQ" && ! -L "$REQ" ]]; then VER=$(head -c 20 -- "$REQ" | tr -dc '0-9.'); FROM_WEB=1; fi
 rm -f -- "$REQ"
-if [[ -z "$VER" || "$VER" == "latest" ]]; then
-  VER=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)
-  if [[ -z "$VER" ]]; then
-    VER=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/tags?per_page=100" \
-          | python3 -c 'import json,re,sys; t=[x["name"].lstrip("v") for x in json.load(sys.stdin) if re.fullmatch(r"v?\d+\.\d+\.\d+", x["name"])]; print(max(t, key=lambda v: tuple(map(int, v.split(".")))) if t else "")')
-  fi
+if [[ -z "$VER" || "$VER" == "latest" ]]; then   # the highest vX.Y.Z tag (every version is tagged; GitHub Releases are optional notes)
+  VER=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/tags?per_page=100" \
+        | python3 -c 'import json,re,sys; t=[x["name"].lstrip("v") for x in json.load(sys.stdin) if re.fullmatch(r"v?\d+\.\d+\.\d+", x["name"])]; print(max(t, key=lambda v: tuple(map(int, v.split(".")))) if t else "")')
 fi
 [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { status failed "No valid version to install ($VER)"; exit 1; }
 if [[ "$VER" == "$FROM" ]]; then status done "Already on $VER"; exit 0; fi

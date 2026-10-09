@@ -1,7 +1,7 @@
 """New-version check and the "Upgrade now" button.
 
 - Every hour (and on demand) the newest release of the update repository (TM_UPDATE_REPO, default the project's GitHub
-  repository) is looked up: its latest GitHub Release, else its highest vX.Y.Z tag.
+  repository) is looked up: its highest vX.Y.Z tag (a GitHub Release for that version adds its notes).
 - Upgrading needs root, which the web app deliberately doesn't have. Clicking Upgrade writes the wanted version to
   <data>/update-request; the root-owned systemd unit tikmanager-update.path notices it and runs deploy/self-update.sh,
   which downloads that release, backs up code and database, installs it, restarts, rolls back if the new version doesn't
@@ -64,20 +64,21 @@ class Updates:
             self.latest.update(error="No update repository configured (TM_UPDATE_REPO).", checked_at=time.time())
             return self.latest
         try:
+            # the newest version is the highest vX.Y.Z tag (every version is tagged); a GitHub Release for that same
+            # version only adds its notes - so a version pushed without a Release is never missed
             version = url = notes = None
+            tags = [t.get("name") for t in self._get(f"https://api.github.com/repos/{self.repo}/tags?per_page=100") or []]
+            best = max((t for t in tags if vtuple(t)), key=vtuple, default=None)
+            if best:
+                version = best.lstrip("v")
+                url = f"https://github.com/{self.repo}/blob/v{version}/CHANGELOG.md"
             try:
                 rel = self._get(f"https://api.github.com/repos/{self.repo}/releases/latest")
-                if vtuple(rel.get("tag_name")):
+                if vtuple(rel.get("tag_name")) and (not version or vtuple(rel["tag_name"]) >= vtuple(version)):
                     version, url, notes = rel["tag_name"].lstrip("v"), rel.get("html_url"), (rel.get("body") or "")[:4000]
             except urllib.error.HTTPError as e:
-                if e.code != 404:   # 404 = no formal release yet; fall back to tags
+                if e.code != 404:   # 404 = no Release published: the tag is enough
                     raise
-            if not version:
-                tags = [t.get("name") for t in self._get(f"https://api.github.com/repos/{self.repo}/tags?per_page=100") or []]
-                best = max((t for t in tags if vtuple(t)), key=vtuple, default=None)
-                if best:
-                    version = best.lstrip("v")
-                    url = f"https://github.com/{self.repo}/blob/v{version}/CHANGELOG.md"
             self.latest.update(version=version, url=url, notes=notes or "", checked_at=time.time(), error=None)
         except Exception as e:  # noqa: BLE001 - offline, rate-limited...: try again later
             self.latest.update(checked_at=time.time(), error=f"Couldn't check for updates: {e}"[:200])

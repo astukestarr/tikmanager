@@ -10,3 +10,4 @@ deploy/Caddyfile  text eol=lf
 *.svg             text
 *.png             binary
 deploy/*.conf      text eol=lf
+*.jpg             binary

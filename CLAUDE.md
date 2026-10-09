@@ -82,7 +82,9 @@ new version** - don't push code changes without one. To release:
 1. Bump `__version__` in `version.py` and add a section at the top of `CHANGELOG.md` (newest first, plain English for
    the administrators who'll read it before clicking Upgrade; for a major version, the steps they must take).
 2. Commit, then tag and push: `git tag -a v1.2.0 -m "TikManager 1.2.0" && git push && git push --tags` (optionally also
-   create a GitHub Release from the tag - its notes are linked from the "What's new" button).
+   create a GitHub Release from the tag - its notes are linked from the "What's new" button; `python tools/release_notes.py
+   1.2.0` prints that version's changelog section to paste). The newest version is always the highest tag, so a version
+   without a Release is still offered.
 3. Check GitHub has it: `git ls-remote --tags origin`, `git show origin/main:version.py`.
 4. Installations see the update within an hour (or at once with "Check for updates") and upgrade with one click
    (`updates.py` -> `deploy/self-update.sh`, which runs the new version's `deploy/update.sh`).
