@@ -5,7 +5,8 @@
 # It ends by printing a one-time setup link: open it to create the first administrator, then configure everything else
 # (Microsoft sign-in, staff domains, branding...) on the Admin pages. --admins / --domains are optional defaults.
 # Safe to run again. It:
-#   - installs WireGuard, Caddy (official repo), Python, ufw, fail2ban, unattended-upgrades
+#   - installs WireGuard, Caddy (official repo), Python, ufw, fail2ban, unattended-upgrades (security updates daily,
+#     Caddy included; restarts at 03:00 only when an update needs it)
 #   - creates the 'tikmanager' system user (no shell, no sudo) and its folders
 #   - creates the controller's WireGuard key and wg0 (10.77.0.1/16, UDP 51820)
 #   - writes /etc/tikmanager/tikmanager.env, the master key, the Caddy site and the systemd service
@@ -37,14 +38,45 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "== Packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -q
+CADDY_LIST=/etc/apt/sources.list.d/caddy-stable.list
+apt_update() {
+  # Caddy's own package repository (Cloudsmith) sometimes refuses downloads for days ("402": its free quota ran out).
+  # Don't let that stop the install: if it's the only source failing, set it aside and carry on.
+  local out
+  if out=$(apt-get update -q 2>&1); then return 0; fi
+  echo "$out" | tail -n 4
+  if [[ -f $CADDY_LIST ]] && ! grep -E '^(Err|E:|Error)' <<<"$out" | grep -vq 'dl.cloudsmith.io'; then
+    echo "Caddy's package repository isn't answering right now - setting it aside ($CADDY_LIST.disabled) and carrying on."
+    mv -f "$CADDY_LIST" "$CADDY_LIST.disabled"
+    apt-get update -q
+  else
+    return 1
+  fi
+}
+install_caddy_github() {
+  # Caddy's official .deb from its GitHub release, checked against the release's own SHA-512 checksums
+  local arch tag ver deb tmp
+  arch=$(dpkg --print-architecture)
+  tag=$(curl -fsSL https://api.github.com/repos/caddyserver/caddy/releases/latest | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])')
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Couldn't find Caddy's latest release on GitHub."; return 1; }
+  ver=${tag#v}; deb="caddy_${ver}_linux_${arch}.deb"; tmp=$(mktemp -d)
+  curl -fsSL -o "$tmp/$deb" "https://github.com/caddyserver/caddy/releases/download/$tag/$deb" &&
+    curl -fsSL -o "$tmp/sums.txt" "https://github.com/caddyserver/caddy/releases/download/$tag/caddy_${ver}_checksums.txt" &&
+    (cd "$tmp" && grep " $deb\$" sums.txt | sha512sum -c --quiet -) || { echo "Caddy's download failed or didn't match its checksum."; rm -rf "$tmp"; return 1; }
+  apt-get install -yq "$tmp/$deb"
+  rm -rf "$tmp"
+  echo "Installed Caddy $ver from GitHub. It won't update automatically until its package repository is back - Admin > Version & updates says how."
+}
+apt_update
 apt-get install -yq wireguard-tools python3 python3-cryptography rsync ufw fail2ban unattended-upgrades debian-keyring debian-archive-keyring apt-transport-https curl gnupg
 if ! command -v caddy >/dev/null; then
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -q && apt-get install -yq caddy
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > "$CADDY_LIST"
+  { apt_update && apt-get install -yq caddy; } || install_caddy_github
 fi
 dpkg-reconfigure -f noninteractive unattended-upgrades
+# automatic updates also restart the server at 03:00 when an update needs it, and keep Caddy (own repository) updated
+install -m 0644 "$SRC/deploy/apt-unattended.conf" /etc/apt/apt.conf.d/52tikmanager-unattended
 
 echo "== User and folders"
 id tikmanager >/dev/null 2>&1 || useradd --system --home /var/lib/tikmanager --shell /usr/sbin/nologin tikmanager

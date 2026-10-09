@@ -404,9 +404,11 @@ TikManager server (SSH, as a user with sudo), then click **Run check** again.
 | fail2ban isn't running | `sudo systemctl enable --now fail2ban` |
 | Automatic security updates are off | `sudo apt install -y unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades` (answer Yes) |
 | Security updates waiting | `sudo apt update && sudo apt upgrade` |
-| Reboot needed | `sudo reboot` out of hours (routers keep working; TikManager is offline for about a minute) |
+| Reboot needed | `sudo reboot` out of hours (routers keep working; TikManager is offline for about a minute) - or turn on automatic restarts (next row) |
+| Nobody restarts the server / Caddy only updates by hand | `sudo install -m 0644 /opt/tikmanager/deploy/apt-unattended.conf /etc/apt/apt.conf.d/52tikmanager-unattended` (done by the installer and every upgrade from 1.9.2): restarts at 03:00 only when an update needs it, and includes Caddy's repository |
+| Caddy's repository set aside | It wasn't answering (Cloudsmith "402" when its quota runs out). When `curl -sI https://dl.cloudsmith.io/public/caddy/stable/deb/debian/dists/any-version/InRelease` shows 200 again: `sudo mv /etc/apt/sources.list.d/caddy-stable.list.disabled /etc/apt/sources.list.d/caddy-stable.list && sudo apt update && sudo apt upgrade` |
 | IP forwarding is on | `sudo sysctl -w net.ipv4.ip_forward=0` and `echo 'net.ipv4.ip_forward=0' \| sudo tee /etc/sysctl.d/90-tikmanager.conf` |
-| Server can reach your LAN | On your **network firewall**: put the server in a DMZ / its own VLAN and block it from the LAN (allow internet and its DNS server). Extra layer on the server, if its gateway and DNS aren't on that LAN: `sudo ufw deny out to 192.168.1.0/24` |
+| Server can reach your LAN | Block only connections the server *starts* - your SSH / web access and the routers' tunnels (WireGuard, 10.77.x.x) keep working. Best on your **network firewall**, with the server in its own subnet / VLAN; on a MikroTik in front of it: `/ip firewall filter add chain=forward src-address=<server> dst-address=<LAN> connection-state=new action=drop` above your forward accepts (plus a DNS accept if your DNS server is on the LAN). Extra layer on the server, in this order: `sudo ufw allow out proto udp from any port 51820 to <LAN>`, `sudo ufw allow out to <DNS server> port 53` (if it's on the LAN), `sudo ufw deny out to <LAN>` |
 | Also listening | `sudo ss -tulpn` to see the program; `sudo systemctl disable --now <service>` if you don't need it |
 | TM_HOST isn't 127.0.0.1 | Set `TM_HOST=127.0.0.1` in `/etc/tikmanager/tikmanager.env`, then `sudo systemctl restart tikmanager` |
 | Caddy isn't running | `sudo systemctl restart caddy`; `sudo journalctl -u caddy -n 50 --no-pager` |

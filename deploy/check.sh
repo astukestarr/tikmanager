@@ -51,7 +51,18 @@ else
 fi
 pending=$(apt-get -s upgrade 2>/dev/null | grep -c '^Inst .*security' || true)
 CHECK=pending_updates; [[ "$pending" -eq 0 ]] && pass "no security updates waiting" || warn "$pending security update(s) waiting (apt upgrade)"
-CHECK=reboot; [[ -f /var/run/reboot-required ]] && warn "a reboot is needed to finish updates (kernel / libraries)" || pass "no reboot pending"
+aptcfg=$(apt-config dump 2>/dev/null)
+CHECK=auto_reboot; autoreboot=$(grep -q '^Unattended-Upgrade::Automatic-Reboot "true"' <<<"$aptcfg" && echo yes)
+rtime=$(sed -n 's/^Unattended-Upgrade::Automatic-Reboot-Time "\(.*\)";/\1/p' <<<"$aptcfg" | tail -1)
+[[ -n "$autoreboot" ]] && pass "the server restarts itself at ${rtime:-02:00} when an update needs it" \
+  || warn "nobody restarts the server after kernel / library updates - turn on automatic restarts at a quiet time"
+CHECK=caddy_updates; grep -q 'site=dl.cloudsmith.io' <<<"$aptcfg" && pass "Caddy updates install automatically (it comes from its own repository)" \
+  || warn "Caddy only updates when someone runs apt upgrade - add its repository to the automatic updates"
+CHECK=caddy_repo; if [[ -f /etc/apt/sources.list.d/caddy-stable.list.disabled && ! -f /etc/apt/sources.list.d/caddy-stable.list ]]; then
+  warn "Caddy's package repository was set aside because it wasn't answering - Caddy won't update until it's turned back on"; fi
+CHECK=reboot; if [[ ! -f /var/run/reboot-required ]]; then pass "no reboot pending"
+elif [[ -n "$autoreboot" ]]; then pass "a reboot is pending to finish updates - the server restarts itself at ${rtime:-02:00}"
+else warn "a reboot is needed to finish updates (kernel / libraries)"; fi
 CHECK=os; if [[ -r /etc/os-release ]]; then . /etc/os-release; pass "running $PRETTY_NAME"; fi
 
 section "Network"

@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.9.2 - 2026-10-09
+
+- **Automatic restarts and Caddy updates**: the installer and every upgrade now set Ubuntu's automatic security updates
+  to restart the server at 03:00 - only when an update needs it (kernel / core libraries) - and to keep Caddy updated
+  too (it comes from its own repository, which the automatic updates skipped). Routers keep working during the
+  restart; TikManager is offline for about a minute. The server security check reports both.
+- **Installs no longer fail when Caddy's repository is down.** Caddy's packages are hosted on Cloudsmith, which refuses
+  downloads ("402 Payment Required") when the project's free quota runs out - as it has since 2026-10-09. The installer
+  now sets that repository aside when it's the only one failing and installs Caddy's official package from GitHub
+  instead (checked against the release's SHA-512 checksums). The security check says when the repository has been set
+  aside and how to turn it back on.
+- **Server can reach your LAN - corrected steps**: block only connections the server starts, with the WireGuard
+  exception first so tunnels to routers on that LAN keep working, and an example rule for a MikroTik in front of the
+  server.
+
 ## 1.9.1 - 2026-10-09
 
 - **How to fix** on every server security WARN / FAIL (Admin > Version & updates): why it matters, the steps, and the
