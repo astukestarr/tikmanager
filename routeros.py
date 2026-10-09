@@ -276,6 +276,10 @@ class RouterOS:
     def fw_rules(self, section):
         return self.get(self.FW_MENUS[section]) or []
 
+    def fw_address_lists(self):
+        """Names of the address lists on the router (only the name of each entry is read - lists can be large)."""
+        return sorted({x.get("list") for x in self.get("/ip/firewall/address-list?.proplist=list") or [] if x.get("list")})
+
     def fw_add(self, section, props, before=None):
         body = dict(props)
         if before:
@@ -513,6 +517,7 @@ class SimRouter:
                 {"chain": "input", "action": "accept", "in-interface": "tikmanager", "src-address": "10.77.0.1", "comment": "TikManager"},
                 {"chain": "input", "action": "drop", "connection-state": "invalid", "comment": "defconf: drop invalid"},
                 {"chain": "input", "action": "accept", "protocol": "icmp", "comment": "defconf: accept ICMP"},
+                {"chain": "input", "action": "accept", "protocol": "tcp", "dst-port": "8291", "src-address-list": "trusted-admins", "comment": "Winbox from admins"},
                 {"chain": "input", "action": "drop", "in-interface-list": "!LAN", "comment": "defconf: drop all not coming from LAN"},
                 {"chain": "forward", "action": "fasttrack-connection", "connection-state": "established,related", "hw-offload": "true", "comment": "defconf: fasttrack"},
                 {"chain": "forward", "action": "accept", "connection-state": "established,related,untracked", "comment": "defconf: accept established,related, untracked"},
@@ -541,6 +546,9 @@ class SimRouter:
     def fw_rules(self, section):
         self._fw_expire()
         return [dict(x) for x in self._fw()["fw"][section]]
+
+    def fw_address_lists(self):
+        return ["blocklist", "office-ips", "trusted-admins"]
 
     def _fw_find(self, section, rid):
         rules = self._fw()["fw"][section]

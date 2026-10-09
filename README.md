@@ -227,7 +227,7 @@ session, which the REST API TikManager uses doesn't have, so TikManager does the
    If nobody keeps the changes in time, or a change cut TikManager off, the router puts the rules back by itself.
 
 TikManager's own rules (comment starting "TikManager": its management rule and the site-to-site VPN rules) and dynamic
-rules are locked. Only the common fields can be set (addresses, ports, protocol, interfaces and lists, connection
+rules are locked. Only the common fields can be set (addresses, ports, protocol, interfaces and lists - address lists are picked from the router's own -, connection
 state, NAT targets, jump / reject / address-list options, log, comment); other settings a rule already has are left
 alone. Each change, keep and undo is in the audit log and the router's events. Very large rule sets (where the
 restore script would be over 60 KB) are refused - change those in Winbox with Safe Mode.

@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.6.2 - 2026-10-09
+
+- **Firewall rules: address lists are pulldowns.** Source and destination address list now offer the router's own
+  address lists ("in" or "not in" each one) instead of a text box; "Add to address list" suggests the existing lists
+  and still accepts a new name. Changes to a rule's lists show in the audit log.
+
 ## 1.6.1 - 2026-10-09
 
 - **Updates show up sooner**: TikManager now checks GitHub for a new release every hour (was once a day), and open

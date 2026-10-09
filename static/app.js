@@ -1578,12 +1578,21 @@ function fwDialog(d, f, sec, rule, change, chain = "") {
   const chains = [...new Set([...(sec === "nat" ? ["srcnat", "dstnat"] : ["input", "forward", "output"]), ...f[sec].map((r) => r.chain)])];
   const input = (k, extra = "") => `<label class="field" data-fwf="${k}">${esc(FW_LABELS[k] || k)}
       <input name="${k}" value="${esc(cur[k] || "")}" spellcheck="false" ${extra}></label>`;
+  // address lists on the router as a pulldown: in the list, or (!) not in it; a value the router no longer has is kept
+  const lists = f.address_lists || [];
+  const listPick = (k) => {
+    const opts = [["", "any"], ...lists.map((l) => [l, l]), ...lists.map((l) => [`!${l}`, `not in ${l}`])];
+    if (cur[k] && !opts.some(([v]) => v === cur[k])) opts.push([cur[k], `${cur[k]} (not on the router)`]);
+    return `<label class="field" data-fwf="${k}">${esc(FW_LABELS[k])} <select name="${k}">${opts.map(([v, l]) =>
+      `<option value="${esc(v)}" ${v === (cur[k] || "") ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+  };
   const rules = f[sec];
   rView.hold = true;
   dialog(`<h2>${rule ? "Edit" : "Add"} ${sec === "nat" ? "NAT" : "filter"} rule</h2>
     <form id="fwForm" class="fw-form">
       <div class="fw-grid">
         <label class="field">Chain <input name="chain" list="fwChains" value="${esc(cur.chain || "")}" required spellcheck="false"></label>
+        <datalist id="fwLists">${lists.map((l) => `<option value="${esc(l)}">`).join("")}</datalist>
         <datalist id="fwChains">${chains.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
         <label class="field">Action <select name="action">${f.actions[sec].map((a) => `<option ${a === cur.action ? "selected" : ""}>${a}</option>`).join("")}</select></label>
         ${input("protocol", `list="fwProtos" placeholder="any"`)}<datalist id="fwProtos">${["tcp", "udp", "icmp", "gre", "ipsec-esp", "ospf"].map((x) => `<option value="${x}">`).join("")}</datalist>
@@ -1592,13 +1601,13 @@ function fwDialog(d, f, sec, rule, change, chain = "") {
         ${input("src-port", `placeholder="any"`)}${input("dst-port", `placeholder="any (e.g. 80,443)"`)}
         ${input("in-interface", `placeholder="any (e.g. ether1)"`)}${input("out-interface", `placeholder="any"`)}
         ${input("in-interface-list", `placeholder="any (e.g. WAN, !LAN)"`)}${input("out-interface-list", `placeholder="any"`)}
-        ${input("src-address-list")}${input("dst-address-list")}
+        ${listPick("src-address-list")}${listPick("dst-address-list")}
         ${input("connection-nat-state", `placeholder="e.g. !dstnat"`)}
         ${input("jump-target")}
         ${fields.includes("reject-with") ? `<label class="field" data-fwf="reject-with">Reject with <select name="reject-with"><option value="">default</option>
           ${["icmp-network-unreachable", "icmp-host-unreachable", "icmp-port-unreachable", "icmp-protocol-unreachable", "icmp-net-prohibited",
             "icmp-host-prohibited", "icmp-admin-prohibited", "tcp-reset"].map((x) => `<option ${x === cur["reject-with"] ? "selected" : ""}>${x}</option>`).join("")}</select></label>` : ""}
-        ${fields.includes("address-list") ? input("address-list") + input("address-list-timeout", `placeholder="none-dynamic, 1d, 00:30:00"`) : ""}
+        ${fields.includes("address-list") ? input("address-list", `list="fwLists" placeholder="pick or type a new list"`) + input("address-list-timeout", `placeholder="none-dynamic, 1d, 00:30:00"`) : ""}
         ${fields.includes("to-addresses") ? input("to-addresses", `placeholder="e.g. 192.168.1.20"`) + input("to-ports", `placeholder="e.g. 3389"`) : ""}
         ${input("comment", `maxlength="200"`)}${input("log-prefix", `maxlength="50"`)}
       </div>

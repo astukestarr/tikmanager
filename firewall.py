@@ -133,7 +133,7 @@ def quiet(fn, default=None):
 
 def describe(section, r) -> str:
     bits = [section, r.get("chain", "?"), r.get("action", "?")]
-    for k in ("protocol", "src-address", "dst-address", "dst-port", "in-interface", "in-interface-list", "to-addresses", "to-ports"):
+    for k in ("protocol", "src-address", "src-address-list", "dst-address", "dst-address-list", "dst-port", "in-interface", "in-interface-list", "to-addresses", "to-ports"):
         if r.get(k):
             bits.append(f"{k}={r[k]}")
     if r.get("comment"):
@@ -169,7 +169,7 @@ class Firewall:
             for x in rules[sec]:
                 x["protected"] = protected(x)
         p = self._pending(d, r)
-        return {**rules, "pending": p and {**p, "seconds": None if p["until"] is None else max(0, int(p["until"] - time.time()))},
+        return {**rules, "address_lists": quiet(r.fw_address_lists, []), "pending": p and {**p, "seconds": None if p["until"] is None else max(0, int(p["until"] - time.time()))},
                 "actions": ACTIONS, "fields": FIELDS, "test_minutes": TEST_MINUTES}
 
     def change(self, d, user, b) -> dict:
