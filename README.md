@@ -250,6 +250,18 @@ address** can also start a new list. Entries a rule added by itself (dynamic, wi
 edited. These changes are tested the same way: the undo script re-adds what was removed, removes what was added and
 sets edited entries back.
 
+## Community script library
+
+**Tasks > Scripts > Community library** lists RouterOS scripts shared in a public GitHub repository - by default
+[astukestarr/routeros-scripts](https://github.com/astukestarr/routeros-scripts) (Admin > Integrations > GitHub). Open
+one to read it in full - lines that deserve a second look (resets, users, file deletion, downloads, schedulers,
+services, firewall removals, updates, TikManager's own access) are highlighted - and import it into your own scripts.
+Nothing runs until you run it.
+
+**Share** next to one of your scripts sends it to the library as a pull request for its owner to review. TikManager
+first checks it for passwords, keys, public IP addresses, e-mail addresses and client names, and each finding must be
+removed or confirmed. Sharing needs a GitHub token (classic, only the `public_repo` scope) on Admin > Integrations.
+
 ## Subnets in use
 
 **Subnets** lists every LAN subnet on every approved router, grouped by client: subnet, name (the interface comment),

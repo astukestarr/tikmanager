@@ -33,6 +33,7 @@ from firewall import Firewall, FirewallError
 from secevents import SecurityEvents
 from observatory import Observatory
 from alerts import Alerts
+from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -87,6 +88,7 @@ vpns = Vpns(db, poller.client, backups)
 firewall = Firewall(db, poller.client, backups)
 observatory = Observatory(db, settings)   # Mozilla Observatory grade of the public URL
 secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubuntu server, routers
+library = ScriptLibrary(db, integ)   # community RouterOS script library on GitHub
 alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWise tickets / Teams when something's wrong
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
@@ -390,7 +392,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(rows)
         if path == "/api/integrations":
             self.require(tech=True, admin=True)
-            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"),
+            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"),
                               "itg_last_sync": json.loads(db.setting("itg_last_sync") or "null"), "itg_sync": integ.sync_state})
         if path == "/api/integrations/cw/companies":   # PSA companies next to the TikManager clients they are linked to
             self.require(tech=True, admin=True)
@@ -501,6 +503,19 @@ class Handler(BaseHTTPRequestHandler):
                            CASE u.status WHEN 'running' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END, COALESCE(u.finished_at, u.scheduled_at) DESC
                            LIMIT 300""", (now() - 30 * 86400,))
             return self.json({"routers": routers, "jobs": jobs, "channels": list(UPGRADE_CHANNELS)})
+        if path == "/api/library":   # the community script library (cached for an hour; ?refresh=1)
+            self.require(tech=True)
+            try:
+                lst = library.listing(refresh=q.get("refresh") == "1")
+            except LibraryError as e:
+                raise HttpError(502, str(e)) from None
+            return self.json({**lst, "can_share": integ.configured("github")})
+        if path == "/api/library/script":
+            self.require(tech=True)
+            try:
+                return self.json(library.get(q.get("path", "")[:300]))
+            except LibraryError as e:
+                raise HttpError(400, str(e)) from None
         if path == "/api/alerts":   # open and recent alerts; the settings (admins change them)
             s = self.require(tech=True)
             return self.json({**alerts.view(), "settings": alerts.settings(), "can_edit": s["role"] == "admin",
@@ -851,6 +866,63 @@ class Handler(BaseHTTPRequestHandler):
             r = backups.run(d["id"], "manual", s["email"])
             db.audit(s["email"], "backup now", d["name"], self.client_ip(), org_id=d["org_id"], detail=r.get("detail", ""))
             return self.json(r, 200 if r.get("ok") else 502)
+        if path == "/api/integrations/github":   # community script library + the token used to share
+            s = self.require(tech=True, admin=True)
+            try:
+                integ.save("github", self.body())
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            library._cache = None
+            db.audit(s["email"], "integration settings changed", "GitHub script library", self.client_ip())
+            return self.json({"ok": True, **integ.public("github")})
+        if path == "/api/integrations/github/test":
+            self.require(tech=True, admin=True)
+            try:
+                lst = library.listing(refresh=True)
+                who = ""
+                if integ.configured("github"):
+                    who = " Token belongs to " + (library._gh("GET", "/user", auth=True) or {}).get("login", "?") + "."
+                return self.json({"ok": True, "detail": f"{len(lst['items'])} scripts in {library.repo}.{who}"})
+            except LibraryError as e:
+                return self.json({"ok": False, "detail": str(e)})
+        if path == "/api/library/import":   # copy a community script into this TikManager's library (never runs it)
+            s = self.require(tech=True, write=True)
+            try:
+                sc = library.get(str(self.body().get("path") or ""))
+            except LibraryError as e:
+                raise HttpError(400, str(e)) from None
+            name = sc["name"][:100]
+            desc = (sc["description"] + (f" (community library, by {sc['author']})" if sc["author"] else " (community library)"))[:300]
+            sid = db.run("INSERT INTO scripts (name, description, body, created_by, created_at, updated_by, updated_at) VALUES (?,?,?,?,?,?,?)",
+                         (name, desc, sc["body"][:100000], s["email"], now(), s["email"], now()))
+            db.audit(s["email"], "community script imported", name, self.client_ip(), detail=sc["url"])
+            return self.json({"ok": True, "id": sid})
+        if path == "/api/library/scan":   # secrets in a script before it's shared
+            s = self.require(tech=True, write=True)
+            names = [o["name"] for o in db.q("SELECT name FROM orgs")]
+            return self.json({"findings": script_secrets(str(self.body().get("body") or ""), names)})
+        if path == "/api/library/share":   # open a pull request on the community library
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            sc = db.one("SELECT * FROM scripts WHERE id=?", (int(b.get("id") or 0),))
+            if not sc:
+                raise HttpError(404, "Script not found.")
+            name = re.sub(r"[\x00-\x1f]", " ", str(b.get("name") or sc["name"])).strip()[:80]
+            desc = re.sub(r"[\x00-\x1f]", " ", str(b.get("description") or sc["description"])).strip()[:300]
+            tags = [re.sub(r"[^a-z0-9 -]", "", t.lower()).strip()[:30] for t in str(b.get("tags") or "").split(",") if t.strip()][:8]
+            ros = re.sub(r"[^0-9a-z .+-]", "", str(b.get("routeros") or "").lower())[:30]
+            body = str(b.get("body") if b.get("body") is not None else sc["body"])[:100000]
+            if not name or not desc:
+                raise HttpError(400, "Give it a name and a description so others know what it does.")
+            findings = script_secrets(body, [o["name"] for o in db.q("SELECT name FROM orgs")])
+            if findings and not b.get("confirmed"):
+                return self.json({"ok": False, "findings": findings}, 409)
+            try:
+                url = library.share(name, desc, tags, ros, body)
+            except LibraryError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "script shared to the community library", name, self.client_ip(), detail=url or "")
+            return self.json({"ok": True, "url": url})
         if m := re.fullmatch(r"/api/integrations/(cw|itg)", path):
             s = self.require(tech=True, admin=True)
             try:

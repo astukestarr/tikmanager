@@ -88,6 +88,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
 | `version.py`, `updates.py` | the running version; hourly new-release check and the "Upgrade now" request |
 | `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, read-only server security check `check.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), `tikmanager-authlog.*` + `collect-auth.py` (this server's sign-in attempts, as root, every 5 min), `tikmanager-check.*` (runs `check.sh` as root daily / on request / after upgrades and writes results the app reads), Caddy and systemd files |
+| `scriptlib.py` | community script library on GitHub: listing / import (no account), share as a pull request (token), danger + secret scans |
 | `alerts.py` | alerts: checks every minute, opens / closes ConnectWise tickets and posts Teams cards (via `integrations.py`) |
 | `observatory.py` | weekly Mozilla HTTP Observatory grade of the public URL (only the host name is sent) |
 | `secevents.py` | the Security page: sign-in events from TikManager, the Ubuntu server (`deploy/collect-auth.py`, root, every 5 min) and router logs (UDP syslog on the tunnel address) |

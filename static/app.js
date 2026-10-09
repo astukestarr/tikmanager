@@ -702,6 +702,13 @@ async function adminIntegrations() {
         <button class="btn" type="button" id="cwLoad">Refresh from PSA</button></div>
         <div class="cw-types" id="cwTypes"></div><div id="cwBody"><p class="muted small">Loading companies...</p></div>` : ""}
     </div>
+    <div class="card"><div class="row"><h2>GitHub script library</h2>${r.github.configured ? `<span class="pill up-done">Sharing set up</span>` : `<span class="pill">Browse only</span>`}</div>
+      <p class="small muted">The community library of RouterOS scripts (Tasks > Scripts > Community library). Browsing needs no account. To <b>share</b> scripts
+        (as pull requests the library's owner reviews), save a GitHub token: a <b>classic</b> token with only the <span class="mono">public_repo</span> scope
+        (github.com > Settings > Developer settings > Personal access tokens > Tokens (classic)).</p>
+      <div class="grid2">${field("github", "library", "Library repository", { ph: "astukestarr/routeros-scripts" })}${field("github", "token", "GitHub token", { secret: true })}</div>
+      <div class="actions"><button class="btn primary" type="button" data-isave="github">Save</button><button class="btn" type="button" data-itest="github">Test</button>
+        <span class="status" id="iStatus_github"></span></div></div>
     <div class="card"><div class="row"><h2>IT Glue</h2>${pill(r.itg.configured)}</div>
       <p class="small muted">Document every router in IT Glue as a configuration (name, model, serial, WAN IP, RouterOS version and a link back here).
         Create the key under Account > Settings > API Keys - leave "Password access" off.</p>
@@ -1146,12 +1153,113 @@ function taskEditor(t, ref, scripts, preset = {}) {
   });
 }
 
+// --- community script library on GitHub (scriptlib.py): browse + import, share as a pull request -------------------
+async function libraryDialog() {
+  dialog(`<h2>Community script library</h2><p class="muted small">Loading…</p>`);
+  $("dlg").classList.add("wide");
+  let lib;
+  try { lib = await api("/api/library"); } catch (e) { $("dlgBody").innerHTML = `<h2>Community script library</h2><p class="status err">${esc(e.message)}</p><div class="actions"><button class="btn" type="button" data-close>Close</button></div>`; $("dlgBody").querySelector("[data-close]").onclick = () => $("dlg").close(); return; }
+  const draw = (q = "") => {
+    const ql = q.toLowerCase();
+    const rows = lib.items.filter((i) => !ql || `${i.name} ${i.description} ${i.tags.join(" ")} ${i.author}`.toLowerCase().includes(ql));
+    $("libList").innerHTML = rows.length ? rows.map((i) => `<button type="button" class="lib-item" data-path="${esc(i.path)}"><b>${esc(i.name)}</b>
+        <span class="small muted">${esc(i.description || "")}</span>
+        <span class="small">${i.tags.map((t) => `<span class="pill">${esc(t)}</span>`).join(" ")}${i.author ? ` <span class="muted">by ${esc(i.author)}</span>` : ""}${i.routeros ? ` <span class="muted">· RouterOS ${esc(i.routeros)}</span>` : ""}</span></button>`).join("")
+      : `<p class="muted">${lib.items.length ? "Nothing matches." : "The library is empty so far - be the first to share a script."}</p>`;
+    $("libList").querySelectorAll("[data-path]").forEach((b) => b.addEventListener("click", () => libraryScript(b.dataset.path)));
+  };
+  $("dlgBody").innerHTML = `<h2>Community script library</h2>
+    <p class="small muted">Scripts shared by other TikManager users in <a href="${esc(lib.url)}" target="_blank" rel="noopener noreferrer">${esc(lib.repo)}</a>, reviewed by its owner before
+      they're added. Importing copies a script into your own list - nothing runs until you run it.</p>
+    <div class="row"><input id="libQ" type="search" placeholder="Search name, description, tag, author" aria-label="Search the library">
+      <span class="spacer"></span><button class="btn" type="button" id="libRefresh">Refresh</button><button class="btn" type="button" data-close>Close</button></div>
+    <div id="libList" class="lib-list"></div>`;
+  $("dlgBody").querySelector("[data-close]").onclick = () => $("dlg").close();
+  $("libQ").addEventListener("input", () => draw($("libQ").value.trim()));
+  $("libRefresh").addEventListener("click", async () => { lib = await api("/api/library?refresh=1"); draw($("libQ").value.trim()); });
+  draw();
+}
+
+async function libraryScript(path) {
+  let s;
+  try { s = await api(`/api/library/script?path=${encodeURIComponent(path)}`); } catch (e) { alert(e.message); return; }
+  dialog(`<h2>${esc(s.name)}</h2>
+    <p class="small muted">${esc(s.description || "")}${s.author ? ` · by ${esc(s.author)}` : ""}${s.routeros ? ` · RouterOS ${esc(s.routeros)}` : ""} ·
+      <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">view on GitHub</a></p>
+    ${s.warnings.length ? `<div class="lib-warn"><b>Read these lines before you run it:</b><ul class="small">${s.warnings.map((w) => `<li>line ${w.line}: ${esc(w.text)} - <span class="mono">${esc(w.code)}</span></li>`).join("")}</ul></div>`
+      : `<p class="small status ok">No commands that usually need a second look - still read it before running it on a router.</p>`}
+    <pre class="code script-box lib-body">${esc(s.body)}</pre>
+    <div class="actions">${canWrite() ? `<button class="btn primary" type="button" id="libImport">Import into my scripts</button>` : ""}
+      <button class="btn" type="button" id="libBack">Back</button><span class="status" id="libStatus"></span></div>`);
+  $("dlg").classList.add("wide");
+  $("libBack").addEventListener("click", libraryDialog);
+  $("libImport")?.addEventListener("click", async () => {
+    try { await post("/api/library/import", { path }); $("dlg").close(); taskTab = "scripts"; tasksView(); }
+    catch (e) { $("libStatus").textContent = e.message; $("libStatus").className = "status err"; }
+  });
+}
+
+async function shareDialog(s, canShare) {
+  if (!canShare) {
+    dialog(`<h2>Share to the community library</h2><p>An administrator needs to save a GitHub token on <b>Admin > Integrations > GitHub</b> first
+      (a classic token with only the <span class="mono">public_repo</span> scope). Shared scripts arrive as a pull request the library's owner reviews.</p>
+      <div class="actions"><button class="btn" type="button" data-close>Close</button></div>`);
+    return;
+  }
+  dialog(`<h2>Share "${esc(s.name)}"</h2>
+    <p class="small muted">This opens a pull request on the community library; its owner reviews it before anyone else gets it. Make sure the script has
+      nothing specific to a client: no passwords, keys, public IP addresses or names - use {{placeholders}} or :local variables instead.</p>
+    <div class="grid2"><label class="field">Name <input id="shName" maxlength="80" value="${esc(s.name)}"></label>
+      <label class="field">Works on RouterOS <input id="shRos" maxlength="30" placeholder="e.g. 7.12+"></label></div>
+    <label class="field">What it does (for others) <input id="shDesc" maxlength="300" value="${esc(s.description.replace(/ \(community library[^)]*\)$/, ""))}"></label>
+    <label class="field">Tags (comma-separated) <input id="shTags" maxlength="200" placeholder="security, firewall, ssh"></label>
+    <label class="field">Script (edit out anything private) <textarea id="shBody" class="code script-box" spellcheck="false">${esc(s.body)}</textarea></label>
+    <div id="shFind"></div>
+    <div class="actions"><button class="btn primary" type="button" id="shGo">Check and share</button><button class="btn" type="button" data-close>Cancel</button>
+      <span class="status" id="shStatus"></span></div>`);
+  $("dlg").classList.add("wide");
+  let confirmed = false;
+  const scan = async () => {
+    const r = await post("/api/library/scan", { body: $("shBody").value });
+    $("shFind").innerHTML = r.findings.length ? `<div class="lib-warn"><b>This looks private - remove it, or tick the box if it's fine to share:</b>
+      <ul class="small">${r.findings.map((f) => `<li>line ${f.line}: ${esc(f.text)} - <span class="mono">${esc(f.code)}</span></li>`).join("")}</ul>
+      <label class="chk"><input type="checkbox" id="shOk"> I checked these - they're placeholders or fine to share</label></div>` : `<p class="small status ok">No passwords, keys, public IP addresses or client names found.</p>`;
+    $("shOk")?.addEventListener("change", () => { confirmed = $("shOk").checked; });
+    return r.findings.length;
+  };
+  $("shBody").addEventListener("change", () => { confirmed = false; scan(); });
+  scan();
+  $("shGo").addEventListener("click", async () => {
+    $("shGo").disabled = true;
+    $("shStatus").textContent = "Checking…";
+    const n = await scan();
+    if (n && !confirmed) { $("shGo").disabled = false; $("shStatus").textContent = "Fix or confirm the lines above first."; $("shStatus").className = "status err"; return; }
+    $("shStatus").textContent = "Opening the pull request on GitHub…";
+    try {
+      const r = await post("/api/library/share", { id: s.id, name: $("shName").value, description: $("shDesc").value, tags: $("shTags").value,
+        routeros: $("shRos").value, body: $("shBody").value, confirmed });
+      $("dlgBody").innerHTML = `<h2>Shared - thank you</h2><p>Pull request opened: <a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.url)}</a></p>
+        <p class="small muted">It appears in the library once the owner merges it.</p><div class="actions"><button class="btn" type="button" data-close>Close</button></div>`;
+      $("dlgBody").querySelector("[data-close]").onclick = () => $("dlg").close();
+    } catch (e) { $("shGo").disabled = false; $("shStatus").textContent = e.message; $("shStatus").className = "status err"; }
+  });
+}
+
 function scriptsTab(scripts, ref) {
-  $("tkBody").innerHTML = `<div class="card">${scripts.scripts.length ? `<div class="table-wrap"><table><thead><tr><th>Script</th><th>Description</th><th>Used by</th><th>Updated</th><th></th></tr></thead><tbody>
+  $("tkBody").innerHTML = `<div class="row lib-bar"><span class="small muted">Your scripts. Browse ready-made ones shared by other TikManager users:</span>
+      <button class="btn" type="button" id="libOpen">Community library</button></div>
+    <div class="card">${scripts.scripts.length ? `<div class="table-wrap"><table><thead><tr><th>Script</th><th>Description</th><th>Used by</th><th>Updated</th><th></th></tr></thead><tbody>
     ${scripts.scripts.map((s) => `<tr><td><b>${esc(s.name)}</b></td><td class="small muted">${esc(s.description)}</td><td class="small">${s.tasks} task${s.tasks === 1 ? "" : "s"}</td>
       <td class="small">${ago(s.updated_at)} · ${esc(s.updated_by || "")}</td><td class="nowrap">${canWrite() ? `<button class="btn" type="button" data-sedit="${s.id}">Edit</button>
-      <button class="btn" type="button" data-srun="${s.id}">Run / schedule...</button> <button class="btn danger" type="button" data-sdel="${s.id}">Delete</button>` : `<button class="btn" type="button" data-sedit="${s.id}">View</button>`}</td></tr>`).join("")}
+      <button class="btn" type="button" data-srun="${s.id}">Run / schedule...</button> <button class="btn" type="button" data-sshare="${s.id}">Share</button>
+      <button class="btn danger" type="button" data-sdel="${s.id}">Delete</button>` : `<button class="btn" type="button" data-sedit="${s.id}">View</button>`}</td></tr>`).join("")}
     </tbody></table></div>` : `<p class="muted">No scripts yet. Add RouterOS commands you want to push to routers, e.g. a firewall rule or an NTP setting.</p>`}</div>`;
+  $("libOpen").addEventListener("click", libraryDialog);
+  document.querySelectorAll("[data-sshare]").forEach((b) => b.addEventListener("click", async () => {
+    let canShare = false;
+    try { canShare = (await api("/api/library")).can_share; } catch { canShare = false; }
+    shareDialog(scripts.scripts.find((s) => s.id === +b.dataset.sshare), canShare);
+  }));
   document.querySelectorAll("[data-sedit]").forEach((b) => b.addEventListener("click", () => scriptEditor(scripts.scripts.find((s) => s.id === +b.dataset.sedit), scripts)));
   document.querySelectorAll("[data-srun]").forEach((b) => b.addEventListener("click", () => { const s = scripts.scripts.find((x) => x.id === +b.dataset.srun); taskEditor(null, ref, scripts, { action: "script", script_id: s.id, name: s.name }); }));
   document.querySelectorAll("[data-sdel]").forEach((b) => b.addEventListener("click", async () => {

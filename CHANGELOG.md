@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.13.0 - 2026-10-09
+
+- **Community script library** (Tasks > Scripts > **Community library**): browse and search RouterOS scripts shared by
+  other TikManager users in a public GitHub repository (default
+  [astukestarr/routeros-scripts](https://github.com/astukestarr/routeros-scripts); Admin > Integrations > GitHub
+  changes it). Each script is shown in full before you import it, with the lines that deserve a second look
+  highlighted (factory reset, users, deleting files, downloads, schedulers, services, firewall removals, updates,
+  anything touching TikManager's own access). Importing copies it into your scripts - nothing runs until you run it.
+- **Share** (next to each of your scripts): opens a **pull request** on the library, so its owner reviews it before
+  anyone else gets it. Before anything is sent, TikManager scans the script for passwords, keys, pre-shared keys, public
+  IP addresses, e-mail addresses and your clients' names; each finding must be removed or confirmed. Sharing needs a
+  GitHub token (a classic token with only the `public_repo` scope) saved on Admin > Integrations > GitHub; browsing
+  needs no account.
+
 ## 1.12.0 - 2026-10-09
 
 - **Alerts** (new page): TikManager now tells you when something's wrong - as a **ConnectWise ticket** and / or a

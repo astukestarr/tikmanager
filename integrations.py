@@ -22,9 +22,11 @@ FIELDS = {   # name -> secret?
     "cw": {"site": False, "company": False, "public_key": False, "private_key": True, "client_id": False, "codebase": False,
            "show_types": False, "active_only": False},   # which company types / statuses the import list shows
     "itg": {"region": False, "api_key": True, "config_type_id": False, "config_status_id": False, "sync": False},
-    "teams": {"webhook": True},   # a Teams Workflows "post to a channel when a webhook request is received" URL (alerts.py)
+    "teams": {"webhook": True},
+    "github": {"library": False, "token": True},   # community script library (scriptlib.py); the token is only for sharing   # a Teams Workflows "post to a channel when a webhook request is received" URL (alerts.py)
 }
-DEFAULTS = {"cw": {"site": "api-na.myconnectwise.net", "codebase": "v4_6_release", "active_only": "1"}, "itg": {"region": "us", "sync": "1"}}
+DEFAULTS = {"cw": {"site": "api-na.myconnectwise.net", "codebase": "v4_6_release", "active_only": "1"}, "itg": {"region": "us", "sync": "1"},
+            "github": {"library": "astukestarr/routeros-scripts"}}
 
 
 class IntegrationError(Exception):
@@ -67,7 +69,7 @@ class Integrations:
 
     def configured(self, kind):
         c = self.config(kind)
-        need = {"cw": ("site", "company", "public_key", "private_key", "client_id"), "teams": ("webhook",)}.get(kind, ("api_key",))
+        need = {"cw": ("site", "company", "public_key", "private_key", "client_id"), "teams": ("webhook",), "github": ("token",)}.get(kind, ("api_key",))
         return all(c.get(k) for k in need)
 
     def save(self, kind, data):
@@ -90,6 +92,8 @@ class Integrations:
             u = urllib.parse.urlparse(c["webhook"])
             if u.scheme != "https" or not (u.hostname or "").endswith((".logic.azure.com", ".powerplatform.com", ".webhook.office.com")):
                 raise ValueError("Paste the HTTPS URL from the Teams workflow \"Post to a channel when a webhook request is received\".")
+        if kind == "github" and c.get("library") and not re.fullmatch(r"[\w.-]+/[\w.-]+", c["library"]):
+            raise ValueError("The library is a GitHub repository like owner/repository.")
         if kind == "itg" and c.get("region", "us") not in ITG_REGIONS:
             raise ValueError("Pick the IT Glue region.")
         blob, enc = self.vault.seal(json.dumps(c).encode(), f"integration:{kind}")

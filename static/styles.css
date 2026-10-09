@@ -485,3 +485,12 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .al-kinds { display: grid; gap: 6px; }
 .al-kind { align-items: center; }
 .al-th { width: 64px; padding: 2px 6px; }
+
+/* community script library */
+.lib-bar { margin-bottom: 10px; }
+.lib-list { display: grid; gap: 8px; margin-top: 10px; max-height: 60vh; overflow: auto; }
+.lib-item { all: unset; box-sizing: border-box; display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.lib-item:hover, .lib-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.lib-warn { border-left: 4px solid var(--warn); background: var(--bg); padding: 8px 12px; border-radius: 8px; margin: 8px 0; }
+.lib-warn ul { margin: 6px 0; padding-left: 18px; }
+.lib-body { max-height: 45vh; overflow: auto; white-space: pre-wrap; }
