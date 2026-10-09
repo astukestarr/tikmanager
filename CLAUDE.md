@@ -64,6 +64,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Change what the adoption script does | `adoption.py` (it runs on every re-run - keep it idempotent) |
 | Add an admin setting | `appsettings.py` FIELDS + `adminSystem()` |
 | Add an integration | `integrations.py` + Admin > Integrations in `app.js` |
+| Change the colours or add a theme | `static/styles.css` (the token block at the top: one `[data-theme=...]` rule per theme, dark mode below it), `static/theme.js` + `THEMES` in `server.py` + `THEME_INFO` in `app.js` (name and swatch) |
 | Change the default logo / favicon | `static/wordmark.svg` (logo: the name with the T as a tiki torch), `static/logo.svg` (torch icon, favicon); an uploaded logo on Admin > Branding replaces the wordmark |
 
 ## Releasing a new version

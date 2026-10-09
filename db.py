@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
   invite_hash TEXT, invite_expires REAL,
   failed INTEGER NOT NULL DEFAULT 0, locked_until REAL NOT NULL DEFAULT 0,
   disabled INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, last_login REAL,
-  entra_oid TEXT                            -- technicians: Microsoft's permanent user ID, bound at first Microsoft sign-in
+  entra_oid TEXT,                           -- technicians: Microsoft's permanent user ID, bound at first Microsoft sign-in
+  prefs TEXT                                -- personal settings (JSON): appearance - colour theme and light/dark mode
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -158,6 +159,8 @@ class DB:
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS orgs_cw ON orgs(cw_id)")
         if "users" in tables and "entra_oid" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
             c.execute("ALTER TABLE users ADD COLUMN entra_oid TEXT")
+        if "users" in tables and "prefs" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
+            c.execute("ALTER TABLE users ADD COLUMN prefs TEXT")
         if "metrics" in tables:
             mcols = {r[1] for r in c.execute("PRAGMA table_info(metrics)")}
             for col in ("latency", "loss"):

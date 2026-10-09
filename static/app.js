@@ -1233,12 +1233,36 @@ async function runScriptOn(d) {
   });
 }
 // --- version and updates ------------------------------------------------------------------------------------------
-function showUpdate(u) {   // the "Update available" badge in the top bar (administrators only)
-  const pill = $("updatePill");
-  if (!pill) return;
-  pill.classList.toggle("hidden", !(u && u.available));
-  if (u && u.available) { pill.textContent = `Update ${u.latest} available`; pill.title = `You have ${u.version}. Open Admin > Settings to upgrade.`; }
-  pill.onclick = (e) => { e.preventDefault(); go("admin", "system"); };
+// The "new version" banner under the top bar, on every page (administrators: only they can upgrade). Hidden for a day
+// with × (for that version only), replaced by a progress line while an upgrade runs.
+function showUpdate(u) {
+  const banner = $("updateBanner");
+  if (!banner || !u) return banner?.classList.add("hidden");
+  const st = u.status || {};
+  const busy = ["requested", "running"].includes(st.state);
+  let snooze = {};
+  try { snooze = JSON.parse(localStorage.getItem("updateSnooze") || "{}"); } catch {}
+  const snoozed = snooze.v === u.latest && snooze.until > Date.now();
+  banner.classList.toggle("hidden", !(busy || (u.available && !snoozed)));
+  banner.classList.toggle("busy", busy);
+  $("ubText").innerHTML = busy
+    ? `<b>Upgrading TikManager to ${esc(st.version || u.latest || "")}…</b> ${esc(st.detail || "")} - it restarts by itself in about a minute.`
+    : `<b>TikManager ${esc(u.latest || "")} is available.</b> You're on ${esc(u.version || "")}.`;
+  $("ubNotes").classList.toggle("hidden", busy || !u.url);
+  if (u.url) $("ubNotes").href = u.url;
+  $("ubGo").classList.toggle("hidden", busy);
+  $("ubClose").classList.toggle("hidden", busy);
+  $("ubGo").onclick = () => go("admin", "system");
+  $("ubClose").onclick = () => {
+    try { localStorage.setItem("updateSnooze", JSON.stringify({ v: u.latest, until: Date.now() + 86400000 })); } catch {}
+    banner.classList.add("hidden");
+  };
+}
+
+// administrators: look again every 30 minutes, so a release shows up even if the page stays open all day
+function watchUpdates() {
+  if (!me.update) return;
+  setInterval(() => api("/api/version").then(showUpdate).catch(() => {}), 30 * 60 * 1000);
 }
 
 async function versionCard() {
@@ -1289,6 +1313,51 @@ function dialog(html) {
   $("dlgBody").innerHTML = html;
   $("dlgBody").querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => $("dlg").close()));
   if (!$("dlg").open) $("dlg").showModal();
+}
+
+// --- appearance: each person's colour theme and light / dark mode (theme.js applies it; saved on the server) -----------
+const THEME_INFO = {   // name and swatch colours (sidebar, accent) shown in the chooser
+  company: ["Company colours", "#0c2d5a", ""], navy: ["Navy", "#0c2d5a", "#2f7cf6"], slate: ["Slate", "#1f2937", "#4f6bed"],
+  ocean: ["Ocean", "#0b4f5c", "#0e9f9a"], forest: ["Forest", "#173d2c", "#2e9d5b"], plum: ["Plum", "#3b1f5e", "#8b5cf6"],
+  tiki: ["Tiki", "#4a2a14", "#e8611a"],
+};
+
+function showAppearance() {
+  const cur = { theme: document.documentElement.dataset.theme, mode: document.documentElement.dataset.mode };
+  const company = (window.BRAND && window.BRAND.accent) || "#e2462f";
+  const draw = () => {
+    $("apBody").innerHTML = `
+      <div class="field-label small muted">Mode</div>
+      <div class="ap-modes" role="radiogroup" aria-label="Mode">${[["system", "System"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) =>
+        `<button type="button" role="radio" aria-checked="${cur.mode === v}" class="${cur.mode === v ? "on" : ""}" data-ap-mode="${v}">${l}</button>`).join("")}</div>
+      <p class="small muted">System follows your computer's or phone's light / dark setting.</p>
+      <div class="field-label small muted">Theme</div>
+      <div class="ap-themes" role="radiogroup" aria-label="Theme">${(window.TM_THEMES || Object.keys(THEME_INFO)).map((k) => {
+        const [name, side, accent] = THEME_INFO[k] || [k, "#333", "#888"];
+        const on = cur.theme === k;
+        return `<button type="button" role="radio" aria-checked="${on}" class="ap-theme ${on ? "on" : ""}" data-theme-pick="${k}" data-side="${side}" data-acc="${accent || company}">
+          <span class="ap-swatch"><span class="sb"><i></i><i></i><i></i></span><span class="pg"><i></i><i></i></span></span>
+          <span class="ap-name">${esc(name)}${on ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>` : ""}</span></button>`;
+      }).join("")}</div>
+      <p class="small muted">Company colours uses the accent set on Admin &gt; Branding. Your choice is saved to your account, so it follows you to other devices.</p>
+      <div class="actions"><span class="spacer"></span><span class="status" id="apStatus"></span><button class="btn" type="button" data-close>Done</button></div>`;
+    $("apBody").querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => $("dlg").close()));
+    // swatch colours come from data attributes (no inline styles: the security policy forbids them)
+    $("apBody").querySelectorAll(".ap-theme").forEach((b) => {
+      b.querySelector(".sb").style.background = b.dataset.side;
+      b.style.setProperty("--sw-accent", b.dataset.acc);
+    });
+    $("apBody").querySelectorAll("[data-ap-mode]").forEach((b) => b.addEventListener("click", () => { cur.mode = b.dataset.apMode; save(); }));
+    $("apBody").querySelectorAll("[data-theme-pick]").forEach((b) => b.addEventListener("click", () => { cur.theme = b.dataset.themePick; save(); }));
+  };
+  const save = () => {
+    window.setAppearance(cur);
+    draw();
+    post("/api/me/prefs", cur).then(() => { if ($("apStatus")) { $("apStatus").textContent = "Saved"; $("apStatus").className = "status ok"; } })
+      .catch((e) => { if ($("apStatus")) { $("apStatus").textContent = e.message; $("apStatus").className = "status err"; } });
+  };
+  dialog(`<h2>Appearance</h2><div id="apBody"></div>`);
+  draw();
 }
 
 // --- site map (like UniFi's Site Manager): every router with its WAN address and the LAN networks behind it -------------
@@ -1612,13 +1681,30 @@ async function go(v, arg) {
 async function init() {
   me = await api("/api/me");
   $("who").textContent = `${me.name || me.email}${me.org ? ` · ${me.org}` : ""}`;
+  // who's signed in, at the top of the sidebar
+  const who = me.name || me.email || "";
+  $("navAvatar").textContent = who.split(/[\s@.]+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  $("navName").textContent = who;
+  $("navRole").textContent = me.kind === "tech" ? { admin: "Administrator", tech: "Technician", readonly: "Read-only" }[me.role] || me.role
+    : `${me.org || "Client"} · ${me.role === "admin" ? "admin" : "viewer"}`;
+  $("navUser").hidden = false;
+  // appearance: the person's saved choice (theme.js already applied this browser's last one)
+  if (me.prefs) window.setAppearance(me.prefs);
+  $("appearanceBtn").addEventListener("click", showAppearance);
+  // phone: the menu slides in; choosing a page or tapping beside it closes it
+  $("menuBtn").addEventListener("click", (e) => { e.stopPropagation(); $("nav").classList.toggle("open"); });
+  document.querySelector(".content").addEventListener("click", () => $("nav").classList.remove("open"));
   $("devBadge").classList.toggle("hidden", !me.dev);
   $("navVersion").textContent = me.version ? `TikManager ${me.version}` : "";
+  // the installed version, next to the logo, for everyone
+  $("verChip").textContent = me.version ? `v${me.version}` : "";
+  $("verChip").classList.toggle("hidden", !me.version);
   showUpdate(me.update);
+  watchUpdates();
   document.querySelectorAll("[data-tech]").forEach((b) => b.classList.toggle("hidden", !isTech()));
   document.querySelectorAll("[data-admin]").forEach((b) => b.classList.toggle("hidden", !(isTech() || me.role === "admin")));
   document.querySelectorAll("[data-techadmin]").forEach((b) => b.classList.toggle("hidden", !(isTech() && me.role === "admin")));
-  document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
+  document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click", () => { $("nav").classList.remove("open"); go(b.dataset.view); }));
   $("logout").addEventListener("click", async () => {
     const r = await post("/api/logout");
     location.href = r.entra_logout || "/login";

@@ -46,6 +46,19 @@ MAX_BODY = 64 * 1024
 TECH_ROLES = ("admin", "tech", "readonly")
 CLIENT_ROLES = ("admin", "viewer")
 INVITE_TTL = 7 * 86400
+# appearance each person can pick (static/theme.js has the same lists)
+THEMES = ("company", "navy", "slate", "ocean", "forest", "plum", "tiki")
+MODES = ("system", "light", "dark")
+
+
+def user_prefs(user_id) -> dict:
+    row = db.one("SELECT prefs FROM users WHERE id=?", (user_id,))
+    try:
+        p = json.loads((row or {}).get("prefs") or "{}")
+    except ValueError:
+        p = {}
+    return {"theme": p.get("theme") if p.get("theme") in THEMES else "company",
+            "mode": p.get("mode") if p.get("mode") in MODES else "system"}
 
 db = DB(settings.data_dir / "tikmanager.db")
 KEY = master_key()
@@ -310,7 +323,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"email": s["email"], "name": s["name"], "kind": s["kind"], "role": s["role"], "org_id": s["org_id"],
                               "org": org["name"] if org else None, "csrf": s["csrf"], "dev": settings.dev, "version": __version__,
                               # admins see when a newer release is out (the banner with "Upgrade now")
-                              "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None})
+                              "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None,
+                              "prefs": user_prefs(s["user_id"])})
         if path == "/api/orgs":
             s = self.require()
             where, args = self.org_scope(s, column="o.id")
@@ -586,6 +600,15 @@ class Handler(BaseHTTPRequestHandler):
         # everything else: signed in + CSRF token
         s = self.session()
         self.check_csrf(s)
+        if path == "/api/me/prefs":   # the signed-in person's own appearance (theme + light/dark mode)
+            b = self.body()
+            prefs = user_prefs(s["user_id"])
+            if b.get("theme") in THEMES:
+                prefs["theme"] = b["theme"]
+            if b.get("mode") in MODES:
+                prefs["mode"] = b["mode"]
+            db.run("UPDATE users SET prefs=? WHERE id=?", (json.dumps(prefs), s["user_id"]))
+            return self.json({"ok": True, "prefs": prefs})
         if path == "/api/logout":
             sessions.end(read_cookie(self.headers.get("Cookie"), SESSION_COOKIE))
             db.audit(s["email"], "sign-out", ip=self.client_ip())

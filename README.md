@@ -98,12 +98,13 @@ fixes things, a **minor** version (1.**3**.0) adds features, and both are safe t
 version (**2**.0.0) needs something from you, and [CHANGELOG.md](CHANGELOG.md) says what. Your data, settings, keys and
 routers are kept by every upgrade.
 
-**Which version am I on?** At the bottom of the menu ("TikManager 1.2.0") and on **Admin > Settings > Version &
-updates**, which also shows the newest release, when TikManager last checked and where updates come from.
+**Which version am I on?** Next to the logo at the top of every page ("v1.4.0"), and on **Admin > Settings > Version
+& updates**, which also shows the newest release, when TikManager last checked and where updates come from.
 
 **How do I know there's a new one?** Once a day TikManager asks GitHub for the newest release. When there is one,
-administrators see an **Update X available** badge at the top of every page. **Check for updates** on the Version &
-updates card checks immediately.
+administrators see a **banner across the top of every page** - "TikManager X is available. You're on Y." - with What's
+new and **Upgrade now** (x hides it for a day; a newer release shows it again). It looks again every 30 minutes, and
+shows progress while an upgrade runs. **Check for updates** on the Version & updates card checks immediately.
 
 **Upgrading with one click** (administrators):
 1. Click the **Update available** badge (or go to Admin > Settings). **What's new** opens that version's notes.
@@ -298,6 +299,10 @@ Admin (administrators only):
 - **Settings** - version & updates, staff sign-in, Microsoft sign-in, router settings, backup time and retention.
 
 The **Audit log** (administrators) records every sign-in and every change, with who, when and from where.
+
+**Appearance** (everyone): the palette button in the top bar chooses **light, dark or system** mode and a colour
+theme - **Company colours** (the accent from Admin > Branding, the default), Navy, Slate, Ocean, Forest, Plum or Tiki.
+It's saved to each person's account, so it follows them to any device.
 
 ## Keeping it secure
 

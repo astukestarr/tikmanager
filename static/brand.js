@@ -1,15 +1,11 @@
 "use strict";
 // Applies Admin > Branding to any page: accent colour, logo (default: the TikManager wordmark) and product name, page title, sign-in message, support contact.
 (function () {
-  function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
   window.applyBrand = function (b) {
     if (!b) return;
     const root = document.documentElement.style;
-    if (/^#[0-9a-f]{6}$/i.test(b.accent || "")) {
-      const [r, g, bl] = hexToRgb(b.accent);
-      root.setProperty("--accent", b.accent);
-      root.setProperty("--accent-soft", `rgba(${r}, ${g}, ${bl}, 0.12)`);
-    }
+    // the company colour: used by the "Company colours" theme (theme.js / styles.css), which is the default
+    if (/^#[0-9a-f]{6}$/i.test(b.accent || "")) root.setProperty("--brand-accent", b.accent);
     document.querySelectorAll(".brand").forEach((el) => {
       el.textContent = "";
       const img = document.createElement("img");

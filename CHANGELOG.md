@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.4.0 - 2026-10-09
+
+- **New look**: a full-height coloured sidebar with the logo, who's signed in and an icon for every page; a clean top
+  bar; cards with soft shadows; KPI tiles with a coloured top edge; calmer tables. Works on phones (the menu slides in).
+- **Appearance, per person**: the palette button in the top bar picks light, dark or system mode and a colour theme -
+  Company colours (the accent from Admin > Branding, the default), Navy, Slate, Ocean, Forest, Plum or Tiki. Saved to
+  each person's account, so it follows them to every device.
+- **New version banner**: when a newer release is out, administrators see a banner across the top of every page with
+  the new and current version, What's new and Upgrade now (hide it for a day with x). It checks again every 30
+  minutes, and shows progress while an upgrade runs.
+- The installed version is shown next to the logo for everyone.
+
 ## 1.3.0 - 2026-10-09
 
 - **Subnets in use**: a new Subnets page lists every LAN subnet on every approved router, grouped by client, with its
