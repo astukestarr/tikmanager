@@ -81,7 +81,7 @@ new version** - don't push code changes without one. To release:
 2. Commit, then tag and push: `git tag -a v1.2.0 -m "TikManager 1.2.0" && git push && git push --tags` (optionally also
    create a GitHub Release from the tag - its notes are linked from the "What's new" button).
 3. Check GitHub has it: `git ls-remote --tags origin`, `git show origin/main:version.py`.
-4. Installations see the update within a day (or at once with "Check for updates") and upgrade with one click
+4. Installations see the update within an hour (or at once with "Check for updates") and upgrade with one click
    (`updates.py` -> `deploy/self-update.sh`, which runs the new version's `deploy/update.sh`).
 
 Never move or reuse a tag that's already on GitHub: servers only offer a version *newer* than their own, so changed

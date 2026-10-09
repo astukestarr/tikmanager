@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.6.1 - 2026-10-09
+
+- **Updates show up sooner**: TikManager now checks GitHub for a new release every hour (was once a day), and open
+  pages pick up the answer within 5 minutes (was 30).
+- **Check for updates** button next to the version number at the top of every page (administrators) - asks GitHub
+  right away and says "Up to date" or which version is available (and shows the banner again if it was hidden).
+
 ## 1.6.0 - 2026-10-09
 
 - **Firewall & NAT rules** on each router's page (technicians): filter and NAT rules with their traffic counters, by

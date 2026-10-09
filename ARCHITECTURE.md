@@ -42,7 +42,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 
 - `version.py` holds the version (semantic: patch = fixes, minor = features, major = admin action needed);
   `CHANGELOG.md` says what changed; each release is a `vX.Y.Z` tag on GitHub.
-- `updates.py` checks the update repository daily (latest GitHub Release, else the highest `vX.Y.Z` tag) and serves
+- `updates.py` checks the update repository hourly (latest GitHub Release, else the highest `vX.Y.Z` tag) and serves
   Admin > Settings > Version & updates and the "Update available" badge.
 - The web app runs without root, so it can't install anything itself. **Upgrade now** only writes the wanted version
   number to `/var/lib/tikmanager/update-request`. The root-owned systemd unit `tikmanager-update.path` notices the file
@@ -86,7 +86,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `vpn.py` / `vpninv.py` | site-to-site WireGuard VPNs it builds / VPNs already on routers (read-only) |
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
-| `version.py`, `updates.py` | the running version; daily new-release check and the "Upgrade now" request |
+| `version.py`, `updates.py` | the running version; hourly new-release check and the "Upgrade now" request |
 | `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, read-only server security check `check.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
 | `topology.py` | the network map behind a router: Internet, networks, switches / APs, device groups, routes (from `RouterOS.topology()`) |
 | `tools/build_map.py` | rebuilds the built-in map data (`static/map/*.json`) from public-domain sources - run by hand, never by the server |

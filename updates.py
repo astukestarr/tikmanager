@@ -1,6 +1,6 @@
 """New-version check and the "Upgrade now" button.
 
-- Once a day (and on demand) the newest release of the update repository (TM_UPDATE_REPO, default the project's GitHub
+- Every hour (and on demand) the newest release of the update repository (TM_UPDATE_REPO, default the project's GitHub
   repository) is looked up: its latest GitHub Release, else its highest vX.Y.Z tag.
 - Upgrading needs root, which the web app deliberately doesn't have. Clicking Upgrade writes the wanted version to
   <data>/update-request; the root-owned systemd unit tikmanager-update.path notices it and runs deploy/self-update.sh,
@@ -21,7 +21,7 @@ from pathlib import Path
 
 from version import __version__
 
-CHECK_EVERY = 24 * 3600
+CHECK_EVERY = 3600   # GitHub allows 60 unauthenticated requests an hour; this uses 1-2
 SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 USER_AGENT = f"TikManager/{__version__}"
 

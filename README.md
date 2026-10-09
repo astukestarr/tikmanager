@@ -101,10 +101,11 @@ routers are kept by every upgrade.
 **Which version am I on?** Next to the logo at the top of every page ("v1.4.0"), and on **Admin > Settings > Version
 & updates**, which also shows the newest release, when TikManager last checked and where updates come from.
 
-**How do I know there's a new one?** Once a day TikManager asks GitHub for the newest release. When there is one,
+**How do I know there's a new one?** Every hour TikManager asks GitHub for the newest release. When there is one,
 administrators see a **banner across the top of every page** - "TikManager X is available. You're on Y." - with What's
-new and **Upgrade now** (x hides it for a day; a newer release shows it again). It looks again every 30 minutes, and
-shows progress while an upgrade runs. **Check for updates** on the Version & updates card checks immediately.
+new and **Upgrade now** (x hides it for a day; a newer release shows it again). Open pages pick it up within 5 minutes,
+and show progress while an upgrade runs. **Check for updates** next to the version number at the top (or on the
+Version & updates card) checks immediately.
 
 **Upgrading with one click** (administrators):
 1. Click the **Update available** badge (or go to Admin > Settings). **What's new** opens that version's notes.
@@ -156,7 +157,7 @@ Anything recorded since the upgrade (new backups, metrics, events) is lost when 
 `astukestarr/tikmanager` repository). It can only be changed in that root-owned file, never on the web pages, so a
 stolen administrator account can't make the server install someone else's code. Running your own modified copy? Fork
 the repository, point `TM_UPDATE_REPO` at your fork (or install with `get.sh --repo`) and publish your own `vX.Y.Z`
-tags (see [CLAUDE.md](CLAUDE.md#releasing-a-new-version)). `TM_UPDATE_CHECK=0` turns off the daily check (the button
+tags (see [CLAUDE.md](CLAUDE.md#releasing-a-new-version)). `TM_UPDATE_CHECK=0` turns off the hourly check (the button
 still works).
 
 ## Routers

@@ -1265,10 +1265,25 @@ function showUpdate(u) {
   };
 }
 
-// administrators: look again every 30 minutes, so a release shows up even if the page stays open all day
+// administrators: the server checks GitHub every hour; the page re-reads its answer every 5 minutes (no GitHub call),
+// and "Check for updates" next to the version asks GitHub right away
 function watchUpdates() {
   if (!me.update) return;
-  setInterval(() => api("/api/version").then(showUpdate).catch(() => {}), 30 * 60 * 1000);
+  setInterval(() => api("/api/version").then(showUpdate).catch(() => {}), 5 * 60 * 1000);
+  const b = $("verCheck");
+  b.classList.remove("hidden");
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    b.textContent = "Checking…";
+    try {
+      const u = await post("/api/admin/update-check");
+      if (u.available) { try { localStorage.removeItem("updateSnooze"); } catch {} }   // asked on purpose: show it even if hidden earlier
+      showUpdate(u);
+      b.textContent = u.error ? "Couldn't check" : u.available ? `${u.latest} available` : "Up to date";
+      b.title = u.error || `Checked just now - newest release ${u.latest || "unknown"}`;
+    } catch (e) { b.textContent = "Couldn't check"; b.title = e.message; }
+    setTimeout(() => { b.disabled = false; b.textContent = "Check for updates"; }, 5000);
+  });
 }
 
 async function versionCard() {

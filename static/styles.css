@@ -305,6 +305,11 @@ dialog { border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, .3); }
 .update-banner { background: var(--accent); color: var(--on-accent); }
 .update-banner .ub-go { color: var(--accent); }
 .ver-chip { background: var(--bg); border-color: transparent; }
+.ver-check { all: unset; cursor: pointer; font-size: 11.5px; font-weight: 600; color: var(--accent); padding: 1px 6px; border-radius: 999px; white-space: nowrap; }
+.ver-check:hover, .ver-check:focus-visible { background: var(--accent-soft); }
+.ver-check:disabled { cursor: default; color: var(--muted); }
+.ver-check.hidden { display: none; }
+@media (max-width: 600px) { .ver-check { display: none; } }
 @media (prefers-color-scheme: dark) { [data-mode="system"] .card, [data-mode="system"] .tile, [data-mode="system"] .hcell { border-color: var(--border); } }
 [data-mode="dark"] .card, [data-mode="dark"] .tile, [data-mode="dark"] .hcell { border-color: var(--border); }
 
