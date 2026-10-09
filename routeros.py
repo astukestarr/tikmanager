@@ -145,8 +145,8 @@ class RouterOS:
 
     def mikrotik_neighbors(self):
         """MikroTik devices this router sees next to it (/ip neighbor print: MNDP / LLDP / CDP), for Discovered."""
-        return [{k: n.get(k) for k in self.NEIGHBOR_KEYS if n.get(k) not in (None, "")}
-                for n in self.get("/ip/neighbor") or [] if "mikrotik" in str(n.get("platform") or "").lower()]
+        return [{k: str(n.get(k))[:200] for k in self.NEIGHBOR_KEYS if n.get(k) not in (None, "")}
+                for n in self.get("/ip/neighbor") or [] if "mikrotik" in str(n.get("platform") or "").lower()][:500]
 
     def topology(self):
         """What the network map needs, read live (read-only): routing table, discovered neighbours (MNDP / LLDP / CDP:
@@ -329,12 +329,12 @@ class RouterOS:
         if script is not None:
             for s in self.get(f"/system/script?name={q}") or []:
                 self._req("DELETE", f"/system/script/{s['.id']}", timeout=20)
-            self._req("PUT", "/system/script", {"name": name, "source": script, "policy": "read,write,policy,test",
+            self._req("PUT", "/system/script", {"name": name, "source": script, "policy": "read,write",
                                                 "comment": "TikManager: puts the firewall back if a change isn't kept"}, timeout=30)
         for s in self.get(f"/system/scheduler?name={q}") or []:
             self._req("DELETE", f"/system/scheduler/{s['.id']}", timeout=20)
         self._req("PUT", "/system/scheduler", {"name": name, "interval": delay, "on-event": f"/system script run {name}",
-                                               "policy": "read,write,policy,test",
+                                               "policy": "read,write",
                                                "comment": "TikManager: undoes a firewall change unless it is kept"}, timeout=20)
 
     def undo_run(self, name):

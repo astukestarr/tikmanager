@@ -265,7 +265,8 @@ class Firewall:
                 items = rules[sec]
         except RouterError as e:
             raise FirewallError(f"Couldn't read the firewall: {e}") from None
-        ids = {x[".id"]: x for x in items}
+        # only items with a real RouterOS internal ID (*1A): it ends up in a REST path and in the undo script
+        ids = {x[".id"]: x for x in items if re.fullmatch(r"\*[0-9A-Fa-f]{1,8}", str(x.get(".id") or ""))}
 
         def item(key):
             rid = str(b.get(key) or "")

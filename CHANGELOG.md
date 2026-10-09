@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.8.1 - 2026-10-09
+
+Security checkup of everything added since 1.1.1 (firewall / NAT / address-list editing, Discovered, maps and address
+lookup, appearance, update checks). No serious problems found; these tighten things up:
+- **Firewall undo script runs with fewer rights**: the script and scheduler TikManager leaves on a router during a test
+  now only have read and write (they had policy and test as well, which they never needed).
+- **Router IDs are checked** before they're used in a REST request or the undo script, so a router reporting a
+  malformed item ID can't get anything extra into the script.
+- **Discovered**: a router's neighbour list is capped (500 devices, 200 characters per field), so a misbehaving router
+  can't fill TikManager's database.
+- The version header that lets open pages reload after an upgrade is no longer sent to people who aren't signed in.
+
 ## 1.8.0 - 2026-10-09
 
 - **Discovered** (new page, technicians): MikroTik devices your routers see next to them in IP > Neighbors (MNDP / LLDP /
