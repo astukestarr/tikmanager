@@ -406,9 +406,31 @@ dialog { border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, .3); }
 .fw-pending > div:first-child { flex: 1; min-width: 240px; }
 .fw-pending ul { margin: 6px 0 0; padding-left: 18px; }
 .fw-pending-acts { display: flex; gap: 8px; }
-.fw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
-.fw-grid .field input, .fw-grid .field select { width: 100%; }
-@media (max-width: 600px) { .fw-grid { grid-template-columns: 1fr; } }
+/* rule editor laid out like WebFig: label | + / (- ! value) */
+dialog.fw-dlg { width: min(680px, 96vw); }
+.fw-form .fw-sec { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; padding: 6px 10px;
+  background: var(--bg); border-radius: 8px; }
+.fw-row { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 4px 12px; min-height: 34px; }
+.fw-lbl { text-align: right; font-size: 13px; color: var(--muted); }
+.fw-row.on .fw-lbl { color: var(--text); font-weight: 600; }
+.fw-val { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fw-val > input:not([type=checkbox]), .fw-val > select { flex: 1; min-width: 0; }
+.fw-row[data-row] .fw-val { display: none; }
+.fw-row[data-row].on .fw-val { display: flex; }
+.fw-row[data-row].on .fw-add { display: none; }
+.fw-add, .fw-del { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  cursor: pointer; font-weight: 700; line-height: 1; justify-self: start; }
+.fw-add:hover, .fw-del:hover { border-color: var(--accent); color: var(--accent); }
+.fw-row.disabled .fw-lbl { opacity: .45; }
+.fw-add:disabled { opacity: .4; cursor: default; }
+.fw-not { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; font-weight: 700; color: var(--muted); position: relative; }
+.fw-not input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.fw-not:has(input:checked) { background: var(--bad); border-color: var(--bad); color: #fff; }
+.fw-not:has(input:focus-visible) { outline: 2px solid var(--accent); }
+.fw-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.fw-hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+@media (max-width: 600px) { .fw-row { grid-template-columns: 1fr; } .fw-lbl { text-align: left; } }
 
 /* map: routers stacked on one spot */
 .gm-list { position: absolute; width: 280px; max-height: calc(100% - 16px); overflow: auto; background: var(--panel); color: var(--text);

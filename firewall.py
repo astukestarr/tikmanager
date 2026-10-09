@@ -169,7 +169,8 @@ class Firewall:
             for x in rules[sec]:
                 x["protected"] = protected(x)
         p = self._pending(d, r)
-        return {**rules, "address_lists": quiet(r.fw_address_lists, []), "pending": p and {**p, "seconds": None if p["until"] is None else max(0, int(p["until"] - time.time()))},
+        opts = quiet(r.fw_options, {}) or {}
+        return {**rules, **{k: opts.get(k, []) for k in ("address_lists", "interfaces", "interface_lists")}, "pending": p and {**p, "seconds": None if p["until"] is None else max(0, int(p["until"] - time.time()))},
                 "actions": ACTIONS, "fields": FIELDS, "test_minutes": TEST_MINUTES}
 
     def change(self, d, user, b) -> dict:

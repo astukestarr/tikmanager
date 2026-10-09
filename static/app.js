@@ -1573,78 +1573,121 @@ async function loadFirewall(d, note) {
   }));
 }
 
+// the rule editor, laid out like WebFig: match fields are added with +, each with - (remove) and ! (not)
+const FW_PORT_PROTOS = ["tcp", "udp", "udp-lite", "sctp", "dccp"];
+const FW_PROTOS = ["tcp", "udp", "icmp", "icmpv6", "gre", "ipsec-esp", "ipsec-ah", "ospf", "igmp", "l2tp", "sctp", "udp-lite", "dccp", "vrrp", "pim", "ipip", "ipencap", "etherip"];
+const FW_STATES = ["invalid", "established", "related", "new", "untracked"];
+const FW_GENERAL = [   // [field, kind]; null = divider
+  ["src-address", "text", "e.g. 192.168.1.0/24 or 10.0.0.1-10.0.0.9"], ["dst-address", "text", "e.g. 203.0.113.10"],
+  ["src-address-list", "alist"], ["dst-address-list", "alist"], null,
+  ["protocol", "proto"], ["src-port", "port", "e.g. 1024-65535"], ["dst-port", "port", "e.g. 80,443"], null,
+  ["in-interface", "iface"], ["out-interface", "iface"], null,
+  ["in-interface-list", "ilist"], ["out-interface-list", "ilist"], null,
+  ["connection-state", "states"], ["connection-nat-state", "nat"]];
+
 function fwDialog(d, f, sec, rule, change, chain = "") {
-  const fields = f.fields[sec], cur = rule || { chain: chain || (sec === "nat" ? "dstnat" : "input"), action: sec === "nat" ? "dst-nat" : "accept" };
-  const chains = [...new Set([...(sec === "nat" ? ["srcnat", "dstnat"] : ["input", "forward", "output"]), ...f[sec].map((r) => r.chain)])];
-  const input = (k, extra = "") => `<label class="field" data-fwf="${k}">${esc(FW_LABELS[k] || k)}
-      <input name="${k}" value="${esc(cur[k] || "")}" spellcheck="false" ${extra}></label>`;
-  // address lists on the router as a pulldown: in the list, or (!) not in it; a value the router no longer has is kept
-  const lists = f.address_lists || [];
-  const listPick = (k) => {
-    const opts = [["", "any"], ...lists.map((l) => [l, l]), ...lists.map((l) => [`!${l}`, `not in ${l}`])];
-    if (cur[k] && !opts.some(([v]) => v === cur[k])) opts.push([cur[k], `${cur[k]} (not on the router)`]);
-    return `<label class="field" data-fwf="${k}">${esc(FW_LABELS[k])} <select name="${k}">${opts.map(([v, l]) =>
-      `<option value="${esc(v)}" ${v === (cur[k] || "") ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+  const fields = f.fields[sec], rules = f[sec];
+  const cur = rule || { chain: chain || (sec === "nat" ? "dstnat" : "input"), action: sec === "nat" ? "dst-nat" : "accept" };
+  const chains = [...new Set([...(sec === "nat" ? ["srcnat", "dstnat"] : ["input", "forward", "output"]), ...rules.map((r) => r.chain)])];
+  const opt = (v, label, sel) => `<option value="${esc(v)}" ${v === sel ? "selected" : ""}>${esc(label ?? v)}</option>`;
+  const choose = (name, values, sel, blank) => {   // a pulldown that keeps a value the router no longer offers
+    const list = [...values];
+    if (sel && !list.some((x) => (Array.isArray(x) ? x[0] : x) === sel)) list.push([sel, `${sel} (not on the router)`]);
+    return `<select name="${name}">${blank != null ? opt("", blank, sel || "") : ""}${list.map((x) => Array.isArray(x) ? opt(x[0], x[1], sel) : opt(x, x, sel)).join("")}</select>`;
   };
-  const rules = f[sec];
+  const control = (k, kind, ph, val) => {
+    if (kind === "alist") return choose(k, f.address_lists || [], val, "");
+    if (kind === "iface") return choose(k, [["all-ethernet", "all ethernet"], ["all-ppp", "all ppp"], ["all-vlan", "all vlan"], ["all-wireless", "all wireless"], ...(f.interfaces || [])], val, "");
+    if (kind === "ilist") return choose(k, [...(f.interface_lists || []), "all", "dynamic", "static", "none"], val, "");
+    if (kind === "proto") return `<input name="${k}" list="fwProtos" value="${esc(val)}" placeholder="name or number" spellcheck="false">`;
+    if (kind === "states" || kind === "nat") {
+      const set = val.split(",");
+      return `<span class="fw-checks">${(kind === "states" ? FW_STATES : ["srcnat", "dstnat"]).map((s) =>
+        `<label class="chk"><input type="checkbox" data-state="${k}" value="${s}" ${set.includes(s) ? "checked" : ""}> ${s}</label>`).join("")}</span>`;
+    }
+    return `<input name="${k}" value="${esc(val)}" placeholder="${esc(ph || "")}" spellcheck="false">`;
+  };
+  const row = ([k, kind, ph]) => {
+    if (!fields.includes(k)) return "";
+    const raw = cur[k] || "", not = raw.startsWith("!"), val = not ? raw.slice(1) : raw;
+    return `<div class="fw-row ${raw ? "on" : ""}" data-row="${k}" data-kind="${kind}">
+      <span class="fw-lbl">${esc(FW_LABELS[k] || k)}</span>
+      <button class="fw-add" type="button" title="Add ${esc(FW_LABELS[k] || k)}" aria-label="Add ${esc(FW_LABELS[k] || k)}">+</button>
+      <span class="fw-val"><button class="fw-del" type="button" title="Remove" aria-label="Remove ${esc(FW_LABELS[k] || k)}">−</button>
+        <label class="fw-not" title="Not: match everything except this"><input type="checkbox" data-not="${k}" ${not ? "checked" : ""}><span>!</span></label>
+        ${control(k, kind, ph, val)}</span></div>`;
+  };
+  const plain = (k, html) => fields.includes(k) ? `<div class="fw-row on" data-act="${k}"><span class="fw-lbl">${esc(FW_LABELS[k] || k)}</span><span class="fw-val">${html}</span></div>` : "";
   rView.hold = true;
-  dialog(`<h2>${rule ? "Edit" : "Add"} ${sec === "nat" ? "NAT" : "filter"} rule</h2>
+  dialog(`<h2>${rule ? "Edit" : "New"} ${sec === "nat" ? "NAT" : "firewall"} rule</h2>
     <form id="fwForm" class="fw-form">
-      <div class="fw-grid">
-        <label class="field">Chain <input name="chain" list="fwChains" value="${esc(cur.chain || "")}" required spellcheck="false"></label>
-        <datalist id="fwLists">${lists.map((l) => `<option value="${esc(l)}">`).join("")}</datalist>
-        <datalist id="fwChains">${chains.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
-        <label class="field">Action <select name="action">${f.actions[sec].map((a) => `<option ${a === cur.action ? "selected" : ""}>${a}</option>`).join("")}</select></label>
-        ${input("protocol", `list="fwProtos" placeholder="any"`)}<datalist id="fwProtos">${["tcp", "udp", "icmp", "gre", "ipsec-esp", "ospf"].map((x) => `<option value="${x}">`).join("")}</datalist>
-        ${input("connection-state", `placeholder="e.g. established,related"`)}
-        ${input("src-address", `placeholder="any (e.g. 192.168.1.0/24)"`)}${input("dst-address", `placeholder="any"`)}
-        ${input("src-port", `placeholder="any"`)}${input("dst-port", `placeholder="any (e.g. 80,443)"`)}
-        ${input("in-interface", `placeholder="any (e.g. ether1)"`)}${input("out-interface", `placeholder="any"`)}
-        ${input("in-interface-list", `placeholder="any (e.g. WAN, !LAN)"`)}${input("out-interface-list", `placeholder="any"`)}
-        ${listPick("src-address-list")}${listPick("dst-address-list")}
-        ${input("connection-nat-state", `placeholder="e.g. !dstnat"`)}
-        ${input("jump-target")}
-        ${fields.includes("reject-with") ? `<label class="field" data-fwf="reject-with">Reject with <select name="reject-with"><option value="">default</option>
-          ${["icmp-network-unreachable", "icmp-host-unreachable", "icmp-port-unreachable", "icmp-protocol-unreachable", "icmp-net-prohibited",
-            "icmp-host-prohibited", "icmp-admin-prohibited", "tcp-reset"].map((x) => `<option ${x === cur["reject-with"] ? "selected" : ""}>${x}</option>`).join("")}</select></label>` : ""}
-        ${fields.includes("address-list") ? input("address-list", `list="fwLists" placeholder="pick or type a new list"`) + input("address-list-timeout", `placeholder="none-dynamic, 1d, 00:30:00"`) : ""}
-        ${fields.includes("to-addresses") ? input("to-addresses", `placeholder="e.g. 192.168.1.20"`) + input("to-ports", `placeholder="e.g. 3389"`) : ""}
-        ${input("comment", `maxlength="200"`)}${input("log-prefix", `maxlength="50"`)}
-      </div>
-      <div class="row">
-        <label class="chk"><input type="checkbox" name="log" ${cur.log === "true" ? "checked" : ""}> Log matches</label>
-        <label class="chk"><input type="checkbox" name="disabled" ${cur.disabled === "true" ? "checked" : ""}> Disabled</label>
-      </div>
-      ${rule ? "" : `<label class="field">Position <select name="before"><option value="">At the end</option>
-        ${rules.map((r, i) => `<option value="${esc(r[".id"])}">Above #${i + 1}: ${esc(`${r.chain} ${r.action} ${r.comment || fwMatch(r)}`).slice(0, 90)}</option>`).join("")}</select></label>`}
-      <p class="small muted">Blank fields match anything. Prefix a value with ! for "not" (e.g. !192.168.1.0/24). The change is tested first: the
-        router puts the rules back in ${f.test_minutes} minutes unless you keep it.</p>
+      <div class="fw-row on"><span class="fw-lbl">Enabled</span><span class="fw-val"><input type="checkbox" name="enabled" ${cur.disabled === "true" ? "" : "checked"} aria-label="Enabled"></span></div>
+      <div class="fw-row on"><span class="fw-lbl">Comment</span><span class="fw-val"><input name="comment" value="${esc(cur.comment || "")}" maxlength="200"></span></div>
+      <h3 class="fw-sec">General</h3>
+      <div class="fw-row on"><span class="fw-lbl">Chain</span><span class="fw-val"><input name="chain" list="fwChains" value="${esc(cur.chain || "")}" required spellcheck="false"></span></div>
+      ${FW_GENERAL.map((x) => x ? row(x) : `<hr class="fw-hr">`).join("")}
+      <h3 class="fw-sec">Action</h3>
+      ${plain("action", choose("action", f.actions[sec], cur.action))}
+      ${plain("jump-target", `<input name="jump-target" list="fwChains" value="${esc(cur["jump-target"] || "")}" spellcheck="false">`)}
+      ${plain("reject-with", choose("reject-with", ["icmp-network-unreachable", "icmp-host-unreachable", "icmp-port-unreachable", "icmp-protocol-unreachable",
+        "icmp-net-prohibited", "icmp-host-prohibited", "icmp-admin-prohibited", "tcp-reset"], cur["reject-with"] || "", "default"))}
+      ${plain("address-list", `<input name="address-list" list="fwLists" value="${esc(cur["address-list"] || "")}" placeholder="pick or type a new list" spellcheck="false">`)}
+      ${plain("address-list-timeout", `<input name="address-list-timeout" value="${esc(cur["address-list-timeout"] || "")}" placeholder="none-dynamic, 1d, 00:30:00">`)}
+      ${plain("to-addresses", `<input name="to-addresses" value="${esc(cur["to-addresses"] || "")}" placeholder="e.g. 192.168.1.20" spellcheck="false">`)}
+      ${plain("to-ports", `<input name="to-ports" value="${esc(cur["to-ports"] || "")}" placeholder="e.g. 3389" spellcheck="false">`)}
+      <div class="fw-row on"><span class="fw-lbl">Log</span><span class="fw-val"><input type="checkbox" name="log" ${cur.log === "true" ? "checked" : ""} aria-label="Log"></span></div>
+      ${plain("log-prefix", `<input name="log-prefix" value="${esc(cur["log-prefix"] || "")}" maxlength="50">`)}
+      ${rule ? "" : `<h3 class="fw-sec">Position</h3><div class="fw-row on"><span class="fw-lbl">Place</span><span class="fw-val"><select name="before"><option value="">At the end</option>
+        ${rules.map((r, i) => `<option value="${esc(r[".id"])}">Above #${i + 1}: ${esc(`${r.chain} ${r.action} ${r.comment || fwMatch(r)}`).slice(0, 90)}</option>`).join("")}</select></span></div>`}
+      <datalist id="fwChains">${chains.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
+      <datalist id="fwLists">${(f.address_lists || []).map((l) => `<option value="${esc(l)}">`).join("")}</datalist>
+      <datalist id="fwProtos">${FW_PROTOS.map((x) => `<option value="${x}">`).join("")}</datalist>
+      <p class="small muted">Fields left out match anything; tick ! to match everything except the value. The change is tested first: the router puts
+        the rules back in ${f.test_minutes} minutes unless you keep it.</p>
       <p class="status err" id="fwFormErr"></p>
       <div class="row"><span class="spacer"></span><button class="btn" type="button" data-close>Cancel</button>
         <button class="btn primary" type="submit">${rule ? "Save and test" : "Add and test"}</button></div>
     </form>`);
-  $("dlg").addEventListener("close", () => { rView.hold = false; }, { once: true });
+  $("dlg").classList.add("fw-dlg");
+  $("dlg").addEventListener("close", () => { rView.hold = false; $("dlg").classList.remove("fw-dlg"); }, { once: true });
   const form = $("fwForm");
-  const showFor = () => {
+  const ports = () => FW_PORT_PROTOS.includes((form.elements.protocol?.value || "").trim()) && !form.querySelector("[data-not=protocol]")?.checked
+    && form.querySelector("[data-row=protocol]")?.classList.contains("on");
+  const refresh = () => {
     const a = form.elements.action.value;
-    form.querySelectorAll("[data-fwf]").forEach((el) => {
-      const k = el.dataset.fwf;
-      el.classList.toggle("hidden", !fields.includes(k) || Boolean(FW_SHOW[k] && !FW_SHOW[k].includes(a)));
-    });
+    form.querySelectorAll("[data-act]").forEach((el) => { const k = el.dataset.act; el.classList.toggle("hidden", Boolean(FW_SHOW[k] && !FW_SHOW[k].includes(a))); });
+    const p = ports();   // like WebFig: ports only once a protocol with ports is chosen
+    form.querySelectorAll("[data-kind=port]").forEach((el) => { el.classList.toggle("disabled", !p); el.querySelector(".fw-add").disabled = !p; if (!p) el.classList.remove("on"); });
   };
-  form.elements.action.addEventListener("change", showFor);
-  showFor();
+  form.querySelectorAll("[data-row]").forEach((el) => {
+    el.querySelector(".fw-add").addEventListener("click", () => { el.classList.add("on"); el.querySelector("input:not([type=checkbox]), select")?.focus(); refresh(); });
+    el.querySelector(".fw-del").addEventListener("click", () => { el.classList.remove("on"); refresh(); });
+  });
+  form.elements.action.addEventListener("change", refresh);
+  form.elements.protocol?.addEventListener("input", refresh);
+  form.querySelector("[data-not=protocol]")?.addEventListener("change", refresh);
+  refresh();
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const vals = {};
-    for (const k of fields) {
-      const el = form.elements[k];
-      if (!el) continue;
-      const hidden = el.closest("[data-fwf]")?.classList.contains("hidden");
-      vals[k] = el.type === "checkbox" ? (el.checked ? "true" : "false") : hidden ? "" : el.value.trim();
-    }
+    form.querySelectorAll("[data-row]").forEach((el) => {
+      const k = el.dataset.row;
+      let v = "";
+      if (el.classList.contains("on")) {
+        v = ["states", "nat"].includes(el.dataset.kind) ? [...el.querySelectorAll("[data-state]:checked")].map((c) => c.value).join(",")
+          : (form.elements[k]?.value || "").trim();
+        if (v && el.querySelector(`[data-not="${k}"]`).checked) v = `!${v}`;
+      }
+      vals[k] = v;
+    });
+    form.querySelectorAll("[data-act]").forEach((el) => { const k = el.dataset.act; vals[k] = el.classList.contains("hidden") ? "" : form.elements[k].value.trim(); });
+    vals.chain = form.elements.chain.value.trim();
+    vals.comment = form.elements.comment.value.trim();
+    vals.disabled = form.elements.enabled.checked ? "false" : "true";
+    vals.log = form.elements.log.checked ? "true" : "false";
+    for (const k of Object.keys(vals)) if (!fields.includes(k)) delete vals[k];
     let body;
-    if (rule) {   // send only what changed; a field emptied is removed from the rule
+    if (rule) {   // send only what changed; a field removed is cleared on the rule
       const diff = {};
       for (const [k, val] of Object.entries(vals)) {
         const was = rule[k] ?? (k === "log" || k === "disabled" ? "false" : "");

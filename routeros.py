@@ -276,9 +276,12 @@ class RouterOS:
     def fw_rules(self, section):
         return self.get(self.FW_MENUS[section]) or []
 
-    def fw_address_lists(self):
-        """Names of the address lists on the router (only the name of each entry is read - lists can be large)."""
-        return sorted({x.get("list") for x in self.get("/ip/firewall/address-list?.proplist=list") or [] if x.get("list")})
+    def fw_options(self):
+        """What the rule editor offers in its pulldowns: address lists (only each entry's list name is read - lists can
+        be large), interfaces and interface lists."""
+        names = lambda path, key="name": sorted({x.get(key) for x in self.optional(lambda: self.get(path), []) or [] if x.get(key)})
+        return {"address_lists": names("/ip/firewall/address-list?.proplist=list", "list"),
+                "interfaces": names("/interface?.proplist=name"), "interface_lists": names("/interface/list?.proplist=name")}
 
     def fw_add(self, section, props, before=None):
         body = dict(props)
@@ -547,8 +550,9 @@ class SimRouter:
         self._fw_expire()
         return [dict(x) for x in self._fw()["fw"][section]]
 
-    def fw_address_lists(self):
-        return ["blocklist", "office-ips", "trusted-admins"]
+    def fw_options(self):
+        return {"address_lists": ["blocklist", "office-ips", "trusted-admins"],
+                "interfaces": ["bridge", "ether1", "ether2", "ether3", "ether4", "ether5", "tikmanager", "wlan1"], "interface_lists": ["LAN", "WAN"]}
 
     def _fw_find(self, section, rid):
         rules = self._fw()["fw"][section]

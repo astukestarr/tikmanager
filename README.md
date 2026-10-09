@@ -215,7 +215,8 @@ recognised by their maker and name, so some stay "Unidentified" (unlike a scanne
 
 Each router's page has a **Firewall & NAT** card (technicians): the filter and NAT rules in order, with what each matches
 and how much traffic it has seen; pick a chain to narrow the list. Technicians with write access can **add**, **edit**,
-**enable / disable**, **delete** and move rules **up / down**.
+**enable / disable**, **delete** and move rules **up / down**. The rule editor is laid out like WebFig: add a match field
+with **+**, remove it with **-**, tick **!** for "not"; interfaces, interface lists and address lists are picked from the router's own.
 
 Changes are tested first, like **Safe Mode** in Winbox (Safe Mode itself only exists inside a Winbox / terminal
 session, which the REST API TikManager uses doesn't have, so TikManager does the same thing with a router script):

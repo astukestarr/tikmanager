@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.6.3 - 2026-10-09
+
+- **Firewall rule editor laid out like WebFig**: Enabled and Comment at the top, then General (chain and match fields)
+  and Action. Match fields are added with **+** and removed with **-**, and each has a **!** (not) switch.
+  In / Out Interface offer the router's interfaces plus all ethernet / ppp / vlan / wireless; interface lists and
+  address lists are pulldowns of the router's own; Connection State and Connection NAT State are tick boxes. Ports can
+  only be set once a protocol with ports (tcp, udp ...) is chosen; action-specific fields (jump target, reject with,
+  address list, NAT targets) appear for the action picked.
+
 ## 1.6.2 - 2026-10-09
 
 - **Firewall rules: address lists are pulldowns.** Source and destination address list now offer the router's own
