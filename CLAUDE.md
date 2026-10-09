@@ -64,6 +64,8 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Change what the adoption script does | `adoption.py` (it runs on every re-run - keep it idempotent) |
 | Add an admin setting | `appsettings.py` FIELDS + `adminSystem()` |
 | Add an integration | `integrations.py` + Admin > Integrations in `app.js` |
+| Firewall / NAT editing (fields, locked rules, undo timer) | `firewall.py` (`FIELDS`, `ACTIONS`, `protected()`, `restore_script()`), `RouterOS.fw_*` / `undo_*` (+ `SimRouter`), `loadFirewall()` / `fwDialog()` in `app.js` |
+| Server hardening check | `deploy/check.sh` (read-only; keep it in step with `install.sh`) |
 | Network map (what's shown, device recognition) | `topology.py` (`OUI` / `NAMES` decide device kinds), `RouterOS.topology()` (+ `SimRouter.topology()`), `loadTopology()` in `app.js` |
 | Geographic map / map data | `static/geomap.js`; rebuild `static/map/*.json` with `python tools/build_map.py <sources>` (instructions inside) |
 | Change the colours or add a theme | `static/styles.css` (the token block at the top: one `[data-theme=...]` rule per theme, dark mode below it), `static/theme.js` + `THEMES` in `server.py` + `THEME_INFO` in `app.js` (name and swatch) |

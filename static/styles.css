@@ -387,3 +387,31 @@ dialog { border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, .3); }
 .topo-list { margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--bg); }
 .topo-list .row { margin-bottom: 8px; }
 @media (max-width: 760px) { .tnets { flex-direction: column; align-items: stretch; } .tcol::before, .tcol::after { display: none; } .tcol { padding-top: 8px; } }
+
+/* firewall & NAT */
+.fw-table td { vertical-align: top; }
+.fw-table tr.fw-off td { opacity: .5; }
+.fw-table tr.fw-bad td { color: var(--bad); }
+.fw-acts .btn { padding: 2px 8px; font-size: 12px; }
+.pill.fw-accept, .pill.fw-masquerade, .pill.fw-fasttrack-connection { border-color: var(--good); color: var(--good); }
+.pill.fw-drop, .pill.fw-reject, .pill.fw-tarpit { border-color: var(--bad); color: var(--bad); }
+.pill.fw-dst-nat, .pill.fw-src-nat, .pill.fw-redirect, .pill.fw-netmap { border-color: var(--info); color: var(--info); }
+.fw-pending { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; border: 1px solid var(--warn); border-radius: 10px;
+  padding: 10px 14px; margin: 10px 0; background: color-mix(in srgb, var(--warn) 10%, var(--panel)); }
+.fw-pending > div:first-child { flex: 1; min-width: 240px; }
+.fw-pending ul { margin: 6px 0 0; padding-left: 18px; }
+.fw-pending-acts { display: flex; gap: 8px; }
+.fw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+.fw-grid .field input, .fw-grid .field select { width: 100%; }
+@media (max-width: 600px) { .fw-grid { grid-template-columns: 1fr; } }
+
+/* map: routers stacked on one spot */
+.gm-list { position: absolute; width: 280px; max-height: calc(100% - 16px); overflow: auto; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); padding: 8px; z-index: 3; }
+.gm-list-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.gm-list-head b { flex: 1; font-size: 13px; }
+.gm-list-x { all: unset; cursor: pointer; font-size: 18px; padding: 0 6px; color: var(--muted); }
+.gm-list-item { all: unset; box-sizing: border-box; display: flex; gap: 8px; align-items: center; width: 100%; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.gm-list-item:hover, .gm-list-item:focus-visible { background: var(--accent-soft); }
+.gm-list-item small { display: block; color: var(--muted); font-size: 11.5px; }
+.geo-dupe { margin-top: 10px; }

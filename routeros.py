@@ -5,6 +5,7 @@ controller's tunnel address.
 SimRouter stands in for real routers in dev mode (TM_DEV=1) so the whole app can be built and tested without hardware.
 """
 import base64
+import copy
 import json
 import random
 import time
@@ -269,6 +270,66 @@ class RouterOS:
                         "rx": int(p.get("rx") or 0), "tx": int(p.get("tx") or 0)})
         return out
 
+    # --- firewall filter / NAT rules (firewall.py drives these, with an automatic undo) -------------------------------
+    FW_MENUS = {"filter": "/ip/firewall/filter", "nat": "/ip/firewall/nat"}
+
+    def fw_rules(self, section):
+        return self.get(self.FW_MENUS[section]) or []
+
+    def fw_add(self, section, props, before=None):
+        body = dict(props)
+        if before:
+            body["place-before"] = before
+        return self._req("PUT", self.FW_MENUS[section], body, timeout=20)
+
+    def fw_set(self, section, rid, props):
+        return self._req("PATCH", f"{self.FW_MENUS[section]}/{rid}", props, timeout=20)
+
+    def fw_unset(self, section, rid, names):
+        for n in names:
+            self._req("POST", f"{self.FW_MENUS[section]}/unset", {"numbers": rid, "value-name": n}, timeout=20)
+
+    def fw_remove(self, section, rid):
+        return self._req("DELETE", f"{self.FW_MENUS[section]}/{rid}", timeout=20)
+
+    def fw_move(self, section, rid, before=None):
+        body = {"numbers": rid}
+        if before:
+            body["destination"] = before
+        return self._req("POST", f"{self.FW_MENUS[section]}/move", body, timeout=20)
+
+    # Safe-mode for REST: RouterOS Safe Mode belongs to an interactive Winbox / terminal session, which the REST API
+    # doesn't have, so TikManager does the same with a script that restores the rules and a scheduler that runs it
+    # unless the change is kept in time.
+    def undo_arm(self, name, script=None, delay="5m"):
+        q = urllib.parse.quote(name)
+        if script is not None:
+            for s in self.get(f"/system/script?name={q}") or []:
+                self._req("DELETE", f"/system/script/{s['.id']}", timeout=20)
+            self._req("PUT", "/system/script", {"name": name, "source": script, "policy": "read,write,policy,test",
+                                                "comment": "TikManager: puts the firewall back if a change isn't kept"}, timeout=30)
+        for s in self.get(f"/system/scheduler?name={q}") or []:
+            self._req("DELETE", f"/system/scheduler/{s['.id']}", timeout=20)
+        self._req("PUT", "/system/scheduler", {"name": name, "interval": delay, "on-event": f"/system script run {name}",
+                                               "policy": "read,write,policy,test",
+                                               "comment": "TikManager: undoes a firewall change unless it is kept"}, timeout=20)
+
+    def undo_run(self, name):
+        self._req("POST", "/system/script/run", {"number": name}, timeout=60)
+
+    def undo_armed(self, name):
+        return bool(self.get(f"/system/scheduler?name={urllib.parse.quote(name)}"))
+
+    def undo_cancel(self, name):
+        q = urllib.parse.quote(name)
+        for menu in ("/system/scheduler", "/system/script"):
+            for s in self.get(f"{menu}?name={q}") or []:
+                self._req("DELETE", f"{menu}/{s['.id']}", timeout=20)
+
+    def alive(self):
+        """Can TikManager still talk to the router? (after a firewall change)"""
+        return bool(self._req("GET", "/system/resource", timeout=8))
+
     # --- RouterOS / RouterBOARD upgrades (upgrades.py drives these) ---------------------------------------------
     def check_updates(self, channel=None) -> dict:
         """Ask MikroTik's server for the newest version on the router's channel (optionally switching channel first).
@@ -441,6 +502,130 @@ class SimRouter:
     # simulated upgrades: state shared by every SimRouter instance (the poller makes a new one per poll)
     SIM = {}
     LATEST = {"stable": "7.20.2", "long-term": "7.16.2"}
+
+    # --- simulated firewall (a typical MikroTik default set + TikManager's rule), kept per device while the server runs ---
+    def _fw(self):
+        st = self._sim()
+        if "fw" not in st:
+            lan = self.networks()[0]["network"]
+            filt = [
+                {"chain": "input", "action": "accept", "connection-state": "established,related,untracked", "comment": "defconf: accept established,related,untracked"},
+                {"chain": "input", "action": "accept", "in-interface": "tikmanager", "src-address": "10.77.0.1", "comment": "TikManager"},
+                {"chain": "input", "action": "drop", "connection-state": "invalid", "comment": "defconf: drop invalid"},
+                {"chain": "input", "action": "accept", "protocol": "icmp", "comment": "defconf: accept ICMP"},
+                {"chain": "input", "action": "drop", "in-interface-list": "!LAN", "comment": "defconf: drop all not coming from LAN"},
+                {"chain": "forward", "action": "fasttrack-connection", "connection-state": "established,related", "hw-offload": "true", "comment": "defconf: fasttrack"},
+                {"chain": "forward", "action": "accept", "connection-state": "established,related,untracked", "comment": "defconf: accept established,related, untracked"},
+                {"chain": "forward", "action": "drop", "connection-state": "invalid", "comment": "defconf: drop invalid"},
+                {"chain": "forward", "action": "drop", "connection-state": "new", "connection-nat-state": "!dstnat", "in-interface-list": "WAN",
+                 "comment": "defconf: drop all from WAN not DSTNATed"},
+                {"chain": "forward", "action": "drop", "src-address": lan, "dst-address": "10.0.0.0/8", "disabled": "true", "comment": "Block LAN to 10/8 (off)"},
+            ]
+            nat = [
+                {"chain": "srcnat", "action": "masquerade", "out-interface-list": "WAN", "ipsec-policy": "out,none", "comment": "defconf: masquerade"},
+                {"chain": "dstnat", "action": "dst-nat", "protocol": "tcp", "dst-port": "3389", "in-interface-list": "WAN",
+                 "to-addresses": lan.rsplit(".", 1)[0] + ".20", "to-ports": "3389", "comment": "RDP to server"},
+            ]
+            r = random.Random(self.id)
+            st["fw"] = {}
+            st["fw_next"] = 1
+            for sec, rules in (("filter", filt), ("nat", nat)):
+                st["fw"][sec] = []
+                for x in rules:
+                    st["fw"][sec].append({".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", "invalid": "false",
+                                          "bytes": str(r.randint(0, 9 * 10 ** 9)), "packets": str(r.randint(0, 9 * 10 ** 6)), **x})
+                    st["fw_next"] += 1
+            st["sched"], st["undo"] = {}, {}
+        return st
+
+    def fw_rules(self, section):
+        self._fw_expire()
+        return [dict(x) for x in self._fw()["fw"][section]]
+
+    def _fw_find(self, section, rid):
+        rules = self._fw()["fw"][section]
+        i = next((k for k, x in enumerate(rules) if x[".id"] == rid), None)
+        if i is None:
+            raise RouterError(f"HTTP 404: no such item ({rid})")
+        return rules, i
+
+    def fw_add(self, section, props, before=None):
+        st = self._fw()
+        rule = {".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", "invalid": "false", "bytes": "0", "packets": "0", **props}
+        st["fw_next"] += 1
+        rules = st["fw"][section]
+        if before:
+            rules.insert(self._fw_find(section, before)[1], rule)
+        else:
+            rules.append(rule)
+        return dict(rule)
+
+    def fw_set(self, section, rid, props):
+        rules, i = self._fw_find(section, rid)
+        rules[i].update(props)
+
+    def fw_unset(self, section, rid, names):
+        rules, i = self._fw_find(section, rid)
+        for n in names:
+            rules[i].pop(n, None)
+
+    def fw_remove(self, section, rid):
+        rules, i = self._fw_find(section, rid)
+        rules.pop(i)
+
+    def fw_move(self, section, rid, before=None):
+        rules, i = self._fw_find(section, rid)
+        rule = rules.pop(i)
+        if before:
+            rules.insert(self._fw_find(section, before)[1], rule)
+        else:
+            rules.append(rule)
+
+    def undo_arm(self, name, script=None, delay="5m"):
+        st = self._fw()
+        if script is not None:
+            st["undo"][name] = copy.deepcopy(st["fw"])
+        st["sched"][name] = time.time() + int(delay.rstrip("m")) * 60
+
+    def undo_run(self, name):
+        st = self._fw()
+        if name in st["undo"]:
+            st["fw"] = copy.deepcopy(st["undo"][name])
+        self.undo_cancel(name)
+
+    def undo_cancel(self, name):
+        st = self._fw()
+        st["sched"].pop(name, None)
+        st["undo"].pop(name, None)
+
+    def undo_armed(self, name):
+        self._fw_expire()
+        return name in self._fw()["sched"]
+
+    def _fw_expire(self):
+        st = self._fw()
+        for name, at in list(st["sched"].items()):
+            if at <= time.time():
+                self.undo_run(name)
+
+    def alive(self):
+        # a rule that drops the controller's own traffic cuts the simulated router off too
+        for x in self._fw()["fw"]["filter"]:
+            if x.get("disabled") == "true" or x.get("chain") != "input" or x.get("action") not in ("drop", "reject"):
+                continue
+            if x.get("comment") == "TikManager":
+                continue
+            if x.get("in-interface") == "tikmanager" or x.get("src-address", "").startswith("10.77.") or not any(
+                    k in x for k in ("src-address", "in-interface", "in-interface-list", "connection-state", "protocol", "dst-port", "src-address-list")):
+                if not self._fw_accepts_first(x):
+                    raise RouterError("Unreachable over the tunnel: timed out")
+        return True
+
+    def _fw_accepts_first(self, rule):
+        """True if TikManager's accept rule comes before `rule` (so the controller is still let in)."""
+        rules = self._fw()["fw"]["filter"]
+        tm = next((k for k, x in enumerate(rules) if x.get("comment") == "TikManager" and x.get("disabled") != "true"), None)
+        return tm is not None and tm < rules.index(rule)
 
     def _sim(self):
         st = SimRouter.SIM.setdefault(self.id, {"channel": "stable"})

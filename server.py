@@ -28,6 +28,7 @@ from poller import Poller
 from routeros import RouterError
 from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
+from firewall import Firewall, FirewallError
 import vpninv
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -79,6 +80,7 @@ upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
+firewall = Firewall(db, poller.client, backups)
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -508,6 +510,15 @@ class Handler(BaseHTTPRequestHandler):
                 topo_cache[key] = hit
             # client users see their network, but not the full routing table (other networks an MSP connected)
             return self.json({**topology.build(hit[1], d, full=s["kind"] == "tech"), "read_at": hit[0]})
+        if m := re.fullmatch(r"/api/devices/(\d+)/firewall", path):   # filter + NAT rules, read live
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            try:
+                return self.json({**firewall.view(d), "can_edit": s["role"] != "readonly"})
+            except FirewallError as e:
+                raise HttpError(502, str(e)) from None
         if m := re.fullmatch(r"/api/devices/(\d+)/dhcp", path):   # DHCP leases, read live from the router
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -689,6 +700,25 @@ class Handler(BaseHTTPRequestHandler):
             db.event(d["id"], org["id"], "approved", f"by {s['email']} for {org['name']}")
             db.audit(s["email"], "router approved", d["name"], self.client_ip(), org_id=org["id"])
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/firewall(/keep|/undo)?", path):   # a firewall change, tested like Safe Mode
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router must be approved and online.")
+            try:
+                if m.group(2):
+                    changes = (firewall.keep if m.group(2) == "/keep" else firewall.undo)(d, s["email"])
+                    what = "kept" if m.group(2) == "/keep" else "undone"
+                    db.event(d["id"], d["org_id"], f"firewall changes {what}", f"{len(changes)} change(s) by {s['email']}")
+                    db.audit(s["email"], f"firewall changes {what}", d["name"], self.client_ip(), org_id=d["org_id"], detail="; ".join(changes)[:4000])
+                    return self.json({"ok": True, "changes": changes})
+                r = firewall.change(d, s["email"], self.body())
+            except FirewallError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "firewall rule changed (testing)", d["name"], self.client_ip(), org_id=d["org_id"], detail=r["summary"][:4000])
+            if r["first"]:
+                db.event(d["id"], d["org_id"], "firewall test started", f"by {s['email']} - undone automatically unless kept")
+            return self.json(r)
         if m := re.fullmatch(r"/api/devices/(\d+)/location", path):   # where the router is, for the map
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))

@@ -59,9 +59,10 @@
       el.innerHTML = `<canvas></canvas>
         <div class="gm-ctl"><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="out" aria-label="Zoom out">−</button>
           <button type="button" data-z="fit" aria-label="Show all routers" title="Show all routers">⤢</button></div>
-        <div class="gm-tip hidden"></div><div class="gm-msg small muted">Loading map…</div>`;
+        <div class="gm-tip hidden"></div><div class="gm-list hidden"></div><div class="gm-msg small muted">Loading map…</div>`;
       this.cv = el.querySelector("canvas");
       this.tip = el.querySelector(".gm-tip");
+      this.list = el.querySelector(".gm-list");
       // start on the lower 48
       this.cx = -96.5 * K; this.cy = -38.5; this.s = 13;
       this.bind();
@@ -157,12 +158,36 @@
       this.cv.classList.toggle("gm-pointer", Boolean(c) || Boolean(this.opts.onPick));
       if (!c) return this.tip.classList.add("hidden");
       this.tip.textContent = c.pins.length === 1 ? `${c.pins[0].name}${c.pins[0].sub ? ` · ${c.pins[0].sub}` : ""}${c.pins[0].online ? "" : " · offline"}`
-        : `${c.pins.length} routers${c.off ? ` · ${c.off} offline` : ""} - click to zoom in`;
+        : `${c.pins.length} routers${c.off ? ` · ${c.off} offline` : ""} - click to ${this.stacked(c) ? "list them" : "zoom in"}`;
       this.tip.classList.remove("hidden");
       this.tip.style.left = `${Math.min(sx + 14, this.w - 220)}px`; this.tip.style.top = `${sy + 14}px`;
     }
+    // routers so close together (or set to the same spot) that zooming in can't separate them
+    stacked(c) {
+      const pts = c.pins.map((p) => this.project(p.lat, p.lon)), xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+      return this.s >= 2900 || Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < 0.0003;
+    }
+    showList(c, sx, sy) {
+      const e = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+      const same = c.pins.every((p) => p.lat === c.pins[0].lat && p.lon === c.pins[0].lon);
+      this.list.innerHTML = `<div class="gm-list-head"><b>${c.pins.length} routers ${same ? "at exactly the same spot" : "very close together"}</b>
+          <button type="button" class="gm-list-x" aria-label="Close">×</button></div>
+        ${same ? `<div class="small muted">If one of them is in the wrong place, open it and use Set location.</div>` : ""}
+        ${c.pins.map((p, i) => `<button type="button" class="gm-list-item" data-i="${i}"><span class="dot ${p.online ? "on" : "off"}"></span>
+          <span><b>${e(p.name)}</b>${p.sub ? `<small>${e(p.sub)}</small>` : ""}</span></button>`).join("")}`;
+      this.list.classList.remove("hidden");
+      this.list.style.left = `${Math.max(8, Math.min(sx + 12, this.w - 290))}px`;
+      this.list.style.top = `${Math.max(8, Math.min(sy - 20, this.h - Math.min(this.h - 16, 60 + c.pins.length * 44)))}px`;
+      this.list.querySelector(".gm-list-x").addEventListener("click", () => this.list.classList.add("hidden"));
+      this.list.querySelectorAll("[data-i]").forEach((b) => b.addEventListener("click", () => {
+        this.list.classList.add("hidden");
+        if (this.opts.onSelect) this.opts.onSelect(c.pins[Number(b.dataset.i)]);
+      }));
+    }
     click(sx, sy) {
       const c = this.hit(sx, sy);
+      this.list.classList.add("hidden");
+      if (c && c.pins.length > 1 && this.stacked(c)) return this.showList(c, sx, sy);
       if (c && c.pins.length > 1) {   // a cluster: zoom to its routers
         const pts = c.pins.map((p) => this.project(p.lat, p.lon)), xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
         return this.fitBox(Math.min(...xs) - 0.02, Math.min(...ys) - 0.02, Math.max(...xs) + 0.02, Math.max(...ys) + 0.02, 3000);

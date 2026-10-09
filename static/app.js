@@ -277,6 +277,7 @@ async function router(id) {
         <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th></tr></thead>
         <tbody>${tunnelRows(d.vpn_found.map((t) => ({ r: d, t })), false)}</tbody></table></div></div>` : ""}
       ${d.online ? `<div class="card" id="topoCard"><h2>Network map</h2><p class="muted small">Reading the router's routes, neighbours and devices...</p></div>` : ""}
+      ${d.online && isTech() ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
       <div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>
       <div class="card" id="locCard"><h2>Location</h2></div>` : ""}
       <div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>
@@ -333,6 +334,7 @@ async function router(id) {
   loadBackups(d);
   if ($("dhcpCard")) loadDhcp(d);
   if ($("topoCard")) loadTopology(d);
+  if ($("fwCard")) loadFirewall(d);
   loadLocation(d);
   const load = async () => {
     const s = await api(`/api/devices/${d.id}/series?range=${rView.range}&iface=${encodeURIComponent(rView.iface)}`);
@@ -1437,6 +1439,204 @@ async function loadTopology(d, refresh = false) {
   if (rView.topoSel) show(...rView.topoSel);
 }
 
+// --- firewall filter + NAT rules: changes are tested like RouterOS Safe Mode - the router undoes them unless kept -------
+const FW_MATCH = [["protocol", ""], ["src-address", "from "], ["src-address-list", "from list "], ["src-port", "src port "],
+  ["dst-address", "to "], ["dst-address-list", "to list "], ["dst-port", "port "], ["in-interface", "in "], ["in-interface-list", "in list "],
+  ["out-interface", "out "], ["out-interface-list", "out list "], ["connection-state", "state "], ["connection-nat-state", "nat state "]];
+const FW_LABELS = { "src-address": "Source address", "dst-address": "Destination address", "src-port": "Source port", "dst-port": "Destination port",
+  "in-interface": "In interface", "out-interface": "Out interface", "in-interface-list": "In interface list", "out-interface-list": "Out interface list",
+  "src-address-list": "Source address list", "dst-address-list": "Destination address list", "connection-state": "Connection state",
+  "connection-nat-state": "Connection NAT state", protocol: "Protocol", "jump-target": "Jump to chain", "reject-with": "Reject with",
+  "address-list": "Add to address list", "address-list-timeout": "List timeout", "to-addresses": "To addresses", "to-ports": "To ports",
+  "log-prefix": "Log prefix", comment: "Comment" };
+const FW_SHOW = {   // fields that only apply to some actions
+  "jump-target": ["jump"], "reject-with": ["reject"], "address-list": ["add-src-to-address-list", "add-dst-to-address-list"],
+  "address-list-timeout": ["add-src-to-address-list", "add-dst-to-address-list"], "to-addresses": ["src-nat", "dst-nat", "netmap", "same"],
+  "to-ports": ["src-nat", "dst-nat", "redirect", "netmap", "same"] };
+let fwTimer = null;
+const fwMatch = (r) => FW_MATCH.filter(([k]) => r[k]).map(([k, p]) => `${p}${r[k]}`).join(" · ") || "everything";
+const fwClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+async function loadFirewall(d, note) {
+  const card = $("fwCard");
+  if (!card) return;
+  clearInterval(fwTimer);
+  const v = rView.fw || (rView.fw = { sec: "filter", chain: "" });
+  let f;
+  try { f = await api(`/api/devices/${d.id}/firewall`); }
+  catch (e) { card.innerHTML = `<h2>Firewall &amp; NAT</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  if (!$("fwCard")) return;
+  const rules = f[v.sec], chains = [...new Set(rules.map((r) => r.chain))];
+  if (v.chain && !chains.includes(v.chain)) v.chain = "";
+  const shown = rules.filter((r) => !v.chain || r.chain === v.chain);
+  const edit = f.can_edit, p = f.pending;
+  card.innerHTML = `<div class="row"><h2>Firewall &amp; NAT</h2>
+      <div class="seg" role="group" aria-label="Rule set">${[["filter", "Filter"], ["nat", "NAT"]].map(([k, l]) =>
+        `<button type="button" data-fwsec="${k}" class="${v.sec === k ? "on" : ""}">${l} (${f[k].length})</button>`).join("")}</div>
+      <select id="fwChain" aria-label="Chain"><option value="">All chains</option>${chains.map((c) => `<option ${c === v.chain ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+      <span class="spacer"></span>
+      ${edit ? `<button class="btn primary" type="button" id="fwAdd">Add rule</button>` : ""}
+      <button class="btn" type="button" id="fwRefresh">Refresh</button></div>
+    ${p ? `<div class="fw-pending"><div><b>Testing ${p.changes.length} change${p.changes.length === 1 ? "" : "s"}</b> -
+        <span id="fwLeft">${p.seconds == null ? "the router puts the rules back soon" : `the router puts the rules back in <b>${fwClock(p.seconds)}</b>`}</span> unless you keep them.
+        <ul class="small">${p.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></div>
+        ${edit ? `<div class="fw-pending-acts"><button class="btn primary" type="button" id="fwKeep">Keep changes</button>
+          <button class="btn" type="button" id="fwUndo">Undo now</button></div>` : ""}</div>` : ""}
+    <p class="status" id="fwStatus"></p>
+    <div class="table-wrap"><table class="fw-table"><thead><tr><th>#</th><th>Chain</th><th>Action</th><th>Match</th>${v.sec === "nat" ? "<th>Translate to</th>" : ""}
+      <th>Comment</th><th>Traffic</th>${edit ? "<th></th>" : ""}</tr></thead><tbody>
+      ${shown.map((r) => { const i = rules.indexOf(r); return `<tr class="${r.disabled === "true" ? "fw-off" : ""} ${r.invalid === "true" ? "fw-bad" : ""}">
+        <td class="muted">${i + 1}</td><td class="mono">${esc(r.chain)}</td>
+        <td><span class="pill fw-${esc(r.action)}">${esc(r.action)}</span>${r["jump-target"] ? ` <span class="small muted">→ ${esc(r["jump-target"])}</span>` : ""}
+          ${r.disabled === "true" ? ` <span class="small muted">(off)</span>` : ""}</td>
+        <td class="small">${esc(fwMatch(r))}</td>
+        ${v.sec === "nat" ? `<td class="mono small">${esc([r["to-addresses"], r["to-ports"] && `port ${r["to-ports"]}`].filter(Boolean).join(" "))}</td>` : ""}
+        <td class="muted small">${esc(r.comment || "")}${r.dynamic === "true" ? ` <span class="pill">dynamic</span>` : ""}</td>
+        <td class="small nowrap">${bytes(+r.bytes || 0)} · ${(+r.packets || 0).toLocaleString()} pkts</td>
+        ${edit ? `<td class="fw-acts nowrap">${r.protected ? `<span class="small muted" title="Needed by TikManager or made by RouterOS - read-only here">locked</span>` : `
+          <button class="btn" type="button" data-fw="up" data-id="${esc(r[".id"])}" title="Move up" aria-label="Move up">↑</button>
+          <button class="btn" type="button" data-fw="down" data-id="${esc(r[".id"])}" title="Move down" aria-label="Move down">↓</button>
+          <button class="btn" type="button" data-fw="${r.disabled === "true" ? "enable" : "disable"}" data-id="${esc(r[".id"])}">${r.disabled === "true" ? "Enable" : "Disable"}</button>
+          <button class="btn" type="button" data-fw="edit" data-id="${esc(r[".id"])}">Edit</button>
+          <button class="btn" type="button" data-fw="remove" data-id="${esc(r[".id"])}">Delete</button>`}</td>` : ""}</tr>`; }).join("")}
+      ${shown.length ? "" : `<tr><td colspan="8" class="muted">No rules${v.chain ? ` in ${esc(v.chain)}` : ""}.</td></tr>`}</tbody></table></div>
+    <p class="small muted">Changes are tested first, like Safe Mode in Winbox: before the first one TikManager saves the current rules on the router and
+      starts a ${f.test_minutes}-minute timer. Press <b>Keep changes</b> once you've checked everything still works - otherwise (or if a change cuts
+      TikManager off) the router puts the rules back by itself. TikManager's own rules and dynamic rules are locked.</p>`;
+  const status = (msg, cls = "") => { $("fwStatus").textContent = msg; $("fwStatus").className = `status ${cls}`; };
+  if (note) status(note[0], note[1]);
+  card.querySelectorAll("[data-fwsec]").forEach((b) => b.addEventListener("click", () => { v.sec = b.dataset.fwsec; v.chain = ""; loadFirewall(d); }));
+  $("fwChain").addEventListener("change", () => { v.chain = $("fwChain").value; loadFirewall(d); });
+  $("fwRefresh").addEventListener("click", () => loadFirewall(d));
+  if (p && p.seconds != null) {
+    const end = Date.now() + p.seconds * 1000;
+    fwTimer = setInterval(() => {
+      if (!$("fwLeft")) { clearInterval(fwTimer); return; }
+      const left = Math.max(0, Math.round((end - Date.now()) / 1000));
+      $("fwLeft").innerHTML = left ? `the router puts the rules back in <b>${fwClock(left)}</b>` : "time's up - the router is putting the rules back";
+      if (!left) { clearInterval(fwTimer); setTimeout(() => loadFirewall(d, ["The changes weren't kept, so the router put the rules back.", "warn"]), 8000); }
+    }, 1000);
+  }
+  const send = async (url, body, busy) => {
+    card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    status(busy);
+    try { return await post(url, body); }
+    catch (e) { await loadFirewall(d, [e.message, "err"]); return null; }
+  };
+  const change = async (body, busy) => {
+    const r = await send(`/api/devices/${d.id}/firewall`, { section: v.sec, ...body }, busy);
+    if (!r) return false;
+    await loadFirewall(d, r.reachable ? [`Done - ${r.summary}. Check that everything still works, then press Keep changes.`, "ok"]
+      : ["TikManager can't reach the router after this change. Unless it comes back, the router will put the rules back by itself when the timer runs out.", "err"]);
+    return true;
+  };
+  $("fwKeep")?.addEventListener("click", async () => {
+    if (await send(`/api/devices/${d.id}/firewall/keep`, {}, "Keeping the changes...")) loadFirewall(d, ["Changes kept.", "ok"]);
+  });
+  $("fwUndo")?.addEventListener("click", async () => {
+    if (await send(`/api/devices/${d.id}/firewall/undo`, {}, "Putting the rules back...")) loadFirewall(d, ["Undone - the rules are back as they were.", "ok"]);
+  });
+  $("fwAdd")?.addEventListener("click", () => fwDialog(d, f, v.sec, null, change, v.chain));
+  card.querySelectorAll("[data-fw]").forEach((b) => b.addEventListener("click", async () => {
+    const op = b.dataset.fw, r = rules.find((x) => x[".id"] === b.dataset.id);
+    if (!r) return;
+    if (op === "edit") return fwDialog(d, f, v.sec, r, change);
+    if (op === "remove") {
+      if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.textContent = "Sure?"; return; }
+      return change({ op, id: r[".id"] }, "Deleting the rule...");
+    }
+    if (op === "enable" || op === "disable") return change({ op, id: r[".id"] }, `${op === "enable" ? "Enabling" : "Disabling"} the rule...`);
+    // up / down: past the neighbouring rule in the list as shown (so it stays within the chain being viewed)
+    const k = shown.indexOf(r);
+    if (op === "up") {
+      if (k <= 0) return;
+      return change({ op: "move", id: r[".id"], before: shown[k - 1][".id"] }, "Moving the rule...");
+    }
+    if (k >= shown.length - 1) return;
+    const after = rules[rules.indexOf(shown[k + 1]) + 1];
+    return change({ op: "move", id: r[".id"], before: after ? after[".id"] : null }, "Moving the rule...");
+  }));
+}
+
+function fwDialog(d, f, sec, rule, change, chain = "") {
+  const fields = f.fields[sec], cur = rule || { chain: chain || (sec === "nat" ? "dstnat" : "input"), action: sec === "nat" ? "dst-nat" : "accept" };
+  const chains = [...new Set([...(sec === "nat" ? ["srcnat", "dstnat"] : ["input", "forward", "output"]), ...f[sec].map((r) => r.chain)])];
+  const input = (k, extra = "") => `<label class="field" data-fwf="${k}">${esc(FW_LABELS[k] || k)}
+      <input name="${k}" value="${esc(cur[k] || "")}" spellcheck="false" ${extra}></label>`;
+  const rules = f[sec];
+  rView.hold = true;
+  dialog(`<h2>${rule ? "Edit" : "Add"} ${sec === "nat" ? "NAT" : "filter"} rule</h2>
+    <form id="fwForm" class="fw-form">
+      <div class="fw-grid">
+        <label class="field">Chain <input name="chain" list="fwChains" value="${esc(cur.chain || "")}" required spellcheck="false"></label>
+        <datalist id="fwChains">${chains.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
+        <label class="field">Action <select name="action">${f.actions[sec].map((a) => `<option ${a === cur.action ? "selected" : ""}>${a}</option>`).join("")}</select></label>
+        ${input("protocol", `list="fwProtos" placeholder="any"`)}<datalist id="fwProtos">${["tcp", "udp", "icmp", "gre", "ipsec-esp", "ospf"].map((x) => `<option value="${x}">`).join("")}</datalist>
+        ${input("connection-state", `placeholder="e.g. established,related"`)}
+        ${input("src-address", `placeholder="any (e.g. 192.168.1.0/24)"`)}${input("dst-address", `placeholder="any"`)}
+        ${input("src-port", `placeholder="any"`)}${input("dst-port", `placeholder="any (e.g. 80,443)"`)}
+        ${input("in-interface", `placeholder="any (e.g. ether1)"`)}${input("out-interface", `placeholder="any"`)}
+        ${input("in-interface-list", `placeholder="any (e.g. WAN, !LAN)"`)}${input("out-interface-list", `placeholder="any"`)}
+        ${input("src-address-list")}${input("dst-address-list")}
+        ${input("connection-nat-state", `placeholder="e.g. !dstnat"`)}
+        ${input("jump-target")}
+        ${fields.includes("reject-with") ? `<label class="field" data-fwf="reject-with">Reject with <select name="reject-with"><option value="">default</option>
+          ${["icmp-network-unreachable", "icmp-host-unreachable", "icmp-port-unreachable", "icmp-protocol-unreachable", "icmp-net-prohibited",
+            "icmp-host-prohibited", "icmp-admin-prohibited", "tcp-reset"].map((x) => `<option ${x === cur["reject-with"] ? "selected" : ""}>${x}</option>`).join("")}</select></label>` : ""}
+        ${fields.includes("address-list") ? input("address-list") + input("address-list-timeout", `placeholder="none-dynamic, 1d, 00:30:00"`) : ""}
+        ${fields.includes("to-addresses") ? input("to-addresses", `placeholder="e.g. 192.168.1.20"`) + input("to-ports", `placeholder="e.g. 3389"`) : ""}
+        ${input("comment", `maxlength="200"`)}${input("log-prefix", `maxlength="50"`)}
+      </div>
+      <div class="row">
+        <label class="chk"><input type="checkbox" name="log" ${cur.log === "true" ? "checked" : ""}> Log matches</label>
+        <label class="chk"><input type="checkbox" name="disabled" ${cur.disabled === "true" ? "checked" : ""}> Disabled</label>
+      </div>
+      ${rule ? "" : `<label class="field">Position <select name="before"><option value="">At the end</option>
+        ${rules.map((r, i) => `<option value="${esc(r[".id"])}">Above #${i + 1}: ${esc(`${r.chain} ${r.action} ${r.comment || fwMatch(r)}`).slice(0, 90)}</option>`).join("")}</select></label>`}
+      <p class="small muted">Blank fields match anything. Prefix a value with ! for "not" (e.g. !192.168.1.0/24). The change is tested first: the
+        router puts the rules back in ${f.test_minutes} minutes unless you keep it.</p>
+      <p class="status err" id="fwFormErr"></p>
+      <div class="row"><span class="spacer"></span><button class="btn" type="button" data-close>Cancel</button>
+        <button class="btn primary" type="submit">${rule ? "Save and test" : "Add and test"}</button></div>
+    </form>`);
+  $("dlg").addEventListener("close", () => { rView.hold = false; }, { once: true });
+  const form = $("fwForm");
+  const showFor = () => {
+    const a = form.elements.action.value;
+    form.querySelectorAll("[data-fwf]").forEach((el) => {
+      const k = el.dataset.fwf;
+      el.classList.toggle("hidden", !fields.includes(k) || Boolean(FW_SHOW[k] && !FW_SHOW[k].includes(a)));
+    });
+  };
+  form.elements.action.addEventListener("change", showFor);
+  showFor();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const vals = {};
+    for (const k of fields) {
+      const el = form.elements[k];
+      if (!el) continue;
+      const hidden = el.closest("[data-fwf]")?.classList.contains("hidden");
+      vals[k] = el.type === "checkbox" ? (el.checked ? "true" : "false") : hidden ? "" : el.value.trim();
+    }
+    let body;
+    if (rule) {   // send only what changed; a field emptied is removed from the rule
+      const diff = {};
+      for (const [k, val] of Object.entries(vals)) {
+        const was = rule[k] ?? (k === "log" || k === "disabled" ? "false" : "");
+        if (val !== was) diff[k] = val;
+      }
+      if (!Object.keys(diff).length) { $("fwFormErr").textContent = "Nothing changed."; return; }
+      body = { op: "edit", id: rule[".id"], rule: diff };
+    } else {
+      body = { op: "add", rule: Object.fromEntries(Object.entries(vals).filter(([, val]) => val !== "" && val !== "false")), before: form.elements.before.value || null };
+    }
+    form.querySelector("[type=submit]").disabled = true;
+    $("dlg").close();
+    await change(body, rule ? "Saving the rule..." : "Adding the rule...");
+  });
+}
+
 // --- where the router is: shown on a small map; technicians type an address, look it up, or click the spot -------------
 function loadLocation(d) {
   const card = $("locCard");
@@ -1503,9 +1703,17 @@ function loadLocation(d) {
 // --- the Map tab of the Site map: every router where it is ---------------------------------------------------------
 function geoTab(rows, body) {
   const placed = rows.filter((d) => d.lat != null), missing = rows.filter((d) => d.lat == null);
+  const spots = new Map();
+  for (const d of placed) { const k = `${d.lat},${d.lon}`; spots.set(k, [...(spots.get(k) || []), d]); }
+  const dupes = [...spots.values()].filter((g) => g.length > 1);
   body.innerHTML = `<div class="card geo-card"><div class="geo-wrap" id="geoMap"></div>
       <div class="row small muted geo-legend"><span><span class="dot on"></span>Online</span><span><span class="dot off"></span>Offline (or a group with one offline)</span>
-        <span>Numbers are groups of routers - click one to zoom in.</span><span class="spacer"></span><span>${placed.length} of ${rows.length} routers placed</span></div></div>
+        <span>Numbers are groups of routers - click one to zoom in (or list them, if they're in the same spot).</span><span class="spacer"></span><span>${placed.length} of ${rows.length} routers placed</span></div></div>
+    ${dupes.length ? `<div class="card"><h2>Routers sharing a location (${dupes.reduce((n, g) => n + g.length, 0)})</h2>
+      <p class="small muted">These routers are set to exactly the same spot, so they show as one group on the map. If one is wrong, open it and use
+        <b>Set location</b>.</p>
+      ${dupes.map((g) => `<div class="geo-dupe"><span class="small muted">${esc(g[0].location || `${g[0].lat.toFixed(4)}, ${g[0].lon.toFixed(4)}`)}</span>
+        <div class="geo-missing">${g.map((d) => `<a href="#router/${d.id}" data-dev="${d.id}"><span class="dot ${d.online ? "on" : "off"}"></span>${esc(d.name)}<span class="small muted"> · ${esc(d.org || "")}</span></a>`).join("")}</div></div>`).join("")}</div>` : ""}
     ${missing.length ? `<div class="card"><h2>No location yet (${missing.length})</h2><p class="small muted">Open a router and use <b>Set location</b>
       (type an address, look it up, or click the spot on the map). Routers with GPS place themselves.</p>
       <div class="geo-missing">${missing.map((d) => `<a href="#router/${d.id}" data-dev="${d.id}"><span class="dot ${d.online ? "on" : "off"}"></span>${esc(d.name)}<span class="small muted"> · ${esc(d.org || "")}</span></a>`).join("")}</div></div>` : ""}`;

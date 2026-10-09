@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.6.0 - 2026-10-09
+
+- **Firewall & NAT rules** on each router's page (technicians): filter and NAT rules with their traffic counters, by
+  chain. Technicians with write access can add, edit, enable / disable, delete and reorder rules.
+- **Changes are tested like Safe Mode in Winbox.** Before the first change TikManager saves the current rules on the
+  router and starts a 5-minute timer; after each change it checks it can still reach the router. Press **Keep
+  changes** once you've checked everything still works, or **Undo now**. If nobody keeps them in time - or a change
+  cuts TikManager off - the router puts the rules back by itself. The router is backed up before the first change
+  (unless it was in the last 10 minutes). TikManager's own rules and dynamic rules are locked; every change is in the
+  audit log.
+- **Site map**: routers set to the same spot no longer hide each other - clicking a group that can't be separated by
+  zooming lists its routers, and a **Routers sharing a location** list under the map shows them so a wrong one is easy
+  to find and fix.
+- **Server security check**: `sudo bash /opt/tikmanager/deploy/check.sh` checks the Ubuntu server is still locked down
+  (firewall, SSH, automatic updates, open ports, certificate, file permissions, the service's sandbox, whether the
+  server can reach your LAN) and says what to fix. It only reads; it never changes anything.
+
 ## 1.5.1 - 2026-10-09
 
 - **Router upgrades**: downloading a new RouterOS could fail with "HTTP 400: Session closed" on routers with a slower

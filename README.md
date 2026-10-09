@@ -11,7 +11,7 @@ SQLite, WireGuard and Caddy. No build step, no package manager.
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Subnets in use](#subnets-in-use) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -201,7 +201,7 @@ least one is offline. Click a router to open it. The map is drawn by TikManager 
 **A router's location** is set on its page (**Location > Set location**): type an address, press **Look up** (optional
 - only the text you type is sent to OpenStreetMap's address search), type the coordinates, or click the spot on the
 map. Routers with a GPS receiver place themselves; a location set by hand always wins. Routers without one are listed
-under the map.
+under the map, and so are routers set to exactly the same spot (on the map, clicking such a group lists its routers).
 
 **Network map** (each router's page): Internet and its gateway -> the router -> each network / VLAN -> the switches and
 access points found by neighbour discovery (MNDP / LLDP / CDP), each with the devices on its port -> groups of devices:
@@ -209,6 +209,27 @@ phones, printers, servers & VMs, cameras, computers, personal devices, IoT and u
 devices (name, IP, MAC, port). Routes to other networks (VPN, static, dynamic) are listed for technicians; client users
 see their networks but not the routing table. Infrastructure and routes come straight from the router; end devices are
 recognised by their maker and name, so some stay "Unidentified" (unlike a scanner, the router doesn't probe them).
+
+## Firewall & NAT rules
+
+Each router's page has a **Firewall & NAT** card (technicians): the filter and NAT rules in order, with what each matches
+and how much traffic it has seen; pick a chain to narrow the list. Technicians with write access can **add**, **edit**,
+**enable / disable**, **delete** and move rules **up / down**.
+
+Changes are tested first, like **Safe Mode** in Winbox (Safe Mode itself only exists inside a Winbox / terminal
+session, which the REST API TikManager uses doesn't have, so TikManager does the same thing with a router script):
+1. Before the first change, TikManager backs up the router (unless it was backed up in the last 10 minutes), saves a
+   script on the router that restores the filter and NAT rules exactly as they are, and a scheduler that runs it in
+   5 minutes (`tikmanager-fw-undo` in System > Scripts / Scheduler).
+2. It makes the change and checks it can still reach the router. Each further change restarts the 5 minutes.
+3. Check the site still works, then press **Keep changes** (the script and scheduler are removed) - or **Undo now**.
+   If nobody keeps the changes in time, or a change cut TikManager off, the router puts the rules back by itself.
+
+TikManager's own rules (comment starting "TikManager": its management rule and the site-to-site VPN rules) and dynamic
+rules are locked. Only the common fields can be set (addresses, ports, protocol, interfaces and lists, connection
+state, NAT targets, jump / reject / address-list options, log, comment); other settings a rule already has are left
+alone. Each change, keep and undo is in the audit log and the router's events. Very large rule sets (where the
+restore script would be over 60 KB) are refused - change those in Winbox with Safe Mode.
 
 ## Subnets in use
 
@@ -336,6 +357,18 @@ TikManager can change every router it manages, so treat the server like the keys
   your `v*` tags - whoever can publish a release there can update your servers.
 - Ubuntu installs its own security updates automatically (unattended-upgrades); check Caddy now and then with
   `sudo apt upgrade` - it comes from Caddy's own package repository.
+
+**Check the server**: run the read-only security check now and then (and after changing anything on the server):
+
+    sudo bash /opt/tikmanager/deploy/check.sh
+
+It checks the firewall (only 80, 443, 51820 and SSH from your LAN), SSH (no root login; keys rather than passwords;
+fail2ban), automatic security updates and pending reboots, IP forwarding off, that the server can't open connections
+into your LAN, what listens on the network, the HTTPS certificate, permissions on the key and settings files, that the
+service can't change its own code, the service's sandbox, and how old the newest database copy is. Each line is PASS,
+WARN or FAIL with what to do; it never changes anything. Two things it can't do for you: keep a copy of
+`/etc/tikmanager/master.key` (and the database) somewhere off the server, and block the server from your LAN on your
+network firewall.
 
 How it's built to be safe (tunnels, encryption, least privilege, the updater): [ARCHITECTURE.md](ARCHITECTURE.md).
 

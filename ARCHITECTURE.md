@@ -82,11 +82,12 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `backups.py` + `vault.py` | nightly `/export show-sensitive`, deduplicated, gzip + AES-256-GCM |
 | `upgrades.py` | RouterOS / RouterBOARD upgrade jobs (backup first, wait for reboot) |
 | `tasks.py` | script library, groups, scheduled script runs and firmware updates |
+| `firewall.py` | filter / NAT rule changes, tested like Safe Mode: restore script + scheduler on the router, Keep / Undo, locked rules |
 | `vpn.py` / `vpninv.py` | site-to-site WireGuard VPNs it builds / VPNs already on routers (read-only) |
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
 | `version.py`, `updates.py` | the running version; daily new-release check and the "Upgrade now" request |
-| `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
+| `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, read-only server security check `check.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), Caddy and systemd files |
 | `topology.py` | the network map behind a router: Internet, networks, switches / APs, device groups, routes (from `RouterOS.topology()`) |
 | `tools/build_map.py` | rebuilds the built-in map data (`static/map/*.json`) from public-domain sources - run by hand, never by the server |
 | `static/` | the single-page web app (`app.js`), the geographic map (`geomap.js`, drawn on a canvas from `map/*.json`), sign-in, invite and first-run pages, `theme.js` (each person's colour theme and light/dark mode, applied before the page draws), built-in logo (`wordmark.svg`) and icon (`logo.svg`) |
