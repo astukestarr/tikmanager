@@ -171,6 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         if ctype == "application/json" or ctype.startswith("text/plain"):
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-TikManager-Version", __version__)   # open pages reload themselves after an upgrade
         for k, v in headers:
             self.send_header(k, v)
         self.end_headers()

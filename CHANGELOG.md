@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.6.4 - 2026-10-09
+
+- **Open pages pick up a new version by themselves.** A browser tab opened before TikManager was upgraded kept running
+  the old page (so new features - like 1.6.3's rule editor - didn't appear until you reloaded). Pages now reload on
+  their own once the server reports a new version - never while a dialog is open or you're typing.
+
 ## 1.6.3 - 2026-10-09
 
 - **Firewall rule editor laid out like WebFig**: Enabled and Comment at the top, then General (chain and match fields)

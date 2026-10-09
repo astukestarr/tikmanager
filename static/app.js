@@ -26,8 +26,18 @@ const bps = (n) => (n == null ? "—" : n < 1e6 ? `${(n / 1e3).toFixed(0)} kbps`
 
 let me = null, view = "dashboard", timer = null;
 
+// a page opened before TikManager was upgraded keeps running the old code: reload once the server reports a new
+// version - but not while a dialog is open or someone is typing (the next request after that does it)
+function newVersionLoaded(v) {
+  if (!me?.version || v === me.version || $("dlg")?.open || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
+  try { if (sessionStorage.getItem("reloadedFor") === v) return; sessionStorage.setItem("reloadedFor", v); } catch {}
+  location.reload();
+}
+
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", "X-CSRF-Token": me?.csrf || "", ...(opts.headers || {}) } });
+  const sv = r.headers.get("X-TikManager-Version");
+  if (sv) setTimeout(() => newVersionLoaded(sv), 0);
   const body = await r.json().catch(() => ({}));
   if (r.status === 401) { location.href = "/login"; throw new Error("Signed out"); }
   if (!r.ok) throw new Error(body.error || r.statusText);
