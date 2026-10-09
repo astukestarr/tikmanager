@@ -1325,7 +1325,12 @@ async function versionCard() {
       : !busy && u.latest && !u.available ? `<p class="small status ok">You're on the newest version.</p>`
       : !busy && u.checked_at && !u.error ? `<p class="small muted">No releases have been published yet.</p>` : ""}
     <div class="actions"><button class="btn" type="button" id="verCheckCard" ${busy ? "disabled" : ""}>Check for updates</button><span class="status" id="verStatus"></span></div>
-    ${securityBox(u.security || {})}`;
+    ${securityBox(u.security || {}, u)}`;
+  el.querySelectorAll(".sec-howto").forEach((b) => b.addEventListener("click", () => {
+    const box = b.nextElementSibling, open = box.classList.toggle("hidden") === false;
+    b.setAttribute("aria-expanded", String(open));
+    b.textContent = open ? "Hide steps" : "How to fix";
+  }));
   $("secRun")?.addEventListener("click", async () => {
     $("secRun").disabled = true;
     try { await post("/api/admin/security-check"); versionCard(); }
@@ -1344,11 +1349,87 @@ async function versionCard() {
   if (busy || u.security?.running) setTimeout(versionCard, 4000);
 }
 
+// "How to fix" for each server security finding (ids come from deploy/check.sh; README "Fixing server security
+// findings" has the same steps). Commands run on the TikManager server over SSH, as a user with sudo.
+const SSH_DROPIN = "/etc/ssh/sshd_config.d/01-hardening.conf";   // 01-: read before Ubuntu's / cloud-init's own files
+const SEC_FIXES = {
+  ufw_off: { why: "Without the firewall, everything listening on the server is reachable.",
+    steps: ["Turn the firewall back on - the rules the installer added are still there:"], cmds: ["sudo ufw --force enable", "sudo ufw status verbose"] },
+  ufw_default: { why: "Anything not explicitly allowed should be blocked.", cmds: ["sudo ufw default deny incoming", "sudo ufw reload"] },
+  ssh_open: { why: "SSH open to the internet gets password-guessing attempts all day.",
+    steps: ["Do this from your LAN (or the server's console), so you can't lock yourself out.",
+      "Allow SSH from your LAN only (use your LAN's subnet), then remove the rule that allows it from anywhere:"],
+    cmds: ["sudo ufw allow from 192.168.1.0/24 to any port 22 proto tcp", "sudo ufw status numbered", "sudo ufw delete <number of the 22/tcp ALLOW Anywhere rule>"] },
+  ufw_extra: { why: "Every open port is something to attack; keep only what TikManager needs (80, 443, 51820, SSH from the LAN).",
+    steps: ["List the rules with numbers and delete the ones you don't need:"], cmds: ["sudo ufw status numbered", "sudo ufw delete <number>"] },
+  ssh_root: { why: "Sign in as yourself and use sudo, so every action is tied to a person.",
+    cmds: [`echo 'PermitRootLogin no' | sudo tee -a ${SSH_DROPIN}`, "sudo sshd -t && sudo systemctl reload ssh"] },
+  ssh_password: { why: "Keys can't be guessed; passwords can.",
+    steps: ["1. On your PC (PowerShell): make a key if you don't have one, then copy it to the server - replace user and server.",
+      "2. Open a NEW window and check you can sign in with the key without a password. Keep your current session open until then.",
+      "3. Then turn off password sign-in on the server."],
+    pc: ["ssh-keygen -t ed25519",
+      "type $env:USERPROFILE\\.ssh\\id_ed25519.pub | ssh user@server \"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys\""],
+    cmds: [`echo 'PasswordAuthentication no' | sudo tee -a ${SSH_DROPIN}`, "sudo sshd -t && sudo systemctl reload ssh"] },
+  fail2ban: { why: "fail2ban blocks addresses that keep failing to sign in.", cmds: ["sudo systemctl enable --now fail2ban", "sudo fail2ban-client status sshd"] },
+  auto_updates: { why: "Security fixes for Ubuntu should install without anyone remembering to.",
+    steps: ["Answer Yes when asked:"], cmds: ["sudo apt install -y unattended-upgrades", "sudo dpkg-reconfigure -plow unattended-upgrades"] },
+  pending_updates: { why: "Automatic updates install these within a day; this means some are waiting (or held back).",
+    steps: ["Install them now (TikManager keeps running; Caddy may restart for a moment):"], cmds: ["sudo apt update && sudo apt upgrade"] },
+  reboot: { why: "Kernel and library fixes only take effect after a restart.",
+    steps: ["Restart out of hours - routers keep working; TikManager is offline for about a minute:"], cmds: ["sudo reboot"] },
+  ip_forward: { why: "With forwarding on, the server could route traffic between routers or into your LAN.",
+    cmds: ["sudo sysctl -w net.ipv4.ip_forward=0", "echo 'net.ipv4.ip_forward=0' | sudo tee /etc/sysctl.d/90-tikmanager.conf"] },
+  lan_reach: { why: "If the server is ever compromised, it shouldn't be a way into your office network.",
+    steps: ["The proper fix is on your network firewall (not this server): put the TikManager server in a DMZ / its own VLAN and block traffic from its address to your LAN, allowing only the internet (and the DNS server it uses).",
+      "As an extra layer on the server itself (if its gateway and DNS server are NOT on that LAN - otherwise allow those first):"],
+    cmds: ["sudo ufw deny out to 192.168.1.0/24"] },
+  listening: { why: "Something besides TikManager is listening for connections.",
+    steps: ["See which program it is, then stop it (or uninstall its package) if you don't need it:"], cmds: ["sudo ss -tulpn", "sudo systemctl disable --now <service name>"] },
+  app_bind: { why: "The app must only be reachable through Caddy (HTTPS), never directly.",
+    steps: ["Set TM_HOST=127.0.0.1 in the settings file and restart:"], cmds: ["sudo nano /etc/tikmanager/tikmanager.env", "sudo systemctl restart tikmanager"] },
+  caddy: { why: "Caddy is the HTTPS front door - without it nobody (and no router) can reach TikManager.",
+    cmds: ["sudo systemctl restart caddy", "sudo journalctl -u caddy -n 50 --no-pager"] },
+  cert: { why: "Caddy renews the certificate by itself; when it can't, it's usually DNS or a blocked port 80/443.",
+    steps: ["Check that the DNS name still points at this server and that ports 80 and 443 reach it from the internet, then look at Caddy's log:"],
+    cmds: ["sudo journalctl -u caddy --since '2 days ago' --no-pager | grep -iE 'error|certificate'", "sudo systemctl reload caddy"] },
+  perm_key: { why: "The master key decrypts router passwords and backups - only root and the service may read it.",
+    cmds: ["sudo chown root:tikmanager /etc/tikmanager/master.key", "sudo chmod 640 /etc/tikmanager/master.key"] },
+  perm_env: { why: "The settings file holds secrets.", cmds: ["sudo chown root:tikmanager /etc/tikmanager/tikmanager.env", "sudo chmod 640 /etc/tikmanager/tikmanager.env"] },
+  perm_wg: { why: "It holds the controller's WireGuard private key.", cmds: ["sudo chown root:root /etc/wireguard/wg0.conf", "sudo chmod 600 /etc/wireguard/wg0.conf"] },
+  code_writable: { why: "If the service could change its own code, a bug could become a permanent backdoor.",
+    cmds: ["sudo chown -R root:root /opt/tikmanager", "sudo chmod -R go-w /opt/tikmanager"] },
+  data_private: { why: "The database and backups should only be readable by the service.",
+    cmds: ["sudo chown -R tikmanager:tikmanager /var/lib/tikmanager", "sudo chmod o-rwx /var/lib/tikmanager"] },
+  login_shell: { why: "The service account should never be usable for signing in.", cmds: ["sudo usermod -s /usr/sbin/nologin tikmanager"] },
+  admin_group: { why: "The service account must not have admin (sudo) rights.", steps: ["Remove it from the group(s) shown by the first command:"],
+    cmds: ["id tikmanager", "sudo gpasswd -d tikmanager sudo"] },
+  service_running: { why: "TikManager itself isn't running.", cmds: ["sudo systemctl restart tikmanager", "sudo journalctl -u tikmanager -n 50 --no-pager"] },
+  service_user: { why: "The service's sandbox settings were changed.", steps: ["Put the original service file back (and remove any overrides):"],
+    cmds: ["systemctl cat tikmanager", "sudo rm -rf /etc/systemd/system/tikmanager.service.d", "sudo cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/", "sudo systemctl daemon-reload && sudo systemctl restart tikmanager"] },
+  db_copy: { why: "If the server dies, the database and master key are what you need to rebuild it.",
+    steps: ["Make a copy now (TikManager stops for a few seconds), then download it to a safe place (WinSCP or scp) and delete it from the server. It contains the master key - store it like a password."],
+    cmds: ["sudo systemctl stop tikmanager && sudo tar czf /root/tikmanager-$(date +%F).tgz /var/lib/tikmanager /etc/tikmanager; sudo systemctl start tikmanager"] },
+};
+SEC_FIXES.sandbox = SEC_FIXES.caps = SEC_FIXES.service_user;
+
 // the read-only server check (deploy/check.sh), run as root daily, after upgrades and on request
-function securityBox(s) {
+function securityBox(s, u = {}) {
   const bad = (s.results || []).filter((r) => r.status !== "pass").sort((a, b) => (a.status === "fail" ? 0 : 1) - (b.status === "fail" ? 0 : 1)), ok = (s.results || []).filter((r) => r.status === "pass");
+  const guide = u.repo ? `https://github.com/${u.repo}/blob/v${u.version}/README.md#fixing-server-security-findings` : "";
+  const fixFor = (r) => {
+    const f = r.status !== "pass" && SEC_FIXES[r.id];
+    if (!f) return "";
+    return `<button class="sec-howto" type="button" aria-expanded="false">How to fix</button>
+      <div class="sec-fix hidden"><p class="small">${esc(f.why)}</p>${(f.steps || []).map((x) => `<p class="small">${esc(x)}</p>`).join("")}
+        ${(f.pc || []).length ? `<p class="small"><b>On your PC</b> (PowerShell):</p><pre class="sec-cmd">${f.pc.map(esc).join("\n")}</pre>
+          <p class="small"><b>On the TikManager server:</b></p>` : ""}
+        ${(f.cmds || []).length ? `<pre class="sec-cmd">${f.cmds.map(esc).join("\n")}</pre>` : ""}
+        <p class="small muted">Run these on the TikManager server (SSH, as a user with sudo), then click <b>Run check</b>.
+          ${guide ? `<a href="${esc(guide)}" target="_blank" rel="noopener noreferrer">More in the guide</a>` : ""}</p></div>`;
+  };
   const row = (r) => `<li class="sec-${esc(r.status)}"><span class="sec-tag">${esc(r.status.toUpperCase())}</span><span class="small muted">${esc(r.section)}</span>
-      <span>${esc(r.text)}</span></li>`;
+      <span>${esc(r.text)} ${fixFor(r)}</span></li>`;
   const head = s.running ? `<span class="status">Running the check…</span>`
     : s.at ? `<span class="small muted">Checked ${ago(s.at)}</span>
         ${s.fails ? `<span class="pill sec-pill-fail">${s.fails} to fix</span>` : ""}${s.warns ? `<span class="pill sec-pill-warn">${s.warns} to look at</span>` : ""}

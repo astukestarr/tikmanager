@@ -103,7 +103,8 @@ class Updates:
                 d = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            rows = [{"status": str(r.get("status"))[:8], "section": str(r.get("section"))[:60], "text": str(r.get("text"))[:600]}
+            rows = [{"status": str(r.get("status"))[:8], "section": str(r.get("section"))[:60], "id": str(r.get("id") or "")[:40],
+                     "text": str(r.get("text"))[:600]}
                     for r in (d.get("results") or [])[:200] if isinstance(r, dict)]
             out.update(at=d.get("at"), fails=int(d.get("fails") or 0), warns=int(d.get("warns") or 0), results=rows)
             break

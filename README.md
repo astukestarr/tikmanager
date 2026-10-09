@@ -388,6 +388,37 @@ WARN or FAIL with what to do; it never changes anything. Two things it can't do 
 `/etc/tikmanager/master.key` (and the database) somewhere off the server, and block the server from your LAN on your
 network firewall.
 
+### Fixing server security findings
+
+Each WARN or FAIL on **Admin > Version & updates** has a **How to fix** link with these steps. Run the commands on the
+TikManager server (SSH, as a user with sudo), then click **Run check** again.
+
+| Finding | Fix |
+|---|---|
+| ufw is off | `sudo ufw --force enable` (the installer's rules are still there) |
+| ufw doesn't deny incoming | `sudo ufw default deny incoming && sudo ufw reload` |
+| SSH open to the whole internet | From your LAN or the console: `sudo ufw allow from 192.168.1.0/24 to any port 22 proto tcp` (your LAN), then `sudo ufw status numbered` and `sudo ufw delete <number>` for the 22/tcp ALLOW Anywhere rule |
+| Extra ufw rules | `sudo ufw status numbered`, then `sudo ufw delete <number>` for rules you don't need |
+| Root may sign in over SSH | `echo 'PermitRootLogin no' \| sudo tee -a /etc/ssh/sshd_config.d/01-hardening.conf` then `sudo sshd -t && sudo systemctl reload ssh` |
+| SSH accepts passwords | On your PC: `ssh-keygen -t ed25519` and copy the key to the server (`~/.ssh/authorized_keys`); check key sign-in works in a new window; then `echo 'PasswordAuthentication no' \| sudo tee -a /etc/ssh/sshd_config.d/01-hardening.conf` and `sudo sshd -t && sudo systemctl reload ssh` |
+| fail2ban isn't running | `sudo systemctl enable --now fail2ban` |
+| Automatic security updates are off | `sudo apt install -y unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades` (answer Yes) |
+| Security updates waiting | `sudo apt update && sudo apt upgrade` |
+| Reboot needed | `sudo reboot` out of hours (routers keep working; TikManager is offline for about a minute) |
+| IP forwarding is on | `sudo sysctl -w net.ipv4.ip_forward=0` and `echo 'net.ipv4.ip_forward=0' \| sudo tee /etc/sysctl.d/90-tikmanager.conf` |
+| Server can reach your LAN | On your **network firewall**: put the server in a DMZ / its own VLAN and block it from the LAN (allow internet and its DNS server). Extra layer on the server, if its gateway and DNS aren't on that LAN: `sudo ufw deny out to 192.168.1.0/24` |
+| Also listening | `sudo ss -tulpn` to see the program; `sudo systemctl disable --now <service>` if you don't need it |
+| TM_HOST isn't 127.0.0.1 | Set `TM_HOST=127.0.0.1` in `/etc/tikmanager/tikmanager.env`, then `sudo systemctl restart tikmanager` |
+| Caddy isn't running | `sudo systemctl restart caddy`; `sudo journalctl -u caddy -n 50 --no-pager` |
+| Certificate expiring / unreadable | Check the DNS name points at the server and ports 80 + 443 reach it; `sudo journalctl -u caddy --since '2 days ago' \| grep -iE 'error\|certificate'` |
+| Key / settings file permissions | `sudo chown root:tikmanager <file> && sudo chmod 640 <file>` (master.key, tikmanager.env); `/etc/wireguard/wg0.conf`: `sudo chown root:root` and `sudo chmod 600` |
+| Service can write its own code | `sudo chown -R root:root /opt/tikmanager && sudo chmod -R go-w /opt/tikmanager` |
+| Data folder not private | `sudo chown -R tikmanager:tikmanager /var/lib/tikmanager && sudo chmod o-rwx /var/lib/tikmanager` |
+| tikmanager account can log in / is an admin | `sudo usermod -s /usr/sbin/nologin tikmanager`; `sudo gpasswd -d tikmanager sudo` |
+| tikmanager isn't running | `sudo systemctl restart tikmanager`; `sudo journalctl -u tikmanager -n 50 --no-pager` |
+| Service sandbox changed | `sudo rm -rf /etc/systemd/system/tikmanager.service.d`, `sudo cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/`, `sudo systemctl daemon-reload && sudo systemctl restart tikmanager` |
+| No database copy / old copy | `sudo systemctl stop tikmanager && sudo tar czf /root/tikmanager-$(date +%F).tgz /var/lib/tikmanager /etc/tikmanager; sudo systemctl start tikmanager`, then download it to a safe place and delete it from the server - it contains the master key |
+
 How it's built to be safe (tunnels, encryption, least privilege, the updater): [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Where things live on the server

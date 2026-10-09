@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.9.1 - 2026-10-09
+
+- **How to fix** on every server security WARN / FAIL (Admin > Version & updates): why it matters, the steps, and the
+  exact commands - with commands for your PC and for the server shown separately - plus a link to the same steps in
+  the README ("Fixing server security findings"). Each check now carries an ID in its results so the right steps
+  always show.
+
 ## 1.9.0 - 2026-10-09
 
 - **Server security on Admin > Version & updates.** The read-only server check (`deploy/check.sh`) now runs by itself
