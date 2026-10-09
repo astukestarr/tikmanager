@@ -191,3 +191,5 @@ fieldset.up-when { border: 1px solid var(--border); border-radius: 10px; padding
 .th-sort:hover, .th-sort:focus-visible, .th-sort.on { color: var(--text); }
 .th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .th-arrow { display: inline-block; min-width: 1em; margin-left: 3px; font-size: 10px; color: var(--accent); }
+/* subnets in use */
+tr.sn-clash td { background: color-mix(in srgb, var(--warn) 9%, transparent); }

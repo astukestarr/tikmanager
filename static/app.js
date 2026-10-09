@@ -1336,6 +1336,83 @@ async function sites() {
   $("smOrg")?.addEventListener("change", (e) => { sitesView.org = e.target.value; draw(); });
   draw();
 }
+// --- subnets in use: every LAN subnet per client, with overlaps and reused ranges flagged ---------------------------------
+const subnetsView = { org: "", q: "", problems: false };
+const ipNum = (ip) => ip.split(".").reduce((a, o) => a * 256 + Number(o), 0);
+
+async function subnetsPage() {
+  const rows = await api("/api/sites");   // the same client-scoped data as the site map
+  const list = rows.flatMap((d) => d.networks.map((n) => {
+    const [first, last] = cidrRange(n.network), bits = Number(n.network.split("/")[1]);
+    return { d, n, first, last, bits, org: d.org || "Unassigned", hosts: bits >= 31 ? 2 ** (32 - bits) : 2 ** (32 - bits) - 2,
+             gateway: (n.address || "").split("/")[0] };
+  }));
+  for (const a of list) {
+    const overlap = (b) => b !== a && b.first <= a.last && a.first <= b.last;
+    // same client, another router (or a second network on the same router): a site-to-site VPN couldn't route both
+    a.clash = list.filter((b) => overlap(b) && b.d.org_id === a.d.org_id && (b.d.id !== a.d.id || b.n.interface !== a.n.interface));
+    // another client: harmless on its own, worth knowing before connecting two clients or merging
+    a.elsewhere = [...new Set(list.filter((b) => overlap(b) && b.d.org_id !== a.d.org_id).map((b) => b.org))];
+    a.factory = a.n.network === "192.168.88.0/24";
+  }
+  const orgs = [...new Map(rows.map((d) => [d.org_id, d.org || "Unassigned"])).entries()].sort((x, y) => x[1].localeCompare(y[1]));
+  const problems = list.filter((a) => a.clash.length).length;
+  $("main").innerHTML = `<h1>Subnets in use</h1>
+    <p class="muted">Every LAN subnet on every approved router, grouped by client. Read from the routers each time they're polled.</p>
+    <div class="row"><input id="snQ" type="search" placeholder="Search subnets, IPs, names or routers" value="${esc(subnetsView.q)}" aria-label="Search">
+      ${orgs.length > 1 ? `<select id="snOrg" aria-label="Client"><option value="">All clients</option>${orgs.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select>` : ""}
+      <label class="chk"><input type="checkbox" id="snProb" ${subnetsView.problems ? "checked" : ""}> Only overlaps</label>
+      <span class="spacer"></span><span class="small muted">${list.length} subnets · ${new Set(list.map((a) => a.d.org_id)).size} clients
+        ${problems ? ` · <span class="status warn">${problems} overlapping</span>` : ""}</span>
+      <button class="btn" type="button" id="snCsv">Export CSV</button></div>
+    <div id="snBody"></div>`;
+  if ($("snOrg")) $("snOrg").value = subnetsView.org;
+
+  const matches = (a) => {
+    const q = subnetsView.q.trim().toLowerCase();
+    if (subnetsView.org && String(a.d.org_id) !== subnetsView.org) return false;
+    if (subnetsView.problems && !a.clash.length) return false;
+    if (!q) return true;
+    // an IP address finds the subnet it belongs to
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(q)) { const n = ipNum(q); return n >= a.first && n <= a.last; }
+    return [a.n.network, a.n.name, a.n.interface, a.gateway, a.d.name, a.org].some((v) => (v || "").toLowerCase().includes(q));
+  };
+  const note = (a) => [
+    a.clash.length ? `<span class="status warn">Overlaps ${esc([...new Set(a.clash.map((b) => b.d.id === a.d.id ? `${b.n.name} (same router)` : b.d.name))].join(", "))}</span>` : "",
+    a.factory ? `<span class="pill">MikroTik default</span>` : "",
+    a.elsewhere.length ? `<span class="small muted" title="${esc(a.elsewhere.join(", "))}">Also used at ${a.elsewhere.length} other client${a.elsewhere.length === 1 ? "" : "s"}</span>` : "",
+  ].filter(Boolean).join(" ");
+  const shown = () => list.filter(matches).sort((x, y) => x.org.localeCompare(y.org) || x.first - y.first || x.bits - y.bits);
+
+  const draw = () => {
+    const items = shown();
+    const groups = new Map();
+    items.forEach((a) => { if (!groups.has(a.org)) groups.set(a.org, []); groups.get(a.org).push(a); });
+    $("snBody").innerHTML = items.length ? [...groups.entries()].map(([org, g]) => `<div class="card">
+      <div class="row"><h2>${esc(org)}</h2><span class="spacer"></span><span class="small muted">${g.length} subnet${g.length === 1 ? "" : "s"} on ${new Set(g.map((a) => a.d.id)).size} router${new Set(g.map((a) => a.d.id)).size === 1 ? "" : "s"}</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Subnet</th><th>Name</th><th>Router</th><th>Interface</th><th>Gateway</th><th class="num">Usable</th><th>Notes</th></tr></thead>
+      <tbody>${g.map((a) => `<tr class="${a.clash.length ? "sn-clash" : ""}"><td class="mono"><b>${esc(a.n.network)}</b></td><td>${esc(a.n.name)}</td>
+        <td><a href="#router/${a.d.id}"><span class="dot ${a.d.online ? "on" : "off"}"></span>${esc(a.d.name)}</a></td>
+        <td class="mono small">${esc(a.n.interface || "")}</td><td class="mono small">${esc(a.gateway)}</td>
+        <td class="num">${a.hosts.toLocaleString()}</td><td>${note(a)}</td></tr>`).join("")}</tbody></table></div></div>`).join("")
+      : `<p class="muted">No subnets match.</p>`;
+  };
+  $("snQ").addEventListener("input", (e) => { subnetsView.q = e.target.value; draw(); });
+  $("snOrg")?.addEventListener("change", (e) => { subnetsView.org = e.target.value; draw(); });
+  $("snProb").addEventListener("change", (e) => { subnetsView.problems = e.target.checked; draw(); });
+  $("snCsv").addEventListener("click", () => {
+    const cell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const lines = [["Client", "Subnet", "Name", "Router", "Interface", "Gateway", "Usable hosts", "Overlaps", "Also used at"].join(",")]
+      .concat(shown().map((a) => [a.org, a.n.network, a.n.name, a.d.name, a.n.interface, a.gateway, a.hosts,
+        a.clash.map((b) => b.d.name).join("; "), a.elsewhere.join("; ")].map(cell).join(",")));
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([lines.join("\r\n")], { type: "text/csv" }));
+    link.download = `subnets-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  });
+  draw();
+}
 // --- site-to-site VPN (WireGuard, hub and spoke) ----------------------------------------------------------------------
 const vpnPill = (st) => `<span class="pill ${{ active: "up-done", failed: "up-failed", applying: "up-run", disabled: "up-cancelled" }[st] || ""}">${esc({ draft: "Draft", applying: "Applying...", active: "Active", failed: "Needs attention", disabled: "Disabled" }[st] || st)}</span>`;
 function tunnelState(s) {
@@ -1517,7 +1594,7 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
 }
-const VIEWS = { dashboard, routers, sites, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   clearInterval(timer);

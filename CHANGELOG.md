@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.3.0 - 2026-10-09
+
+- **Subnets in use**: a new Subnets page lists every LAN subnet on every approved router, grouped by client, with its
+  name, router, interface, gateway and size. Subnets that overlap another of the same client's subnets are flagged (a
+  site-to-site VPN couldn't route both), as are the MikroTik factory default (192.168.88.0/24) and ranges also used at
+  other clients. Search by subnet, name, router or an IP address (finds the subnet it belongs to), show only overlaps,
+  and export to CSV. Client users see only their own.
+
 ## 1.2.0 - 2026-10-08
 
 - **Install straight on Ubuntu**: `deploy/get.sh` downloads the newest release from GitHub on the server itself and

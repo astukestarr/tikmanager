@@ -11,7 +11,7 @@ SQLite, WireGuard and Caddy. No build step, no package manager.
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Subnets in use](#subnets-in-use) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -188,6 +188,18 @@ router - to remove that too, paste this into the router's terminal:
     /interface wireguard remove [find name=tikmanager]
 
 and remove `10.77.0.1/32` from IP > Services > www (*Available From*) if it was added there.
+
+## Subnets in use
+
+**Subnets** lists every LAN subnet on every approved router, grouped by client: subnet, name (the interface comment),
+router, interface, gateway address and usable addresses. It's read from the routers each time they're polled, so it
+stays current without anyone keeping a spreadsheet.
+- **Overlaps** between a client's own subnets are flagged and tinted - two sites using the same range can't be joined
+  with a site-to-site VPN without renumbering one. **Only overlaps** shows just those.
+- The **MikroTik default** (192.168.88.0/24) is marked, and so are ranges **also used at other clients** (fine on their
+  own; worth knowing before connecting two networks).
+- Search by subnet, name, router or client - or type an IP address to find the subnet it belongs to.
+- **Export CSV** downloads what's shown. Client users see only their own subnets.
 
 ## Clients and their users
 
