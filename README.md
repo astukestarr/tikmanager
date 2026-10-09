@@ -11,7 +11,7 @@ SQLite, WireGuard and Caddy. No build step, no package manager.
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Subnets in use](#subnets-in-use) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Subnets in use](#subnets-in-use) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -189,6 +189,26 @@ router - to remove that too, paste this into the router's terminal:
     /interface wireguard remove [find name=tikmanager]
 
 and remove `10.77.0.1/32` from IP > Services > www (*Available From*) if it was added there.
+
+## Maps: where routers are, and what's behind them
+
+**Site map > Map** shows every router where it is. Zoom from the whole country down to town level: state borders,
+county lines, interstates and the name of every incorporated US city and town appear as you zoom in (wheel, pinch,
+double-click or +/-; drag to pan). Routers close together show as a numbered group - click it to zoom in; red means at
+least one is offline. Click a router to open it. The map is drawn by TikManager from built-in public-domain data
+(Natural Earth and the US Census Bureau), so nothing is loaded from other sites.
+
+**A router's location** is set on its page (**Location > Set location**): type an address, press **Look up** (optional
+- only the text you type is sent to OpenStreetMap's address search), type the coordinates, or click the spot on the
+map. Routers with a GPS receiver place themselves; a location set by hand always wins. Routers without one are listed
+under the map.
+
+**Network map** (each router's page): Internet and its gateway -> the router -> each network / VLAN -> the switches and
+access points found by neighbour discovery (MNDP / LLDP / CDP), each with the devices on its port -> groups of devices:
+phones, printers, servers & VMs, cameras, computers, personal devices, IoT and unidentified. Click a group to list its
+devices (name, IP, MAC, port). Routes to other networks (VPN, static, dynamic) are listed for technicians; client users
+see their networks but not the routing table. Infrastructure and routes come straight from the router; end devices are
+recognised by their maker and name, so some stay "Unidentified" (unlike a scanner, the router doesn't probe them).
 
 ## Subnets in use
 

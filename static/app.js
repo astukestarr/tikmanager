@@ -276,7 +276,9 @@ async function router(id) {
       ${d.vpn_found && d.vpn_found.length ? `<div class="card"><div class="row"><h2>VPNs on this router</h2><span class="spacer"></span><span class="small muted">read ${ago(d.vpn_inv_at)}</span></div>
         <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th></tr></thead>
         <tbody>${tunnelRows(d.vpn_found.map((t) => ({ r: d, t })), false)}</tbody></table></div></div>` : ""}
-      <div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
+      ${d.online ? `<div class="card" id="topoCard"><h2>Network map</h2><p class="muted small">Reading the router's routes, neighbours and devices...</p></div>` : ""}
+      <div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>
+      <div class="card" id="locCard"><h2>Location</h2></div>` : ""}
       <div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>
       ${canWrite() ? `<div class="card"><h2>Manage</h2>
         ${d.state === "adopted" ? `<div class="row"><label class="field">Router identity (on the MikroTik) <input id="rIdent" value="${esc(d.identity || "")}" maxlength="64" spellcheck="false"></label>
@@ -330,6 +332,8 @@ async function router(id) {
   $("rUpCancel")?.addEventListener("click", async () => { await post(`/api/upgrades/${d.upgrade.id}/cancel`); router(d.id); });
   loadBackups(d);
   if ($("dhcpCard")) loadDhcp(d);
+  if ($("topoCard")) loadTopology(d);
+  loadLocation(d);
   const load = async () => {
     const s = await api(`/api/devices/${d.id}/series?range=${rView.range}&iface=${encodeURIComponent(rView.iface)}`);
     const sel = $("cIface");
@@ -1360,8 +1364,158 @@ function showAppearance() {
   draw();
 }
 
+// --- network map behind one router (Internet -> router -> networks -> switches / APs -> device groups) -------------------
+const TI = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const TOPO_ICONS = {
+  cloud: TI('<path d="M7 18a4.5 4.5 0 0 1-.5-9A6 6 0 0 1 18 9.5a4 4 0 0 1-.5 8.5z"/>'),
+  router: TI('<rect x="2.5" y="13" width="19" height="7" rx="2"/><path d="M6.5 16.5h.01M10 16.5h.01M8 13l-2-6M16 13l2-6"/>'),
+  net: TI('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>'),
+  network: TI('<rect x="2" y="8" width="20" height="8" rx="2"/><path d="M6 12h.01M9 12h.01M12 12h.01M15 12h.01M18 12h.01"/>'),
+  ap: TI('<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1"/>'),
+  phone: TI('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>'),
+  printer: TI('<path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7"/>'),
+  camera: TI('<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>'),
+  server: TI('<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/>'),
+  computer: TI('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
+  mobile: TI('<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>'),
+  iot: TI('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'),
+  unknown: TI('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6M12 17h.01"/>'),
+};
+const isAp = (i) => /ap|wap|cap|wifi|wireless|uap|u6|u7|access/i.test(`${i.model} ${i.name}`);
+
+async function loadTopology(d, refresh = false) {
+  const card = $("topoCard");
+  if (!card) return;
+  let t;
+  try { t = await api(`/api/devices/${d.id}/topology${refresh ? "?refresh=1" : ""}`); }
+  catch (e) { card.innerHTML = `<h2>Network map</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  if (!$("topoCard")) return;
+  const bubbles = (groups, where) => groups.map((g) => `<button type="button" class="tbub k-${esc(g.kind)}" data-where="${where}" data-kind="${esc(g.kind)}"
+      title="${esc(g.label)}: ${g.count}"><span class="tic">${TOPO_ICONS[g.kind] || TOPO_ICONS.unknown}</span><b class="tcnt">${g.count}</b><span class="tlbl">${esc(g.label)}</span></button>`).join("");
+  const gw = t.internet.gateways;
+  card.innerHTML = `<div class="row"><h2>Network map</h2><span class="spacer"></span>
+      <span class="small muted">${t.infra} switch${t.infra === 1 ? "" : "es"} / APs · ${t.devices} devices · read ${ago(t.read_at)}</span>
+      <button class="btn" type="button" id="topoRefresh">Refresh</button></div>
+    <div class="topo">
+      <div class="tnode tcloud"><span class="tic">${TOPO_ICONS.cloud}</span><span><b>Internet</b>${gw.length ? `<small>${gw.map((g) => `via ${esc(g.gateway)}${gw.length > 1 ? (g.active ? " (active)" : " (standby)") : ""}`).join(" · ")}</small>` : ""}</span></div>
+      <div class="tstem"></div>
+      <div class="trouter-row">
+        <div class="tnode trouter"><span class="tic">${TOPO_ICONS.router}</span><span><b>${esc(d.name)}</b><small>${esc(t.internet.wan_ip || "")}${t.internet.interface ? ` · WAN ${esc(t.internet.interface)}` : ""}</small></span></div>
+      </div>
+      <div class="tstem"></div>
+      <div class="tnets ${t.networks.length === 1 ? "single" : ""}">${t.networks.map((n, ni) => `<div class="tcol">
+        <div class="tnode tnet"><span class="tic">${TOPO_ICONS.net}</span><span><b>${esc(n.name)}</b><small class="mono">${esc(n.network)}${n.vlan ? ` · VLAN ${esc(n.vlan)}` : ""}</small></span></div>
+        ${n.infra.map((i, ii) => `<div class="tbranch"><div class="tnode tinfra"><span class="tic">${isAp(i) ? TOPO_ICONS.ap : TOPO_ICONS.network}</span>
+            <span><b>${esc(i.name)}</b><small>${esc([i.model || i.platform, i.ip, i.port ? `port ${i.port}` : ""].filter(Boolean).join(" · "))}</small></span></div>
+            ${i.groups.length ? `<div class="tgroups">${bubbles(i.groups, `${ni}.${ii}`)}</div>` : ""}</div>`).join("")}
+        ${n.groups.length ? `<div class="tbranch direct">${n.infra.length ? `<div class="small muted tdirect">Directly on the router</div>` : ""}<div class="tgroups">${bubbles(n.groups, `${ni}`)}</div></div>` : ""}
+        ${!n.infra.length && !n.groups.length ? `<div class="small muted tempty">No devices seen</div>` : ""}
+      </div>`).join("")}</div>
+    </div>
+    ${t.routes.length ? `<div class="troutes"><div class="small muted">Routes to other networks</div>${t.routes.map((r) => `<div class="troute ${r.active ? "" : "off"}">
+          <span class="pill r-${esc(r.kind)}">${esc({ vpn: "VPN", static: "Static", dynamic: "Dynamic" }[r.kind] || r.kind)}</span>
+          <span class="mono">${esc(r.dst)}</span><span class="small muted">via ${esc(r.gateway)}${r.comment ? ` · ${esc(r.comment)}` : ""}${r.active ? "" : " · inactive"}</span></div>`).join("")}</div>`
+          : t.routes_hidden ? `<div class="troutes small muted">This router also routes to other networks (shown to technicians).</div>` : ""}
+    <div id="topoList"></div>
+    <p class="small muted">Switches and access points come from neighbour discovery (MNDP / LLDP / CDP); devices from the ARP table and
+      DHCP leases, recognised by maker and name - some stay Unidentified. Click a group to list its devices.</p>`;
+  const show = (where, kind) => {
+    rView.topoSel = [where, kind];
+    const [ni, ii] = where.split(".").map(Number);
+    const n = t.networks[ni], holder = ii === undefined || Number.isNaN(ii) ? n : n.infra[ii];
+    const g = (holder?.groups || []).find((x) => x.kind === kind);
+    document.querySelectorAll(".tbub").forEach((b) => b.classList.toggle("on", b.dataset.where === where && b.dataset.kind === kind));
+    if (!g) { $("topoList").innerHTML = ""; return; }
+    $("topoList").innerHTML = `<div class="topo-list"><div class="row"><b>${esc(g.label)}</b><span class="muted small">${esc(holder.name)} · ${g.count}</span>
+        <span class="spacer"></span><button class="btn" type="button" id="topoClose">Close</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>IP address</th><th>MAC address</th><th>Port</th></tr></thead>
+      <tbody>${g.devices.map((x) => `<tr><td>${esc(x.name)}</td><td class="mono">${esc(x.ip)}</td><td class="mono small">${esc(x.mac)}</td><td class="mono small">${esc(x.port)}</td></tr>`).join("")}</tbody></table></div></div>`;
+    $("topoClose").addEventListener("click", () => { rView.topoSel = null; show("-", "-"); });
+  };
+  card.querySelectorAll(".tbub").forEach((b) => b.addEventListener("click", () => show(b.dataset.where, b.dataset.kind)));
+  $("topoRefresh").addEventListener("click", () => loadTopology(d, true));
+  if (rView.topoSel) show(...rView.topoSel);
+}
+
+// --- where the router is: shown on a small map; technicians type an address, look it up, or click the spot -------------
+function loadLocation(d) {
+  const card = $("locCard");
+  if (!card) return;
+  const has = d.lat != null && d.lon != null;
+  const src = d.loc_source === "gps" ? "from the router's GPS" : d.loc_source === "manual" ? "set by hand" : "";
+  card.innerHTML = `<div class="row"><h2>Location</h2><span class="spacer"></span>
+      ${canWrite() ? `<button class="btn" type="button" id="locEdit">${has ? "Change" : "Set location"}</button>` : ""}</div>
+    <p class="${has ? "" : "muted"}">${has ? `${esc(d.location || "")} <span class="mono small muted">${Number(d.lat).toFixed(5)}, ${Number(d.lon).toFixed(5)}</span>
+      ${src ? `<span class="small muted">· ${src}</span>` : ""}` : "Not set yet - it won't appear on the map until it is."}</p>
+    <div id="locEditor"></div>
+    <div class="loc-map" id="locMap"></div>`;
+  const map = new GeoMap($("locMap"), { pins: has ? [{ id: d.id, name: d.name, lat: d.lat, lon: d.lon, online: d.online }] : [], fitOnLoad: true });
+  $("locEdit")?.addEventListener("click", () => {
+    rView.hold = true;   // don't let the page's auto-refresh throw the edit away
+    let pick = has ? [d.lat, d.lon] : null;
+    $("locEdit").remove();
+    $("locEditor").innerHTML = `<div class="loc-edit">
+      <label class="field">Address or description (shown on the router page)
+        <span class="row"><input id="locAddr" value="${esc(d.location || "")}" maxlength="200" placeholder="e.g. 123 Main St, Wichita, KS">
+        <button class="btn" type="button" id="locLook" title="Sends only this text to OpenStreetMap's address search">Look up</button></span></label>
+      <div id="locHits"></div>
+      <div class="row"><label class="field">Latitude <input id="locLat" inputmode="decimal" value="${has ? d.lat : ""}" placeholder="37.68720"></label>
+        <label class="field">Longitude <input id="locLon" inputmode="decimal" value="${has ? d.lon : ""}" placeholder="-97.33010"></label></div>
+      <p class="small muted">Or click the spot on the map below (zoom in for towns and streets' worth of detail).</p>
+      <div class="actions"><button class="btn primary" type="button" id="locSave">Save location</button>
+        ${has ? `<button class="btn danger" type="button" id="locClear">Remove</button>` : ""}
+        <button class="btn" type="button" id="locCancel">Cancel</button><span class="status" id="locStatus"></span></div></div>`;
+    const setPick = (lat, lon, zoom) => {
+      pick = [lat, lon]; $("locLat").value = lat; $("locLon").value = lon; map.setPick(lat, lon);
+      if (zoom) { const [x, y] = map.project(lat, lon); map.fitBox(x - 0.05, y - 0.05, x + 0.05, y + 0.05, 600); }
+    };
+    map.opts.onPick = (lat, lon) => setPick(lat, lon, false);
+    if (pick) map.setPick(...pick);
+    const typed = () => { const lat = parseFloat($("locLat").value), lon = parseFloat($("locLon").value); if (!Number.isNaN(lat) && !Number.isNaN(lon)) setPick(lat, lon, true); };
+    $("locLat").addEventListener("change", typed); $("locLon").addEventListener("change", typed);
+    const say = (t, k) => { $("locStatus").textContent = t; $("locStatus").className = `status ${k || ""}`; };
+    $("locLook").addEventListener("click", async () => {
+      say("Looking up…");
+      try {
+        const r = await post("/api/geocode", { q: $("locAddr").value });
+        say(r.results.length ? "" : "Nothing found - try a simpler address, or click the map.", r.results.length ? "" : "err");
+        $("locHits").innerHTML = r.results.map((x, i) => `<button type="button" class="loc-hit" data-i="${i}">${esc(x.label)}</button>`).join("");
+        $("locHits").querySelectorAll(".loc-hit").forEach((b) => b.addEventListener("click", () => {
+          const x = r.results[Number(b.dataset.i)];
+          setPick(Number(x.lat.toFixed(6)), Number(x.lon.toFixed(6)), true);
+          $("locHits").innerHTML = "";
+        }));
+      } catch (e) { say(e.message, "err"); }
+    });
+    const done = () => { rView.hold = false; router(d.id); };
+    $("locCancel").addEventListener("click", done);
+    $("locSave").addEventListener("click", async () => {
+      try { await post(`/api/devices/${d.id}/location`, { lat: $("locLat").value, lon: $("locLon").value, address: $("locAddr").value }); done(); }
+      catch (e) { say(e.message, "err"); }
+    });
+    $("locClear")?.addEventListener("click", async (e) => {
+      if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to remove"; return; }
+      await post(`/api/devices/${d.id}/location`, { clear: true }); done();
+    });
+  });
+}
+
+// --- the Map tab of the Site map: every router where it is ---------------------------------------------------------
+function geoTab(rows, body) {
+  const placed = rows.filter((d) => d.lat != null), missing = rows.filter((d) => d.lat == null);
+  body.innerHTML = `<div class="card geo-card"><div class="geo-wrap" id="geoMap"></div>
+      <div class="row small muted geo-legend"><span><span class="dot on"></span>Online</span><span><span class="dot off"></span>Offline (or a group with one offline)</span>
+        <span>Numbers are groups of routers - click one to zoom in.</span><span class="spacer"></span><span>${placed.length} of ${rows.length} routers placed</span></div></div>
+    ${missing.length ? `<div class="card"><h2>No location yet (${missing.length})</h2><p class="small muted">Open a router and use <b>Set location</b>
+      (type an address, look it up, or click the spot on the map). Routers with GPS place themselves.</p>
+      <div class="geo-missing">${missing.map((d) => `<a href="#router/${d.id}" data-dev="${d.id}"><span class="dot ${d.online ? "on" : "off"}"></span>${esc(d.name)}<span class="small muted"> · ${esc(d.org || "")}</span></a>`).join("")}</div></div>` : ""}`;
+  new GeoMap($("geoMap"), { pins: placed.map((d) => ({ id: d.id, name: d.name, lat: d.lat, lon: d.lon, online: d.online, sub: [d.org, d.site].filter(Boolean).join(" · ") })),
+                           onSelect: (p) => go("router", p.id) });
+  body.querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
+}
+
 // --- site map (like UniFi's Site Manager): every router with its WAN address and the LAN networks behind it -------------
-const sitesView = { org: "", q: "" };
+const sitesView = { org: "", q: "", tab: "map" };
 
 function cidrRange(c) {   // "192.168.1.0/24" -> [first, last] as numbers
   const [ip, bits] = c.split("/"), n = ip.split(".").reduce((a, o) => a * 256 + Number(o), 0), size = 2 ** (32 - Number(bits));
@@ -1378,7 +1532,9 @@ async function sites() {
   const orgs = [...new Map(rows.map((d) => [d.org_id, d.org || "Unassigned"])).entries()];
   const clashes = flat.filter((x) => x.n.clash.length).length;
   $("main").innerHTML = `<h1>Site map</h1>
-    <div class="row"><input id="smQ" type="search" placeholder="Search routers, networks or subnets" value="${esc(sitesView.q)}">
+    <div class="tabs" role="tablist">${[["map", "Map"], ["sites", "Networks"]].map(([k, l]) =>
+      `<button type="button" role="tab" data-smtab="${k}" class="${sitesView.tab === k ? "active" : ""}">${l}</button>`).join("")}</div>
+    <div class="row sm-filters"><input id="smQ" type="search" placeholder="Search routers, networks or subnets" value="${esc(sitesView.q)}">
       ${orgs.length > 1 ? `<select id="smOrg"><option value="">All clients</option>${orgs.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select>` : ""}
       <span class="spacer"></span><span class="small muted">${rows.length} routers · ${flat.length} networks${clashes ? ` · <span class="status warn">${clashes} overlapping</span>` : ""}</span></div>
     <div id="smBody"></div>`;
@@ -1387,6 +1543,7 @@ async function sites() {
     const q = sitesView.q.toLowerCase();
     const shown = rows.filter((d) => (!sitesView.org || String(d.org_id) === sitesView.org) &&
       (!q || [d.name, d.wan_ip, d.site, d.org].concat(d.networks.flatMap((n) => [n.name, n.network])).some((v) => (v || "").toLowerCase().includes(q))));
+    if (sitesView.tab === "map") return geoTab(shown, $("smBody"));
     const groups = new Map();
     shown.forEach((d) => { if (!groups.has(d.org_id)) groups.set(d.org_id, []); groups.get(d.org_id).push(d); });
     $("smBody").innerHTML = shown.length ? [...groups.values()].map((list) => `<section class="sm-org"><h2>${esc(list[0].org || "Unassigned")}</h2><div class="sm-tree">
@@ -1401,6 +1558,7 @@ async function sites() {
       : `<p class="muted">No routers match.</p>`;
     document.querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
   };
+  document.querySelectorAll("[data-smtab]").forEach((b) => b.addEventListener("click", () => { sitesView.tab = b.dataset.smtab; sites(); }));
   $("smQ").addEventListener("input", (e) => { sitesView.q = e.target.value; draw(); });
   $("smOrg")?.addEventListener("change", (e) => { sitesView.org = e.target.value; draw(); });
   draw();
@@ -1666,13 +1824,14 @@ async function vpnView(id) {
 const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
+  rView.hold = false;
   clearInterval(timer);
   document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === v || (v === "router" && b.dataset.view === "routers") || (v === "vpn" && b.dataset.view === "vpns")));
   history.replaceState(null, "", arg != null ? `#${v}/${arg}` : `#${v}`);
   try {
     await (v === "router" ? router(arg) : VIEWS[v](arg));
     // auto-refresh, skipped while someone is typing in a field on the page
-    if (v === "dashboard" || v === "router") timer = setInterval(() => { if (document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
+    if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       (v === "router" ? router(arg) : dashboard()).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => { if (!$("dlg").open) upgradesView().catch(() => {}); }, 20000);
   } catch (e) { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; }

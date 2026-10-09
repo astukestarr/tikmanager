@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.5.0 - 2026-10-09
+
+- **Geographic map** (Site map > Map): every router where it is, from the whole country down to town level - state
+  borders, county lines, interstates and the name of every incorporated US city and town appear as you zoom in. Routers
+  group into numbered clusters when zoomed out (red if one is offline); click one to open it. Drawn by TikManager from
+  built-in public-domain map data - nothing is loaded from other sites.
+- **Router location**: set on the router's page - type an address, look it up (optional: only the text you type is
+  sent to OpenStreetMap's address search), enter coordinates, or click the spot on the map. Routers with a GPS receiver
+  place themselves; a location set by hand always wins.
+- **Network map** on each router's page (like Auvik's): Internet and gateway -> router -> its networks and VLANs ->
+  switches and access points found by neighbour discovery (MNDP / LLDP / CDP), each with the devices on its port ->
+  groups of devices (phones, printers, servers & VMs, cameras, computers, personal devices, IoT, unidentified) -
+  click a group for its devices (name, IP, MAC, port). Routes to other networks (VPN, static, dynamic) are listed
+  for technicians; client users see their networks but not the routing table.
+
 ## 1.4.0 - 2026-10-09
 
 - **New look**: a full-height coloured sidebar with the logo, who's signed in and an icon for every page; a clean top

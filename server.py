@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import adoption
+import topology
 from config import ROOT, master_key, settings
 from db import DB
 from entra import STATE_COOKIE, AuthError, Entra
@@ -36,6 +37,7 @@ from branding import Branding
 from appsettings import AppSettings
 from updates import Updates
 from version import __version__
+import urllib.request
 from integrations import IntegrationError, Integrations, norm
 from thumbs import Thumbs
 from vault import Vault
@@ -78,6 +80,9 @@ tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 login_limit = RateLimiter(10, 300)     # per IP
+topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
+geo_lock = threading.Lock()
+geo_last = [0.0]
 adopt_limit = RateLimiter(30, 300)     # per IP
 pending_logins: dict = {}              # ticket -> {user_id, created, enroll_secret}
 pending_lock = threading.Lock()
@@ -88,6 +93,25 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
+
+
+def geocode(text):
+    """Address -> up to 5 candidates via OpenStreetMap's Nominatim (their policy: identify yourself, at most one request a
+    second). Only the typed text is sent, and only when someone clicks Look up."""
+    with geo_lock:
+        wait = 1.1 - (time.time() - geo_last[0])
+        if wait > 0:
+            time.sleep(wait)
+        geo_last[0] = time.time()
+    url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode({"q": text, "format": "jsonv2", "limit": 5})
+    req = urllib.request.Request(url, headers={"User-Agent": f"TikManager/{__version__} (self-hosted MikroTik controller)",
+                                               "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            rows = json.loads(r.read() or b"[]")
+    except Exception as e:  # noqa: BLE001 - offline, rate-limited...
+        raise HttpError(502, f"The address lookup didn't answer ({e}). Enter the coordinates or pick the spot on the map instead.") from None
+    return [{"label": x.get("display_name", "")[:200], "lat": float(x["lat"]), "lon": float(x["lon"])} for x in rows if x.get("lat")]
 
 
 class HttpError(Exception):
@@ -282,6 +306,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.static("login.html")
         if re.fullmatch(r"/invite/[A-Za-z0-9_-]{20,80}", path):
             return self.static("invite.html")
+        if m := re.fullmatch(r"/map/(base|detail)\.json", path):   # built-in map data (public domain, tools/build_map.py)
+            return self.static(f"map/{m.group(1)}.json")
         if re.fullmatch(r"/[a-z]+\.(js|css|svg)", path):
             return self.static(path[1:])
         if path == "/auth/login":
@@ -343,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require()
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.online, d.wan_ip, d.public_ip, d.model, d.thumb_slug,
-                            d.networks, v.name AS vpn, v.id AS vpn_id, CASE WHEN v.hub_device_id = d.id THEN 1 ELSE 0 END AS vpn_hub
+                            d.networks, d.lat, d.lon, d.location, d.loc_source, v.name AS vpn, v.id AS vpn_id, CASE WHEN v.hub_device_id = d.id THEN 1 ELSE 0 END AS vpn_hub
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                             LEFT JOIN vpn_sites vs ON vs.device_id = d.id AND vs.state <> 'removing' LEFT JOIN vpns v ON v.id = vs.vpn_id
                             WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
@@ -467,6 +493,21 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require(tech=True)
             return self.json({"command": adoption.command(settings, self.enroll_token()), "pending": db.one(
                 "SELECT COUNT(*) AS n FROM devices WHERE state='pending'")["n"], "rotated_at": db.setting("enroll_rotated_at")})
+        if m := re.fullmatch(r"/api/devices/(\d+)/topology", path):   # network map behind one router, read live
+            s = self.require()
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            key = d["id"]
+            hit = topo_cache.get(key)
+            if not hit or time.time() - hit[0] > 60 or q.get("refresh") == "1":
+                try:
+                    hit = (time.time(), poller.client(d).topology())
+                except RouterError as e:
+                    raise HttpError(502, f"Couldn't read the router's tables: {e}") from None
+                topo_cache[key] = hit
+            # client users see their network, but not the full routing table (other networks an MSP connected)
+            return self.json({**topology.build(hit[1], d, full=s["kind"] == "tech"), "read_at": hit[0]})
         if m := re.fullmatch(r"/api/devices/(\d+)/dhcp", path):   # DHCP leases, read live from the router
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -648,6 +689,30 @@ class Handler(BaseHTTPRequestHandler):
             db.event(d["id"], org["id"], "approved", f"by {s['email']} for {org['name']}")
             db.audit(s["email"], "router approved", d["name"], self.client_ip(), org_id=org["id"])
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/location", path):   # where the router is, for the map
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            b = self.body()
+            if b.get("clear"):
+                db.run("UPDATE devices SET lat=NULL, lon=NULL, location=NULL, loc_source=NULL WHERE id=?", (d["id"],))
+                db.audit(s["email"], "router location cleared", d["name"], self.client_ip(), org_id=d["org_id"])
+                return self.json({"ok": True})
+            try:
+                lat, lon = float(b.get("lat")), float(b.get("lon"))
+            except (TypeError, ValueError):
+                raise HttpError(400, "Enter the latitude and longitude as numbers (e.g. 37.6872, -97.3301).") from None
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise HttpError(400, "Latitude must be -90 to 90 and longitude -180 to 180.")
+            label = re.sub(r"[\x00-\x1f]", " ", str(b.get("address") or "")).strip()[:200]
+            db.run("UPDATE devices SET lat=?, lon=?, location=?, loc_source='manual' WHERE id=?", (round(lat, 6), round(lon, 6), label, d["id"]))
+            db.audit(s["email"], "router location set", f"{d['name']}: {label or f'{lat:.4f}, {lon:.4f}'}", self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True})
+        if path == "/api/geocode":   # optional address lookup: only what the person typed goes to OpenStreetMap's Nominatim
+            s = self.require(tech=True, write=True)
+            text = str(self.body().get("q") or "").strip()[:200]
+            if len(text) < 3:
+                raise HttpError(400, "Type an address or place.")
+            return self.json({"results": geocode(text)})
         if m := re.fullmatch(r"/api/devices/(\d+)/rename", path):
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))

@@ -139,6 +139,40 @@ class RouterOS:
                         "expires": _dur_s(l.get("expires-after")), "comment": l.get("comment") or ""})
         return out
 
+    def topology(self):
+        """What the network map needs, read live (read-only): routing table, discovered neighbours (MNDP / LLDP / CDP:
+        switches, access points, other routers), ARP and bridge host tables, DHCP leases and the router's addresses."""
+        pick = lambda rows, keys: [{k: r.get(k) for k in keys if r.get(k) not in (None, "")} for r in rows or []]
+        return {
+            "routes": pick(self.optional(lambda: self.get("/ip/route"), []),
+                           ("dst-address", "gateway", "immediate-gw", "distance", "active", "static", "dynamic", "connect", "disabled",
+                            "routing-table", "comment", "vrf-interface", "bgp", "ospf")),
+            "neighbors": pick(self.optional(lambda: self.get("/ip/neighbor"), []),
+                              ("interface", "address", "address4", "mac-address", "identity", "platform", "board", "version",
+                               "system-description", "interface-name", "discovered-by")),
+            "arp": pick(self.optional(lambda: self.get("/ip/arp"), []), ("address", "mac-address", "interface", "complete", "dynamic", "status")),
+            "hosts": pick(self.optional(lambda: self.get("/interface/bridge/host"), []), ("mac-address", "on-interface", "bridge", "interface", "local", "vid")),
+            "leases": self.dhcp_leases(),
+            "addresses": pick(self.optional(lambda: self.get("/ip/address"), []), ("address", "network", "interface", "disabled", "comment")),
+            "interfaces": pick(self.optional(lambda: self.get("/interface"), []), ("name", "type", "comment", "running", "disabled")),
+            "vlans": pick(self.optional(lambda: self.get("/interface/vlan"), []), ("name", "vlan-id", "interface")),
+        }
+
+    def gps(self):
+        """(latitude, longitude) from a GPS receiver (RouterOS gps package / LTE modems with GPS), or None."""
+        res = self.optional(lambda: self._req("POST", "/system/gps/monitor", {"once": ""}), None)
+        rows = res if isinstance(res, list) else [res] if isinstance(res, dict) else []
+        for r in rows:
+            if str(r.get("valid", "")).lower() not in ("true", "yes"):
+                continue
+            try:
+                lat, lon = float(r.get("latitude")), float(r.get("longitude"))
+            except (TypeError, ValueError):
+                continue
+            if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat, lon) != (0.0, 0.0):
+                return lat, lon
+        return None
+
     def set_identity(self, name):
         """/system identity set name=... ; returns the identity the router reports afterwards."""
         self.post("/system/identity/set", {"name": name})
@@ -468,6 +502,47 @@ class SimRouter:
         if ":error" in body:
             raise RouterError("HTTP 400: failure: " + body.split(":error", 1)[1].strip().strip('"')[:80])
         return "\n".join(f"(simulated) {line.strip()}" for line in body.splitlines() if line.strip() and not line.strip().startswith("#"))[:2000]
+
+    def topology(self):
+        """Simulated network: a switch and an access point behind the router, phones, printers, PCs, a VM host."""
+        r = random.Random(self.id * 313)
+        nets = self.networks()
+        lan = nets[0]["network"].rsplit(".", 1)[0]
+        mac = lambda prefix: prefix + ":" + ":".join("%02X" % r.randint(0, 255) for _ in range(3))
+        devices = [("80:5E:C0", "SIP-T54W"), ("80:5E:C0", "SIP-T46U"), ("00:04:F2", "Polycom-VVX"), ("00:80:77", "BRN-OFFICE"),
+                   ("00:0C:29", "FILESRV01"), ("00:50:56", "DC01"), ("3C:52:82", "DESKTOP-4K2J9"), ("D4:BE:D9", "LAPTOP-SALES"),
+                   ("D4:BE:D9", "Reception-PC"), ("BC:AD:28", "NVR-Lobby"), ("7A:11:22", "iPhone"), ("DA:33:44", "Galaxy-S24"),
+                   ("B8:27:EB", "pi-sensors"), ("00:11:32", "NAS"), ("E0:D5:5E", ""), ("44:38:39", "")]
+        devices = devices[: 9 + self.id % 7]
+        arp, hosts, leases = [], [], []
+        for k, (prefix, name) in enumerate(devices):
+            m = mac(prefix)
+            ip = f"{lan}.{30 + k}"
+            port = "ether2" if k % 3 else "ether3"
+            arp.append({"address": ip, "mac-address": m, "interface": "bridge", "complete": "true"})
+            hosts.append({"mac-address": m, "on-interface": port, "bridge": "bridge"})
+            if name:
+                leases.append({"address": ip, "mac": m, "host": name, "server": "dhcp-lan", "interface": "bridge", "status": "bound",
+                               "dynamic": True, "disabled": False, "blocked": False, "last_seen": r.randint(1, 900), "expires": 600, "comment": ""})
+        neighbors = [{"interface": "ether2", "address": f"{lan}.2", "mac-address": mac("44:D9:E7"), "identity": f"SW-{self.name[:8]}",
+                      "platform": "UniFi", "board": "USW-24-PoE", "discovered-by": "lldp"},
+                     {"interface": "ether3", "address": f"{lan}.3", "mac-address": mac("4C:5E:0C"), "identity": f"AP-{self.name[:8]}",
+                      "platform": "MikroTik", "board": "cAP ax", "version": "7.19.4", "discovered-by": "mndp"}]
+        routes = [{"dst-address": "0.0.0.0/0", "gateway": f"203.0.113.{self.id % 250 + 1}", "immediate-gw": f"203.0.113.{self.id % 250 + 1}%ether1",
+                   "distance": "1", "active": "true", "static": "true"},
+                  {"dst-address": "10.77.0.0/16", "gateway": "tikmanager", "active": "true", "static": "true", "comment": "TikManager"}]
+        routes += [{"dst-address": n["network"], "gateway": n["interface"], "active": "true", "connect": "true", "dynamic": "true"} for n in nets]
+        if self.id % 2:
+            routes.append({"dst-address": f"172.16.{self.id}.0/24", "gateway": "10.250.0.1", "active": "true", "static": "true",
+                           "comment": "Branch office over site-to-site VPN"})
+        return {"routes": routes, "neighbors": neighbors, "arp": arp, "hosts": hosts, "leases": leases,
+                "addresses": [{"address": n["address"], "network": n["network"].split("/")[0], "interface": n["interface"]} for n in nets],
+                "interfaces": [{"name": "ether1", "type": "ether", "comment": "WAN"}, {"name": "bridge", "type": "bridge", "comment": "LAN"},
+                               {"name": "vlan20-guest", "type": "vlan"}, {"name": "vlan30-voip", "type": "vlan"}],
+                "vlans": [{"name": "vlan20-guest", "vlan-id": "20", "interface": "bridge"}, {"name": "vlan30-voip", "vlan-id": "30", "interface": "bridge"}]}
+
+    def gps(self):
+        return None
 
     def dhcp_leases(self):
         r = random.Random(self.id * 101)

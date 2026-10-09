@@ -21,6 +21,7 @@ class Poller:
         self._prev = {}   # device id -> (time, rx, tx) for rate calculation
         self.thumbs = None   # thumbs.Thumbs, set by the server
         self._prev_if = {}   # device id -> {interface: (time, rx bytes, tx bytes)}
+        self._gps = {}   # device id -> when its GPS was last read (every 6 hours)
         self._last_prune = 0
 
     def client(self, d):
@@ -60,6 +61,16 @@ class Poller:
                     (now, now, st["identity"], st["model"], st["serial"], st["version"], st["board"], st["uptime"], st["cpu"],
                      st["mem_used"], st["mem_total"], json.dumps(st["interfaces"]), st["identity"], st["identity"], d["id"]))
         cl = self.client(d)
+        # location from the router's own GPS (if it has one) - never over a location someone entered by hand
+        if d.get("loc_source") != "manual" and hasattr(cl, "gps") and now - self._gps.get(d["id"], 0) > 6 * 3600:
+            self._gps[d["id"]] = now
+            try:
+                fix = cl.gps()
+            except RouterError:
+                fix = None
+            if fix:
+                self.db.run("UPDATE devices SET lat=?, lon=?, loc_source='gps', location=COALESCE(location, 'GPS') WHERE id=? AND "
+                            "COALESCE(loc_source, '') <> 'manual'", (round(fix[0], 6), round(fix[1], 6), d["id"]))
         try:
             latency, loss = cl.ping(getattr(self.s, "ping_target", "") or "1.1.1.1") if hasattr(cl, "ping") else (None, None)
         except RouterError:

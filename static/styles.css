@@ -324,3 +324,66 @@ dialog { border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, .3); }
 .ap-swatch .pg i { display: block; height: 14px; border-radius: 4px; background: var(--panel); border-top: 3px solid var(--sw-accent); }
 .ap-name { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; font-size: 13px; font-weight: 600; }
 .ap-name svg { width: 16px; height: 16px; fill: none; stroke: var(--accent); stroke-width: 2.5; }
+
+/* geographic map (geomap.js) */
+.geomap { position: relative; overflow: hidden; border-radius: 10px; background: var(--bg); touch-action: none; user-select: none; }
+.geomap canvas { display: block; cursor: grab; }
+.geomap canvas:active { cursor: grabbing; }
+.geomap canvas.gm-pointer { cursor: pointer; }
+.gm-ctl { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; }
+.gm-ctl button { all: unset; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; cursor: pointer; font-size: 18px; font-weight: 700;
+  background: var(--panel); color: var(--text); box-shadow: 0 1px 4px rgba(0, 0, 0, .2); }
+.gm-ctl button:hover, .gm-ctl button:focus-visible { color: var(--accent); }
+.gm-tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--text); padding: 6px 10px; border-radius: 8px; font-size: 12.5px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .2); white-space: nowrap; }
+.gm-msg { position: absolute; inset: 0; display: grid; place-items: center; }
+.geo-card { padding: 10px; }
+.geo-wrap { height: min(68vh, 620px); }
+.geo-legend { gap: 16px; padding: 8px 4px 0; }
+.geo-missing { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.geo-missing a { color: var(--text); text-decoration: none; } .geo-missing a:hover { color: var(--accent); }
+.sm-filters { margin-top: 12px; }
+.loc-map { height: 260px; margin-top: 10px; }
+.loc-edit { display: grid; gap: 10px; margin: 6px 0 4px; }
+.loc-edit .row input { flex: 1; min-width: 160px; }
+.loc-hit { all: unset; display: block; cursor: pointer; padding: 6px 10px; border-radius: 8px; font-size: 13px; background: var(--bg); margin-bottom: 4px; }
+.loc-hit:hover, .loc-hit:focus-visible { background: var(--accent-soft); color: var(--accent); }
+
+/* network map behind one router (org-chart style tree) */
+.topo { display: flex; flex-direction: column; align-items: center; padding: 10px 0 6px; overflow-x: auto; }
+.tnode { display: inline-flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 12px; background: var(--panel); box-shadow: var(--shadow);
+  border: 1px solid var(--border); text-align: left; max-width: 260px; }
+.tnode > span:last-child { display: grid; min-width: 0; line-height: 1.3; }
+.tnode b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tnode small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tic { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; color: #fff; background: var(--muted); }
+.tic svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.tcloud .tic { background: #8aa4c8; } .trouter .tic { background: #ef6b5a; } .tnet .tic { background: var(--accent); } .tinfra .tic { background: #f0a24a; }
+.tstem { width: 2px; height: 22px; background: color-mix(in srgb, var(--info) 55%, transparent); }
+.trouter-row { display: flex; align-items: flex-start; gap: 18px; position: relative; }
+.troutes { display: grid; gap: 6px; padding: 10px 14px; border-radius: 10px; background: var(--bg); margin-top: 14px; }
+.troute { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; } .troute.off { opacity: .55; }
+.pill.r-vpn { color: var(--info); } .pill.r-static { color: var(--text); } .pill.r-dynamic { color: var(--good); }
+.tnets { display: flex; gap: 0; position: relative; padding-top: 0; }
+.tcol { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 12px 0; position: relative; min-width: 200px; }
+/* the connector: a horizontal bar across the columns and a short drop into each one */
+.tcol::before, .tcol::after { content: ""; position: absolute; top: 0; width: 50%; height: 22px; border-top: 2px solid color-mix(in srgb, var(--info) 55%, transparent); }
+.tcol::before { right: 50%; } .tcol::after { left: 50%; border-left: 2px solid color-mix(in srgb, var(--info) 55%, transparent); }
+.tcol:first-child::before, .tcol:last-child::after { border-top: 0; }
+.tcol:last-child::before { border-right: 2px solid color-mix(in srgb, var(--info) 55%, transparent); width: calc(50% - 1px); }
+.tcol:first-child:last-child::before { display: none; }
+.tbranch { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--border); width: 100%; }
+.tgroups { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 280px; }
+.tbub { all: unset; box-sizing: border-box; position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 78px; padding: 6px 2px;
+  border-radius: 10px; cursor: pointer; font-size: 11.5px; color: var(--muted); text-align: center; }
+.tbub:hover, .tbub:focus-visible, .tbub.on { background: var(--accent-soft); color: var(--text); }
+.tbub .tic { width: 42px; height: 42px; }
+.tbub .tcnt { position: absolute; top: 0; right: 12px; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; border-radius: 10px;
+  background: var(--panel); color: var(--text); font-size: 11px; display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.k-phone .tic { background: #2bb3a3; } .k-printer .tic { background: #7c9ccf; } .k-camera .tic { background: #8b6fd6; } .k-server .tic { background: #5b7fd6; }
+.k-computer .tic { background: #4aa3df; } .k-mobile .tic { background: #e58fb0; } .k-iot .tic { background: #9bbf4a; } .k-network .tic { background: #f0a24a; }
+.k-unknown .tic { background: #9aa5b5; }
+.tdirect, .tempty { text-align: center; }
+.topo-list { margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--bg); }
+.topo-list .row { margin-bottom: 8px; }
+@media (max-width: 760px) { .tnets { flex-direction: column; align-items: stretch; } .tcol::before, .tcol::after { display: none; } .tcol { padding-top: 8px; } }
