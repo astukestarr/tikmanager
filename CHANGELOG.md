@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.17.1 - 2026-10-11
+
+- **Winbox session password hidden**: it shows as dots on the router page (and isn't in the page's text, so it stays out
+  of screenshots and screen shares). **Copy** copies it; **Show** reveals it for 10 seconds if copying is blocked.
+
 ## 1.17.0 - 2026-10-11
 
 - **Who changed what over Winbox**:

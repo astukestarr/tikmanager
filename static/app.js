@@ -415,7 +415,8 @@ async function loadWinbox(d) {
       <div class="wb-addr"><span class="mono" data-copy>${esc(w.host)}:${s.port}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
       <p class="small">Login <span class="small muted">(${s.group === "read" ? "read-only - you can look, not change" : "full"}; only for this session)</span>:</p>
       <div class="wb-addr"><span class="mono" data-copy>${esc(s.router_user)}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
-      <div class="wb-addr"><span class="mono" data-copy>${esc(s.password || "")}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
+      <div class="wb-addr"><span class="mono wb-secret" id="wbPass" aria-label="Password (hidden)">••••••••••••••••</span>
+        <button class="btn" type="button" id="wbPassShow" aria-pressed="false">Show</button><button class="btn" type="button" id="wbPassCopy">Copy</button></div>
       <p class="small muted">Open to <span class="mono">${esc(s.allow_ip)}</span> only · closes in ${left(s)} min (or after 10 min without traffic) ·
         ${s.conns ? `${s.conns} connection${s.conns === 1 ? "" : "s"}, ${bytes(s.bytes)}` : "not connected yet"}. The login is deleted when the session
         ends and a backup records what changed.</p>
@@ -446,6 +447,24 @@ async function loadWinbox(d) {
   $("wbExtend")?.addEventListener("click", () => act(`/api/winbox/${s.port}/extend`));
   $("wbClose")?.addEventListener("click", () => act(`/api/winbox/${s.port}/close`));
   $("wbIp")?.addEventListener("focus", () => { rView.hold = true; });
+  // the password stays hidden on the page (and out of its text - screenshots, screen shares); Copy copies it, Show reveals it for 10 s
+  let hideTimer;
+  $("wbPassCopy")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(s.password || ""); say("Password copied - paste it into Winbox.", "ok"); }
+    catch { say("The browser blocked copying - use Show and type it in."); }
+  });
+  $("wbPassShow")?.addEventListener("click", () => {
+    const shown = $("wbPassShow").getAttribute("aria-pressed") === "true";
+    clearTimeout(hideTimer);
+    const set = (on) => {
+      if (!$("wbPass")) return;
+      $("wbPass").textContent = on ? s.password || "" : "••••••••••••••••";
+      $("wbPassShow").textContent = on ? "Hide" : "Show";
+      $("wbPassShow").setAttribute("aria-pressed", String(on));
+    };
+    set(!shown);
+    if (!shown) hideTimer = setTimeout(() => set(false), 10000);
+  });
   el.querySelectorAll("[data-copybtn]").forEach((b) => b.addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(b.previousElementSibling.textContent); say("Copied - paste it into Winbox.", "ok"); }
     catch { say("Select it and copy it (the browser blocked copying)."); }

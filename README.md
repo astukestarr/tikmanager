@@ -234,7 +234,7 @@ routers without a public address work too.
   disconnected and shows on the Security page.
 - 30 minutes, **Extend** for 30 more (up to 4 hours), closed after 10 minutes without traffic or with **Close**.
 - **Your own login for the session**: TikManager creates a temporary router user just for you (e.g. `alan.tm`, random
-  password shown only to you) in the router's **full** group - or **read** if you're a read-only technician in TikManager -
+  password - hidden on the page, with Copy and Show - only for you) in the router's **full** group - or **read** if you're a read-only technician in TikManager -
   that can only sign in through TikManager, and deletes it when the session ends. The router's log then says
   "changed by alan.tm".
 - **What you changed**: a configuration backup is taken when the session ends (labelled with the session and you), so

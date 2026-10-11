@@ -498,3 +498,4 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 /* Winbox through TikManager */
 .wb-addr { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
 .wb-addr .mono { flex: 1; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); user-select: all; font-size: 14px; }
+.wb-secret { letter-spacing: .08em; }
