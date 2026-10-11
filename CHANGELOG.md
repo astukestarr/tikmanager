@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.17.0 - 2026-10-11
+
+- **Who changed what over Winbox**:
+  - **A router login per session**: Open Winbox now also creates a temporary login on the router just for you (e.g.
+    `alan.tm`, random password shown only to you), allowed to sign in only from TikManager's tunnel address, and deletes
+    it when the session ends. It's in the router's **full** group for TikManager administrators and technicians, and
+    **read** for read-only technicians - who can now open Winbox too, to look but not change. The router's own log then
+    says "changed by alan.tm", and nobody needs the shared admin password day to day. Leftover session logins (e.g.
+    after a restart) are removed within the hour.
+  - **A backup when the session ends**: labelled "after Winbox session 14:02-14:31 · technician", so a configuration's
+    **What changed** shows exactly what that session did (nothing is saved if nothing changed).
+  - **Router log lines are labelled with the session's technician** on the Security page - "Winbox session of
+    alan@..." - and "probably the Winbox session of ... (shared router login admin)" when someone signs in with a
+    shared login through the relay.
+- Configuration backups now show why each version was taken (nightly, by hand, before a firewall change, after a
+  Winbox session) and who caused it - before, everything but manual backups said "nightly".
+
 ## 1.16.0 - 2026-10-11
 
 - **Winbox through TikManager** (router page > Winbox > **Open Winbox**, technicians with write access): TikManager opens

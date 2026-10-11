@@ -225,16 +225,22 @@ recognised by their maker and name, so some stay "Unidentified" (unlike a scanne
 
 ## Winbox through TikManager
 
-**Router page > Winbox > Open Winbox** (technicians with write access) gives you an address like
-`tikmanager.example.com:40012` to type into Winbox's **Connect To**; sign in with your own router login. TikManager relays
+**Router page > Winbox > Open Winbox** (technicians) gives you an address like
+`tikmanager.example.com:40012` to type into Winbox's **Connect To**, and a login made just for that session. TikManager relays
 that port to the router's Winbox over the router's tunnel, so Winbox is never open on the router's internet side and
 routers without a public address work too.
 
 - Only your public address can use the session (change it if your Winbox goes out through a VPN); anything else is
   disconnected and shows on the Security page.
 - 30 minutes, **Extend** for 30 more (up to 4 hours), closed after 10 minutes without traffic or with **Close**.
-- If the router's Winbox is turned off or limited to certain addresses, the box offers a one-click fix that lets only
-  TikManager's tunnel address in.
+- **Your own login for the session**: TikManager creates a temporary router user just for you (e.g. `alan.tm`, random
+  password shown only to you) in the router's **full** group - or **read** if you're a read-only technician in TikManager -
+  that can only sign in through TikManager, and deletes it when the session ends. The router's log then says
+  "changed by alan.tm".
+- **What you changed**: a configuration backup is taken when the session ends (labelled with the session and you), so
+  **What changed** shows exactly what it did; the Security page labels the router's log lines with your name.
+- If the router's Winbox is turned off or limited to certain addresses, the box offers a one-click fix (write access)
+  that lets only TikManager's tunnel address in.
 - **Setup:** forward **TCP 40000-40049** to the TikManager server on your edge firewall (the installer / upgrade opens
   it in ufw). `TM_WINBOX_PORTS` changes the range - change the ufw rule and your edge firewall to match.
 

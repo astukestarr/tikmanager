@@ -52,6 +52,7 @@ class SecurityEvents:
         self._auth_mtime = 0
         self._limited = {}   # (kind, ip) -> last recorded, so a flood of refused requests is one event per 5 minutes
         self._devmap, self._devmap_at = {}, 0
+        self.winbox_who = None   # set by server.py: (device_id, router user) -> (technician, exact) for lines from the Winbox relay
         self.lock = threading.Lock()
 
     # --- recording ----------------------------------------------------------------------------------------
@@ -88,6 +89,12 @@ class SecurityEvents:
             return   # TikManager's own polling
         if kind == "login_ok" and via == "local":
             ip = "console"
+        if ip == getattr(self.s, "wg_server_ip", "") and user != "tikmanager" and self.winbox_who:   # through TikManager's Winbox relay
+            tech, exact = self.winbox_who(dev, user)
+            if tech:
+                note = f"Winbox session of {tech}" if exact else f"probably the Winbox session of {tech} (shared router login {user})"
+                detail = f"{note} - {detail}" if detail else note
+                via = via or "winbox"
         self.record("router", kind, user, ip, via, detail, device_id=dev)
 
     def syslog_loop(self):

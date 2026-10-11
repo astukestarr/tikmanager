@@ -97,7 +97,8 @@ alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWis
 alerts.reach = reach
 offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP / WebDAV storage
 alerts.offsite = offsite
-winbox = WinboxRelay(db, settings, secev)   # Winbox to routers through TikManager (on-demand, address-locked)
+winbox = WinboxRelay(db, settings, secev, poller.client, backups)   # Winbox to routers through TikManager (on-demand, address-locked)
+secev.winbox_who = winbox.who   # label router log lines from the relay with the session's technician
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -552,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, admin=True)
             return self.json(offsite.public())
         if m := re.fullmatch(r"/api/devices/(\d+)/winbox", path):   # the router's Winbox service + open sessions to it
-            s = self.require(tech=True, write=True)
+            s = self.require(tech=True)
             d = self.device_for(s, m.group(1))
             svc, err = None, None
             if d["state"] == "adopted" and d["online"]:
@@ -564,7 +565,8 @@ class Handler(BaseHTTPRequestHandler):
             ok = bool(svc) and not svc["disabled"] and winbox_allows_tikmanager(svc["address"])
             return self.json({"service": svc, "error": err, "reachable": ok, "tunnel_ip": tip, "host": urllib.parse.urlparse(settings.public_url).hostname,
                               "your_ip": self.client_ip(), "sessions": [x for x in winbox.view(s) if x["device_id"] == d["id"]],
-                              "ports": f"{winbox.ports.start}-{winbox.ports.stop - 1}"})
+                              "ports": f"{winbox.ports.start}-{winbox.ports.stop - 1}", "can_fix": s["role"] != "readonly",
+                              "group": "read" if s["role"] == "readonly" else "full"})
         if path == "/api/winbox":   # all open Winbox sessions (Security page)
             s = self.require(tech=True)
             return self.json({"sessions": winbox.view(s)})
@@ -1317,7 +1319,9 @@ class Handler(BaseHTTPRequestHandler):
             db.audit(s["email"], "off-site backup started", offsite.where(), self.client_ip())
             return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/winbox/(open|fix|enable)", path):
-            s = self.require(tech=True, write=True)
+            # opening: any technician - the session's router login is read-only for read-only technicians; fixing the
+            # router's Winbox service changes the router, so that needs write access
+            s = self.require(tech=True, write=m.group(2) != "open")
             d = self.device_for(s, m.group(1))
             if d["state"] != "adopted" or not d["online"]:
                 raise HttpError(400, "The router must be online.")
@@ -1337,12 +1341,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "This router's Winbox only accepts certain addresses - allow TikManager's tunnel address first.")
             allow = str(self.body().get("allow_ip") or self.client_ip()).strip()
             try:
-                return self.json({"ok": True, "session": winbox.open(d, s["email"], allow, svc["port"]),
+                return self.json({"ok": True, "session": winbox.open(d, s["email"], allow, svc["port"], "read" if s["role"] == "readonly" else "full"),
                                   "host": urllib.parse.urlparse(settings.public_url).hostname})
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
         if m := re.fullmatch(r"/api/winbox/(\d+)/(extend|close)", path):
-            s = self.require(tech=True, write=True)
+            s = self.require(tech=True)
             try:
                 if m.group(2) == "extend":
                     return self.json({"ok": True, "session": winbox.extend(int(m.group(1)), s["email"], s["role"] == "admin")})

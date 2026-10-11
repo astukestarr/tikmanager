@@ -161,6 +161,21 @@ class RouterOS:
             self._req("PATCH", f"/ip/service/{s['id']}", body, timeout=15)
         return self.winbox_service()
 
+    SESSION_COMMENT = "TikManager Winbox session"
+
+    def session_user_add(self, name, group, password, only_from, note):
+        """A temporary router login for one Winbox session: may only sign in from TikManager's tunnel address."""
+        self._req("PUT", "/user", {"name": name, "group": group, "password": password, "address": f"{only_from}/32",
+                                   "comment": f"{self.SESSION_COMMENT}: {note}"[:250]}, timeout=15)
+
+    def session_user_remove(self, name):
+        for u in self.get(f"/user?name={urllib.parse.quote(name)}") or []:
+            if str(u.get("comment") or "").startswith(self.SESSION_COMMENT):   # only ever TikManager's own session logins
+                self._req("DELETE", f"/user/{u['.id']}", timeout=15)
+
+    def session_users(self):
+        return [u.get("name") for u in self.get("/user") or [] if str(u.get("comment") or "").startswith(self.SESSION_COMMENT)]
+
     NEIGHBOR_KEYS = ("interface", "address", "address4", "mac-address", "identity", "platform", "board", "version",
                      "software-id", "uptime", "discovered-by", "interface-name")
 
@@ -839,6 +854,18 @@ class SimRouter:
     def set_identity(self, name):
         self.name = name   # the poller builds SimRouter with the stored name, so the new identity "sticks" once saved
         return name
+
+    def session_user_add(self, name, group, password, only_from, note):
+        users = self._sim().setdefault("users", {})
+        if name in users:
+            raise RouterError("HTTP 400: failure: user with the same name already exists")
+        users[name] = {"group": group, "address": f"{only_from}/32", "comment": f"TikManager Winbox session: {note}"}
+
+    def session_user_remove(self, name):
+        self._sim().setdefault("users", {}).pop(name, None)
+
+    def session_users(self):
+        return list(self._sim().setdefault("users", {}))
 
     def winbox_service(self):
         st = self._sim().setdefault("winbox", {"id": "*2", "disabled": self.id % 4 == 0, "port": 8291,

@@ -246,7 +246,7 @@ async function router(id) {
         ${kv("Model", d.model)}${kv("Serial", d.serial)}
       </div>
       ${d.state === "adopted" && isTech() ? upgradeBox(d) : ""}
-      ${d.state === "adopted" && canWrite() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
+      ${d.state === "adopted" && isTech() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
       ${d.vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b><span class="spacer"></span><a href="#vpn/${d.vpn.id}">${esc(d.vpn.name)}</a></div>
         <div class="small">${d.vpn.role === "hub" ? "Hub" : "Spoke"} · <span class="mono">${esc(d.vpn.tunnel_ip)}</span></div>${tunnelState(d.vpn)}</div>` : ""}
       ${d.state === "adopted" ? `
@@ -412,23 +412,27 @@ async function loadWinbox(d) {
   let body;
   if (s && s.mine) {
     body = `<p class="small">In Winbox, <b>Connect To</b>:</p>
-      <div class="wb-addr"><span class="mono" id="wbAddr">${esc(w.host)}:${s.port}</span><button class="btn" type="button" id="wbCopy">Copy</button></div>
+      <div class="wb-addr"><span class="mono" data-copy>${esc(w.host)}:${s.port}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
+      <p class="small">Login <span class="small muted">(${s.group === "read" ? "read-only - you can look, not change" : "full"}; only for this session)</span>:</p>
+      <div class="wb-addr"><span class="mono" data-copy>${esc(s.router_user)}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
+      <div class="wb-addr"><span class="mono" data-copy>${esc(s.password || "")}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
       <p class="small muted">Open to <span class="mono">${esc(s.allow_ip)}</span> only · closes in ${left(s)} min (or after 10 min without traffic) ·
-        ${s.conns ? `${s.conns} connection${s.conns === 1 ? "" : "s"}, ${bytes(s.bytes)}` : "not connected yet"}. Sign in with your own router login.</p>
+        ${s.conns ? `${s.conns} connection${s.conns === 1 ? "" : "s"}, ${bytes(s.bytes)}` : "not connected yet"}. The login is deleted when the session
+        ends and a backup records what changed.</p>
       <div class="row"><button class="btn" type="button" id="wbExtend">Extend 30 min</button><button class="btn" type="button" id="wbClose">Close</button></div>`;
   } else if (!svc) {
     body = `<p class="small muted">${esc(w.error || "The router must be online to open Winbox.")}</p>`;
   } else if (svc.disabled) {
     body = `<p class="small">Winbox is turned off on this router.</p>
-      <button class="btn" type="button" id="wbEnable">Turn on for TikManager only</button>
+      ${w.can_fix ? `<button class="btn" type="button" id="wbEnable">Turn on for TikManager only</button>` : `<p class="small muted">A technician with write access can turn it on for TikManager.</p>`}
       <p class="small muted">Turns Winbox on, reachable only from TikManager's tunnel address (${esc(w.tunnel_ip)}) - not from the internet or the LAN.</p>`;
   } else if (!w.reachable) {
     body = `<p class="small">Winbox only accepts <span class="mono">${esc(svc.address)}</span>, so TikManager can't reach it.</p>
-      <button class="btn" type="button" id="wbFix">Allow TikManager's tunnel address</button>
+      ${w.can_fix ? `<button class="btn" type="button" id="wbFix">Allow TikManager's tunnel address</button>` : `<p class="small muted">A technician with write access can allow it.</p>`}
       <p class="small muted">Adds ${esc(w.tunnel_ip)}/32 to Winbox's "Available From" - nothing else changes.</p>`;
   } else {
     body = `<p class="small muted">Opens a port on TikManager, relayed to this router's Winbox over its tunnel - no Winbox port on the router's internet side.
-        Only your address can use it, for 30 minutes.</p>
+        Only your address can use it, for 30 minutes, with a ${w.group === "read" ? "read-only" : "full"} router login made just for the session.</p>
       <label class="field small">Your public address <input id="wbIp" value="${esc(w.your_ip)}" spellcheck="false"></label>
       <button class="btn primary" type="button" id="wbOpen">Open Winbox</button>
       ${s ? `<p class="small muted">${esc(s.user)} has a session open to this router.</p>` : ""}`;
@@ -442,10 +446,10 @@ async function loadWinbox(d) {
   $("wbExtend")?.addEventListener("click", () => act(`/api/winbox/${s.port}/extend`));
   $("wbClose")?.addEventListener("click", () => act(`/api/winbox/${s.port}/close`));
   $("wbIp")?.addEventListener("focus", () => { rView.hold = true; });
-  $("wbCopy")?.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText($("wbAddr").textContent); say("Copied - paste it into Winbox's Connect To.", "ok"); }
-    catch { say("Select the address and copy it (the browser blocked copying)."); }
-  });
+  el.querySelectorAll("[data-copybtn]").forEach((b) => b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.previousElementSibling.textContent); say("Copied - paste it into Winbox.", "ok"); }
+    catch { say("Select it and copy it (the browser blocked copying)."); }
+  }));
 }
 
 function upgradeBox(d) {
@@ -554,7 +558,8 @@ async function loadBackups(d) {
     ${v.length ? `<div class="table-wrap"><table><thead><tr><th>Saved</th><th>Changes</th><th>Size</th><th>By</th><th></th></tr></thead><tbody>
       ${v.map((x, i) => `<tr><td>${when(x.ts)}${i === 0 ? ` <span class="pill">latest</span>` : ""}</td>
         <td>${i === v.length - 1 ? `first backup (${x.lines} lines)` : `<span class="add">+${x.added}</span> / <span class="del">-${x.removed}</span>`}</td>
-        <td>${bytes(x.size)}</td><td class="small muted">${esc(x.trigger === "manual" ? x.by_user : "nightly")}</td>
+        <td>${bytes(x.size)}</td><td class="small muted">${esc(x.trigger === "manual" ? x.by_user : x.trigger === "nightly" || !x.trigger ? "nightly"
+          : `${x.trigger === "pre-firewall" ? "before a firewall change" : x.trigger}${x.by_user && x.by_user !== "schedule" ? ` · ${x.by_user}` : ""}`)}</td>
         <td class="row">${b.can_view ? `<button class="btn" type="button" data-bk-view="${x.id}">View</button>
           ${i < v.length - 1 ? `<button class="btn" type="button" data-bk-diff="${x.id}">What changed</button>` : ""}
           <a class="btn" href="/api/backups/${x.id}/download">Download .rsc</a>` : ""}</td></tr>`).join("")}</tbody></table></div>`
