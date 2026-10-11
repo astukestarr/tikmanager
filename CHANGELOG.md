@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.15.0 - 2026-10-11
+
+- **Off-site backup** (Admin > Settings): a copy of TikManager on storage you own - **FTPS** (recommended), FTP or
+  **WebDAV** (Nextcloud, ownCloud, Synology / QNAP, Box ...). Choose **Full** (the database - routers, clients, users,
+  the routers' configuration backups, settings, scripts - plus the master key, the settings file and branding:
+  everything to rebuild TikManager on a new server) or **Scripts only**. Backups are **encrypted with your passphrase**
+  (scrypt + AES-256-GCM) before they leave the server; a full backup must be. Daily at the hour you pick, plus **Back up
+  now** and **Test connection**; the newest N copies are kept on the storage. A failed backup can raise an alert.
+- `tools/tmbak.py` opens a backup with its passphrase; the README explains how to restore a server from it.
+
 ## 1.14.0 - 2026-10-11
 
 - **Connectivity test** (Admin > Version & updates > **Run test**): checks from the internet, the way routers and people

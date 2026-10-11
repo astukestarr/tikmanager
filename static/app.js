@@ -836,11 +836,65 @@ async function loadItg(r, refresh) {
   };
   $("itgRefresh").onclick = () => loadItg(r, true);
 }
+// --- off-site backup to your own FTPS / FTP / WebDAV storage (offsite.py) ---------------------------------------------
+async function offsiteCard() {
+  const el = $("offCard");
+  if (!el) return;
+  let o;
+  try { o = await api("/api/admin/offsite"); } catch (e) { el.innerHTML = `<h2>Off-site backup</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  const v = (k) => esc(o[k] || "");
+  const last = o.last || {};
+  el.innerHTML = `<div class="row"><h2>Off-site backup</h2>${o.configured ? `<span class="pill up-done">Set up</span>` : `<span class="pill">Not set up</span>`}<span class="spacer"></span>
+      ${o.running ? `<span class="status">Backing up…</span>` : last.at ? `<span class="small ${last.ok ? "status ok" : "status err"}">${last.ok ? "Last backup" : "Last attempt failed"} ${ago(last.at)}</span>` : ""}</div>
+    <p class="muted small">A copy off this server, on storage you own - if the server dies, this is what you rebuild from. <b>Full</b> = the database (routers, clients,
+      users, the routers' configuration backups, settings, scripts) + master key + settings file + branding; <b>Scripts</b> = your script library only.
+      Encrypted with your passphrase before it leaves the server.</p>
+    ${last.detail ? `<p class="small ${last.ok ? "" : "status err"}">${esc(last.detail)}</p>` : ""}
+    <div class="grid2">
+      <label class="field">Where <select id="ofKind"><option value="ftps">FTPS (FTP over TLS) - recommended</option><option value="webdav">WebDAV (Nextcloud, ownCloud, Synology, QNAP, Box ...)</option>
+        <option value="ftp">FTP (unencrypted connection - backup must be encrypted)</option></select></label>
+      <label class="field">What <select id="ofWhat"><option value="full">Full - everything to rebuild TikManager</option><option value="scripts">Scripts only</option></select></label>
+      <label class="field of-ftp">FTP server <input id="ofHost" value="${v("host")}" placeholder="nas.example.com" spellcheck="false"></label>
+      <label class="field of-ftp">Port <input id="ofPort" value="${v("port")}" placeholder="21" inputmode="numeric"></label>
+      <label class="field of-dav">WebDAV address <input id="ofUrl" value="${v("url")}" placeholder="https://cloud.example.com/remote.php/dav/files/backup/" spellcheck="false"></label>
+      <label class="field">Folder <input id="ofFolder" value="${v("folder")}" placeholder="tikmanager" spellcheck="false"></label>
+      <label class="field">User name <input id="ofUser" value="${v("username")}" autocomplete="off" spellcheck="false"></label>
+      <label class="field">Password <input id="ofPass" type="password" autocomplete="new-password" placeholder="${o.password_set ? "saved - leave blank to keep" : ""}"></label>
+      <label class="field">Encryption passphrase (12+ characters) <input id="ofPhrase" type="password" autocomplete="new-password" placeholder="${o.passphrase_set ? "saved - leave blank to keep" : "required for full backups"}"></label>
+      <label class="field">Schedule <select id="ofSched"><option value="daily">Daily</option><option value="off">Only when I click Back up now</option></select></label>
+      <label class="field">At (server time) <select id="ofHour">${[...Array(24).keys()].map((h) => `<option value="${h}" ${String(h) === String(o.hour) ? "selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("")}</select></label>
+      <label class="field">Copies to keep on the storage <input id="ofKeep" value="${v("keep")}" inputmode="numeric"></label>
+    </div>
+    <label class="chk"><input type="checkbox" id="ofVerify" ${o.verify === "0" ? "" : "checked"}> Check the storage's certificate (untick only for a NAS with a self-signed certificate)</label>
+    <p class="small muted"><b>Keep the passphrase somewhere else too</b> (e.g. your password manager) - without it a backup can't be opened, and it's what you'll need if
+      this server is gone. If the storage is on your LAN and you blocked this server from the LAN (Connectivity test > How to fix), allow just the storage's address:
+      <span class="mono">sudo ufw insert 1 allow out to &lt;storage IP&gt;</span>. Restore steps: README > "Restoring from an off-site backup".</p>
+    <div class="actions"><button class="btn primary" type="button" id="ofSave">Save</button><button class="btn" type="button" id="ofTest" ${o.configured ? "" : "disabled"}>Test connection</button>
+      <button class="btn" type="button" id="ofRun" ${o.configured && !o.running ? "" : "disabled"}>Back up now</button><span class="status" id="ofStatus"></span></div>`;
+  $("ofKind").value = o.kind; $("ofWhat").value = o.what; $("ofSched").value = o.schedule;
+  const kind = () => { const dav = $("ofKind").value === "webdav"; el.querySelectorAll(".of-ftp").forEach((x) => x.classList.toggle("hidden", dav)); el.querySelectorAll(".of-dav").forEach((x) => x.classList.toggle("hidden", !dav)); };
+  $("ofKind").addEventListener("change", kind); kind();
+  const say = (m, c = "") => { $("ofStatus").textContent = m; $("ofStatus").className = `status ${c}`; };
+  $("ofSave").addEventListener("click", async () => {
+    const b = { kind: $("ofKind").value, what: $("ofWhat").value, host: $("ofHost").value, port: $("ofPort").value, url: $("ofUrl").value, folder: $("ofFolder").value,
+      username: $("ofUser").value, schedule: $("ofSched").value, hour: $("ofHour").value, keep: $("ofKeep").value, verify: $("ofVerify").checked ? "1" : "0" };
+    if ($("ofPass").value) b.password = $("ofPass").value;
+    if ($("ofPhrase").value) b.passphrase = $("ofPhrase").value;
+    try { await post("/api/admin/offsite", b); await offsiteCard(); $("ofStatus").textContent = "Saved."; $("ofStatus").className = "status ok"; } catch (e) { say(e.message, "err"); }
+  });
+  $("ofTest").addEventListener("click", async () => { say("Connecting…"); try { const r = await post("/api/admin/offsite/test"); say(r.detail, r.ok ? "ok" : "err"); } catch (e) { say(e.message, "err"); } });
+  $("ofRun").addEventListener("click", async () => {
+    try { await post("/api/admin/offsite/run"); say("Backing up…"); const poll = setInterval(async () => { const x = await api("/api/admin/offsite"); if (!x.running) { clearInterval(poll); offsiteCard(); } }, 3000); }
+    catch (e) { say(e.message, "err"); }
+  });
+}
+
 async function adminSystem() {
   const s = await api("/api/admin/system");
   const f = (id, label, val, o = {}) => `<label class="field">${label} <input id="${id}" value="${esc(val || "")}" placeholder="${esc(o.ph || "")}" ${o.type ? `type="${o.type}"` : ""} spellcheck="false" ${o.auto ? `autocomplete="${o.auto}"` : ""}></label>`;
   $("adminBody").innerHTML = `
     <div class="card" id="verCard"><h2>Version &amp; updates</h2><p class="muted">Loading…</p></div>
+    <div class="card" id="offCard"><h2>Off-site backup</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>Staff sign-in</h2>
       <p class="muted">Your technicians sign in with Microsoft. Anyone from these email domains becomes a technician at first sign-in;
         the listed emails become administrators. Roles can be changed on the Technicians tab.</p>
@@ -870,6 +924,7 @@ async function adminSystem() {
         .map(([k, v]) => `<div class="kv"><span>${k}</span><span class="mono">${esc(v)}</span></div>`).join("")}</div>
       <p class="small muted">The public address is set when TikManager is installed (the HTTPS certificate depends on it).</p></div>`;
   versionCard();
+  offsiteCard();
   const say = (id, m, ok) => { $(id).textContent = m; $(id).className = `status ${ok ? "ok" : "err"}`; };
   $("cfSave").addEventListener("click", async () => {
     try {

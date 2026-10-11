@@ -33,6 +33,7 @@ from firewall import Firewall, FirewallError
 from secevents import SecurityEvents
 from observatory import Observatory
 from reachability import Reachability
+from offsite import OffsiteBackup, OffsiteError
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -93,6 +94,8 @@ secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubunt
 library = ScriptLibrary(db, integ)   # community RouterOS script library on GitHub
 alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWise tickets / Teams when something's wrong
 alerts.reach = reach
+offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP / WebDAV storage
+alerts.offsite = offsite
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -531,6 +534,9 @@ class Handler(BaseHTTPRequestHandler):
                                   "priorities": integ.cw_priorities(), "companies": [{"id": c["id"], "name": c["name"]} for c in integ.cw_companies()]})
             except IntegrationError as e:
                 raise HttpError(502, str(e)) from None
+        if path == "/api/admin/offsite":   # off-site backup settings + last result
+            self.require(tech=True, admin=True)
+            return self.json(offsite.public())
         if path == "/api/security":   # sign-in attempts and other security events (TikManager, Ubuntu server, routers)
             self.require(tech=True)
             try:
@@ -1258,6 +1264,27 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "test alert sent", ip=self.client_ip(), detail=msg)
             return self.json({"ok": True, "detail": msg})
+        if path == "/api/admin/offsite":
+            s = self.require(tech=True, admin=True)
+            try:
+                offsite.save(self.body())
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "off-site backup settings changed", offsite.where(), self.client_ip())
+            return self.json({"ok": True, **offsite.public()})
+        if path == "/api/admin/offsite/test":
+            s = self.require(tech=True, admin=True)
+            try:
+                return self.json({"ok": True, "detail": offsite.test()})
+            except OffsiteError as e:
+                return self.json({"ok": False, "detail": str(e)})
+        if path == "/api/admin/offsite/run":   # back up now (in the background)
+            s = self.require(tech=True, admin=True)
+            if offsite.running:
+                raise HttpError(400, "An off-site backup is already running.")
+            threading.Thread(target=offsite.run, args=("manual",), daemon=True, name="offsite-now").start()
+            db.audit(s["email"], "off-site backup started", offsite.where(), self.client_ip())
+            return self.json({"ok": True})
         if path == "/api/admin/reachability-test":   # connectivity test from the internet (runs ~20 s in the background)
             s = self.require(tech=True, admin=True)
             try:
@@ -1632,6 +1659,7 @@ def main():
     secev.start()
     observatory.start()
     reach.start_loop()
+    offsite.start()
     alerts.start()
     if settings.dev:
         secev.seed_dev()

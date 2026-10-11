@@ -67,6 +67,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Firewall / NAT editing (fields, locked rules, undo timer) | `firewall.py` (`FIELDS`, `ACTIONS`, `protected()`, `restore_script()`), `RouterOS.fw_*` / `undo_*` (+ `SimRouter`), `loadFirewall()` / `fwDialog()` in `app.js` |
 | Community script library (danger / secret patterns, sharing) | `scriptlib.py` (`DANGER`, `SECRETS`, `share()`), `libraryDialog()` / `shareDialog()` in `app.js`; library repo `astukestarr/routeros-scripts` |
 | Alerts (kinds, thresholds, tickets, Teams) | `alerts.py` (`KINDS`, `conditions()`, `notify_open/resolved()`), `Integrations.cw_ticket/cw_close/teams_post`, `alertsPage()` in `app.js` |
+| Off-site backup / restore | `offsite.py` (`build()`, `encrypt()`, destinations), `tools/tmbak.py`, `offsiteCard()` in `app.js`; README "Off-site backup and restoring" |
 | Connectivity test (outside-in ports) | `reachability.py`, `reachBox()` + `SEC_FIXES.net_*` in `app.js` |
 | Website security grade (Mozilla Observatory) | `observatory.py`, `obsBox()` in `app.js`; `TM_OBSERVATORY` |
 | Security page (events, flags, router log parsing) | `secevents.py` (`parse_router()`, `summary()`), `deploy/collect-auth.py` (Ubuntu side), `secev.record(...)` calls in `server.py`, `securityPage()` in `app.js` |

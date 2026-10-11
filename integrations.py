@@ -22,8 +22,10 @@ FIELDS = {   # name -> secret?
     "cw": {"site": False, "company": False, "public_key": False, "private_key": True, "client_id": False, "codebase": False,
            "show_types": False, "active_only": False},   # which company types / statuses the import list shows
     "itg": {"region": False, "api_key": True, "config_type_id": False, "config_status_id": False, "sync": False},
-    "teams": {"webhook": True},
-    "github": {"library": False, "token": True},   # community script library (scriptlib.py); the token is only for sharing   # a Teams Workflows "post to a channel when a webhook request is received" URL (alerts.py)
+    "teams": {"webhook": True},   # a Teams Workflows "post to a channel when a webhook request is received" URL (alerts.py)
+    "github": {"library": False, "token": True},   # community script library (scriptlib.py); the token is only for sharing
+    "offsite": {"kind": False, "host": False, "port": False, "username": False, "password": True, "folder": False, "url": False,
+                "verify": False, "what": False, "passphrase": True, "schedule": False, "keep": False, "hour": False},   # offsite.py
 }
 DEFAULTS = {"cw": {"site": "api-na.myconnectwise.net", "codebase": "v4_6_release", "active_only": "1"}, "itg": {"region": "us", "sync": "1"},
             "github": {"library": "astukestarr/routeros-scripts"}}
@@ -69,6 +71,8 @@ class Integrations:
 
     def configured(self, kind):
         c = self.config(kind)
+        if kind == "offsite":
+            return bool(c.get("url") if c.get("kind") == "webdav" else c.get("host"))
         need = {"cw": ("site", "company", "public_key", "private_key", "client_id"), "teams": ("webhook",), "github": ("token",)}.get(kind, ("api_key",))
         return all(c.get(k) for k in need)
 

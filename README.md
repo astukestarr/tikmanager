@@ -487,6 +487,34 @@ Mozilla. Set `TM_OBSERVATORY=0` in `/etc/tikmanager/tikmanager.env` to turn it o
 
 How it's built to be safe (tunnels, encryption, least privilege, the updater): [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Off-site backup and restoring
+
+**Admin > Settings > Off-site backup** copies TikManager to storage you own, daily: FTPS (recommended), FTP or WebDAV
+(Nextcloud, ownCloud, Synology / QNAP, Box ...). **Full** backs up everything needed to rebuild the server - the
+database (routers, clients, users, the routers' configuration backups, settings, scripts), the master key, the settings
+file and branding; **Scripts only** backs up the script library. Backups are encrypted with your passphrase before they
+leave the server (a full backup must be). **Keep the passphrase somewhere else too** - a backup can't be opened without
+it. If the storage is on your LAN and you've blocked the server from the LAN, allow just that address:
+`sudo ufw insert 1 allow out to <storage IP>`.
+
+**Restoring from an off-site backup** (new or rebuilt server):
+1. Install TikManager as usual (`get.sh`) with the **same public name**, so routers find it again.
+2. Copy the newest `.tmbak` file to the server and open it: `python3 /opt/tikmanager/tools/tmbak.py <file>.tmbak restore`
+   (asks for the passphrase).
+3. Put it in place and restart:
+
+       sudo systemctl stop tikmanager
+       sudo install -o tikmanager -g tikmanager -m 600 restore/tikmanager.db /var/lib/tikmanager/tikmanager.db
+       sudo install -o root -g tikmanager -m 640 restore/master.key /etc/tikmanager/master.key
+       sudo cp -r restore/branding /var/lib/tikmanager/ && sudo chown -R tikmanager:tikmanager /var/lib/tikmanager/branding
+       sudo systemctl start tikmanager
+
+4. Compare `restore/tikmanager.env` with `/etc/tikmanager/tikmanager.env` and copy over anything you'd changed, then
+   `sudo systemctl restart tikmanager`. Keep the new server's own WireGuard key (`WG_SERVER_PUBKEY`), or restore the old
+   `/etc/wireguard/wg0.conf` too if you have it - otherwise re-run the adoption command on each router so it learns the
+   new key.
+5. Delete the `restore` folder - it contains the master key.
+
 ## Where things live on the server
 
 | What | Where |

@@ -34,6 +34,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "server": ("Server security check finds a FAIL", True, None, None),
     "website": ("Website security grade drops below A", True, None, None),
     "connectivity": ("Connectivity test finds a port problem (e.g. HTTPS not reachable from the internet)", True, None, None),
+    "offsite": ("Off-site backup failed", True, None, None),
     "cpu": ("Router CPU high (15-minute average)", False, "percent", 90),
     "firmware": ("New RouterOS available for a router", False, None, None),
 }
@@ -132,6 +133,11 @@ class Alerts:
             if bad:
                 out["connectivity"] = ("connectivity", None, None, f"Connectivity test: {len(bad)} problem{'s' if len(bad) != 1 else ''}",
                                        "\n".join(f"- {x}" for x in bad))
+        off = getattr(self, "offsite", None)
+        if k["offsite"]["on"] and off:
+            last = off.last()
+            if last and last.get("ok") is False:
+                out["offsite"] = ("offsite", None, None, "Off-site backup failed", f"{last.get('detail')}\nDestination: {off.where()}")
         if k["website"]["on"]:
             o = self.observatory.info()
             if o.get("grade") and not str(o["grade"]).upper().startswith("A"):
