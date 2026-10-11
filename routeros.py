@@ -140,6 +140,27 @@ class RouterOS:
                         "expires": _dur_s(l.get("expires-after")), "comment": l.get("comment") or ""})
         return out
 
+    def winbox_service(self):
+        """The router's Winbox service: {disabled, port, address (who may connect; "" = anyone)}."""
+        s = (self.get("/ip/service?name=winbox") or [{}])[0]
+        return {"id": s.get(".id"), "disabled": s.get("disabled") == "true", "port": int(s.get("port") or 8291), "address": s.get("address") or ""}
+
+    def winbox_allow(self, ip, enable=False):
+        """Let `ip` (TikManager's tunnel address) reach Winbox: add it to "Available From" if that list is in use; turning
+        Winbox on (if asked) restricts it to `ip` alone when nothing was listed, so it never opens to everyone."""
+        s = self.winbox_service()
+        addrs = [a for a in s["address"].split(",") if a]
+        body = {}
+        if addrs and f"{ip}/32" not in addrs and ip not in addrs:
+            body["address"] = ",".join(addrs + [f"{ip}/32"])
+        if enable and s["disabled"]:
+            body["disabled"] = "false"
+            if not addrs:
+                body["address"] = f"{ip}/32"
+        if body:
+            self._req("PATCH", f"/ip/service/{s['id']}", body, timeout=15)
+        return self.winbox_service()
+
     NEIGHBOR_KEYS = ("interface", "address", "address4", "mac-address", "identity", "platform", "board", "version",
                      "software-id", "uptime", "discovered-by", "interface-name")
 
@@ -818,6 +839,22 @@ class SimRouter:
     def set_identity(self, name):
         self.name = name   # the poller builds SimRouter with the stored name, so the new identity "sticks" once saved
         return name
+
+    def winbox_service(self):
+        st = self._sim().setdefault("winbox", {"id": "*2", "disabled": self.id % 4 == 0, "port": 8291,
+                                               "address": "192.168.88.0/24" if self.id % 3 == 0 else ""})
+        return dict(st)
+
+    def winbox_allow(self, ip, enable=False):
+        st = self._sim().setdefault("winbox", self.winbox_service())
+        addrs = [a for a in st["address"].split(",") if a]
+        if addrs and f"{ip}/32" not in addrs:
+            st["address"] = ",".join(addrs + [f"{ip}/32"])
+        if enable and st["disabled"]:
+            st["disabled"] = False
+            if not addrs:
+                st["address"] = f"{ip}/32"
+        return dict(st)
 
     def mikrotik_neighbors(self):
         lan = self.networks()[0]["network"].rsplit(".", 1)[0]

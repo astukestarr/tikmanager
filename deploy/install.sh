@@ -10,7 +10,8 @@
 #   - creates the 'tikmanager' system user (no shell, no sudo) and its folders
 #   - creates the controller's WireGuard key and wg0 (10.77.0.1/16, UDP 51820)
 #   - writes /etc/tikmanager/tikmanager.env, the master key, the Caddy site and the systemd service
-#   - firewall: 80+443/tcp and 51820/udp from anywhere, SSH only from your LAN, syslog only over the tunnel
+#   - firewall: 80+443/tcp and 51820/udp from anywhere, 40000-40049/tcp for the Winbox relay (each port only answers the
+#     technician who opened it), SSH only from your LAN, syslog only over the tunnel
 #   - a daily read-only security check of this server (deploy/check.sh; results on Admin > Version & updates)
 set -euo pipefail
 
@@ -159,6 +160,7 @@ ufw default allow outgoing
 ufw allow 80/tcp comment 'Caddy: certificate checks + redirect to HTTPS'
 ufw allow 443/tcp comment 'TikManager web + router adoption'
 ufw allow 51820/udp comment 'WireGuard from routers'
+ufw allow 40000:40049/tcp comment 'Winbox relay (each port only for the technician who opened it)'
 ufw allow from "$LAN" to any port 22 proto tcp comment 'SSH from LAN only'
 ufw allow in on wg0 to 10.77.0.1 port 5514 proto udp comment 'Router logs over the tunnel'
 ufw --force enable

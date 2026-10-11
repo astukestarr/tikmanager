@@ -246,6 +246,7 @@ async function router(id) {
         ${kv("Model", d.model)}${kv("Serial", d.serial)}
       </div>
       ${d.state === "adopted" && isTech() ? upgradeBox(d) : ""}
+      ${d.state === "adopted" && canWrite() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
       ${d.vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b><span class="spacer"></span><a href="#vpn/${d.vpn.id}">${esc(d.vpn.name)}</a></div>
         <div class="small">${d.vpn.role === "hub" ? "Hub" : "Spoke"} · <span class="mono">${esc(d.vpn.tunnel_ip)}</span></div>${tunnelState(d.vpn)}</div>` : ""}
       ${d.state === "adopted" ? `
@@ -345,6 +346,7 @@ async function router(id) {
   if ($("dhcpCard")) loadDhcp(d);
   if ($("topoCard")) loadTopology(d);
   if ($("fwCard")) loadFirewall(d);
+  if ($("wbBox")) loadWinbox(d);
   loadLocation(d);
   const load = async () => {
     const s = await api(`/api/devices/${d.id}/series?range=${rView.range}&iface=${encodeURIComponent(rView.iface)}`);
@@ -397,6 +399,55 @@ async function loadDhcp(d) {
 }
 
 // Upgrade status / button in the router page's side panel (technicians)
+// --- Winbox through TikManager (winbox.py): an address-locked, time-limited port relayed over the router's tunnel ----
+async function loadWinbox(d) {
+  const el = $("wbBox");
+  if (!el) return;
+  let w;
+  try { w = await api(`/api/devices/${d.id}/winbox`); } catch (e) { el.innerHTML = `<div class="row small"><b>Winbox</b></div><p class="small status err">${esc(e.message)}</p>`; return; }
+  if (!$("wbBox")) return;
+  const s = w.sessions.find((x) => x.mine) || w.sessions[0];
+  const svc = w.service;
+  const left = (x) => Math.max(0, Math.round((x.expires - Date.now() / 1000) / 60));
+  let body;
+  if (s && s.mine) {
+    body = `<p class="small">In Winbox, <b>Connect To</b>:</p>
+      <div class="wb-addr"><span class="mono" id="wbAddr">${esc(w.host)}:${s.port}</span><button class="btn" type="button" id="wbCopy">Copy</button></div>
+      <p class="small muted">Open to <span class="mono">${esc(s.allow_ip)}</span> only · closes in ${left(s)} min (or after 10 min without traffic) ·
+        ${s.conns ? `${s.conns} connection${s.conns === 1 ? "" : "s"}, ${bytes(s.bytes)}` : "not connected yet"}. Sign in with your own router login.</p>
+      <div class="row"><button class="btn" type="button" id="wbExtend">Extend 30 min</button><button class="btn" type="button" id="wbClose">Close</button></div>`;
+  } else if (!svc) {
+    body = `<p class="small muted">${esc(w.error || "The router must be online to open Winbox.")}</p>`;
+  } else if (svc.disabled) {
+    body = `<p class="small">Winbox is turned off on this router.</p>
+      <button class="btn" type="button" id="wbEnable">Turn on for TikManager only</button>
+      <p class="small muted">Turns Winbox on, reachable only from TikManager's tunnel address (${esc(w.tunnel_ip)}) - not from the internet or the LAN.</p>`;
+  } else if (!w.reachable) {
+    body = `<p class="small">Winbox only accepts <span class="mono">${esc(svc.address)}</span>, so TikManager can't reach it.</p>
+      <button class="btn" type="button" id="wbFix">Allow TikManager's tunnel address</button>
+      <p class="small muted">Adds ${esc(w.tunnel_ip)}/32 to Winbox's "Available From" - nothing else changes.</p>`;
+  } else {
+    body = `<p class="small muted">Opens a port on TikManager, relayed to this router's Winbox over its tunnel - no Winbox port on the router's internet side.
+        Only your address can use it, for 30 minutes.</p>
+      <label class="field small">Your public address <input id="wbIp" value="${esc(w.your_ip)}" spellcheck="false"></label>
+      <button class="btn primary" type="button" id="wbOpen">Open Winbox</button>
+      ${s ? `<p class="small muted">${esc(s.user)} has a session open to this router.</p>` : ""}`;
+  }
+  el.innerHTML = `<div class="row small"><b>Winbox</b><span class="spacer"></span>${s && s.mine ? `<span class="pill up-done">open</span>` : ""}</div>${body}<p class="small status" id="wbStatus"></p>`;
+  const say = (m, c = "err") => { $("wbStatus").textContent = m; $("wbStatus").className = `small status ${c}`; };
+  const act = async (url, body) => { try { await post(url, body || {}); rView.hold = false; loadWinbox(d); } catch (e) { say(e.message); } };
+  $("wbOpen")?.addEventListener("click", () => act(`/api/devices/${d.id}/winbox/open`, { allow_ip: $("wbIp").value.trim() }));
+  $("wbFix")?.addEventListener("click", () => act(`/api/devices/${d.id}/winbox/fix`));
+  $("wbEnable")?.addEventListener("click", () => act(`/api/devices/${d.id}/winbox/enable`));
+  $("wbExtend")?.addEventListener("click", () => act(`/api/winbox/${s.port}/extend`));
+  $("wbClose")?.addEventListener("click", () => act(`/api/winbox/${s.port}/close`));
+  $("wbIp")?.addEventListener("focus", () => { rView.hold = true; });
+  $("wbCopy")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("wbAddr").textContent); say("Copied - paste it into Winbox's Connect To.", "ok"); }
+    catch { say("Select the address and copy it (the browser blocked copying)."); }
+  });
+}
+
 function upgradeBox(d) {
   const j = d.upgrade, last = d.last_upgrade;
   const avail = hasUpdate(d), fw = fwUpdate(d);
@@ -2392,7 +2443,8 @@ async function alertsPage() {
 const secView = { hours: 24, source: "", kind: "", q: "" };
 const SEC_SOURCE = { tikmanager: "TikManager", server: "Ubuntu server", router: "Router" };
 const SEC_KIND = { login_failed: "Failed sign-in", mfa_failed: "Wrong MFA code", sudo_failed: "sudo password wrong", locked: "Account locked",
-  rate_limited: "Too many attempts", adoption_rejected: "Bad adoption command", login_ok: "Signed in", banned: "Blocked (fail2ban)", config_change: "Config changed" };
+  rate_limited: "Too many attempts", adoption_rejected: "Bad adoption command", login_ok: "Signed in", banned: "Blocked (fail2ban)", config_change: "Config changed", remote_session: "Winbox session opened",
+  remote_rejected: "Winbox: wrong address" };
 
 async function securityPage() {
   const s = await api(`/api/security?hours=${secView.hours}&source=${encodeURIComponent(secView.source)}&kind=${encodeURIComponent(secView.kind)}&q=${encodeURIComponent(secView.q)}`);

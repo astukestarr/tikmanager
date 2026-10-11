@@ -20,7 +20,7 @@ import traceback
 from pathlib import Path
 
 KEEP_DAYS = 90
-FAIL_KINDS = ("login_failed", "mfa_failed", "sudo_failed", "locked", "rate_limited", "adoption_rejected")
+FAIL_KINDS = ("login_failed", "mfa_failed", "sudo_failed", "locked", "rate_limited", "adoption_rejected", "remote_rejected")
 SOURCES = ("tikmanager", "server", "router")
 AUTH_FILES = [Path("/var/lib/tikmanager-update/auth-events.json")]
 

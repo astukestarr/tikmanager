@@ -3,6 +3,22 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.16.0 - 2026-10-11
+
+- **Winbox through TikManager** (router page > Winbox > **Open Winbox**, technicians with write access): TikManager opens
+  a port from a small pool (TCP 40000-40049) on its own address and relays it to the router's Winbox over the router's
+  existing tunnel - so Winbox never has to be open on a router's internet side, and it works for routers with no public
+  address of their own. Type the `host:port` it shows into Winbox's Connect To and sign in with your own router login.
+  - Each session only accepts **your public address** (editable, e.g. if your Winbox goes out through a VPN); anyone
+    else is disconnected at once and it's recorded on the Security page.
+  - **30 minutes** (Extend adds 30, up to 4 hours), closed after 10 minutes without traffic, or with Close.
+  - A relay inside TikManager - IP forwarding stays off on the server; Winbox's own encryption passes through untouched.
+  - Every session (who, router, from where, how long, how much) is in the audit log and on the Security page.
+  - If a router's Winbox is off or only accepts certain addresses, one click lets TikManager's tunnel address in (turning
+    it on restricts it to that address alone, never the internet).
+  - **Forward TCP 40000-40049 to the TikManager server on your edge firewall.** This upgrade opens the range in the
+    server's own firewall (ufw); the security check expects it.
+
 ## 1.15.0 - 2026-10-11
 
 - **Off-site backup** (Admin > Settings): a copy of TikManager on storage you own - **FTPS** (recommended), FTP or

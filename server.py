@@ -34,6 +34,7 @@ from secevents import SecurityEvents
 from observatory import Observatory
 from reachability import Reachability
 from offsite import OffsiteBackup, OffsiteError
+from winbox import WinboxRelay
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -96,6 +97,7 @@ alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWis
 alerts.reach = reach
 offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP / WebDAV storage
 alerts.offsite = offsite
+winbox = WinboxRelay(db, settings, secev)   # Winbox to routers through TikManager (on-demand, address-locked)
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -110,6 +112,18 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
+
+
+def winbox_allows_tikmanager(addresses):
+    """A router's Winbox "Available From": empty = anyone; otherwise TikManager's tunnel address must be in a listed network."""
+    nets = [a.strip() for a in str(addresses or "").split(",") if a.strip()]
+    for n in nets:
+        try:
+            if ipaddress.ip_address(settings.wg_server_ip) in ipaddress.ip_network(n, strict=False):
+                return True
+        except ValueError:
+            continue
+    return not nets
 
 
 def geocode(text):
@@ -537,6 +551,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/offsite":   # off-site backup settings + last result
             self.require(tech=True, admin=True)
             return self.json(offsite.public())
+        if m := re.fullmatch(r"/api/devices/(\d+)/winbox", path):   # the router's Winbox service + open sessions to it
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            svc, err = None, None
+            if d["state"] == "adopted" and d["online"]:
+                try:
+                    svc = poller.client(d).winbox_service()
+                except RouterError as e:
+                    err = str(e)
+            tip = settings.wg_server_ip
+            ok = bool(svc) and not svc["disabled"] and winbox_allows_tikmanager(svc["address"])
+            return self.json({"service": svc, "error": err, "reachable": ok, "tunnel_ip": tip, "host": urllib.parse.urlparse(settings.public_url).hostname,
+                              "your_ip": self.client_ip(), "sessions": [x for x in winbox.view(s) if x["device_id"] == d["id"]],
+                              "ports": f"{winbox.ports.start}-{winbox.ports.stop - 1}"})
+        if path == "/api/winbox":   # all open Winbox sessions (Security page)
+            s = self.require(tech=True)
+            return self.json({"sessions": winbox.view(s)})
         if path == "/api/security":   # sign-in attempts and other security events (TikManager, Ubuntu server, routers)
             self.require(tech=True)
             try:
@@ -1285,6 +1316,40 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=offsite.run, args=("manual",), daemon=True, name="offsite-now").start()
             db.audit(s["email"], "off-site backup started", offsite.where(), self.client_ip())
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/winbox/(open|fix|enable)", path):
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router must be online.")
+            cl = poller.client(d)
+            try:
+                if m.group(2) in ("fix", "enable"):   # let TikManager's tunnel address reach Winbox (and turn it on, restricted to that address)
+                    svc = cl.winbox_allow(settings.wg_server_ip, enable=m.group(2) == "enable")
+                    db.audit(s["email"], "router Winbox service changed for TikManager", d["name"], self.client_ip(), org_id=d["org_id"],
+                             detail=f"available from: {svc['address'] or 'anywhere'}, {'off' if svc['disabled'] else 'on'}")
+                    return self.json({"ok": True, "service": svc})
+                svc = cl.winbox_service()
+            except RouterError as e:
+                raise HttpError(502, f"The router didn't answer: {e}") from None
+            if svc["disabled"]:
+                raise HttpError(400, "Winbox is turned off on this router - turn it on for TikManager first.")
+            if not winbox_allows_tikmanager(svc["address"]):
+                raise HttpError(400, "This router's Winbox only accepts certain addresses - allow TikManager's tunnel address first.")
+            allow = str(self.body().get("allow_ip") or self.client_ip()).strip()
+            try:
+                return self.json({"ok": True, "session": winbox.open(d, s["email"], allow, svc["port"]),
+                                  "host": urllib.parse.urlparse(settings.public_url).hostname})
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+        if m := re.fullmatch(r"/api/winbox/(\d+)/(extend|close)", path):
+            s = self.require(tech=True, write=True)
+            try:
+                if m.group(2) == "extend":
+                    return self.json({"ok": True, "session": winbox.extend(int(m.group(1)), s["email"], s["role"] == "admin")})
+                winbox.close(int(m.group(1)), s["email"], s["role"] == "admin", why=f"closed by {s['email']}")
+                return self.json({"ok": True})
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
         if path == "/api/admin/reachability-test":   # connectivity test from the internet (runs ~20 s in the background)
             s = self.require(tech=True, admin=True)
             try:

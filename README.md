@@ -23,7 +23,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -222,6 +222,21 @@ phones, printers, servers & VMs, cameras, computers, personal devices, IoT and u
 devices (name, IP, MAC, port). Routes to other networks (VPN, static, dynamic) are listed for technicians; client users
 see their networks but not the routing table. Infrastructure and routes come straight from the router; end devices are
 recognised by their maker and name, so some stay "Unidentified" (unlike a scanner, the router doesn't probe them).
+
+## Winbox through TikManager
+
+**Router page > Winbox > Open Winbox** (technicians with write access) gives you an address like
+`tikmanager.example.com:40012` to type into Winbox's **Connect To**; sign in with your own router login. TikManager relays
+that port to the router's Winbox over the router's tunnel, so Winbox is never open on the router's internet side and
+routers without a public address work too.
+
+- Only your public address can use the session (change it if your Winbox goes out through a VPN); anything else is
+  disconnected and shows on the Security page.
+- 30 minutes, **Extend** for 30 more (up to 4 hours), closed after 10 minutes without traffic or with **Close**.
+- If the router's Winbox is turned off or limited to certain addresses, the box offers a one-click fix that lets only
+  TikManager's tunnel address in.
+- **Setup:** forward **TCP 40000-40049** to the TikManager server on your edge firewall (the installer / upgrade opens
+  it in ufw). `TM_WINBOX_PORTS` changes the range - change the ufw rule and your edge firewall to match.
 
 ## Firewall & NAT rules
 
