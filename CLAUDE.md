@@ -67,6 +67,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Firewall / NAT editing (fields, locked rules, undo timer) | `firewall.py` (`FIELDS`, `ACTIONS`, `protected()`, `restore_script()`), `RouterOS.fw_*` / `undo_*` (+ `SimRouter`), `loadFirewall()` / `fwDialog()` in `app.js` |
 | Community script library (danger / secret patterns, sharing) | `scriptlib.py` (`DANGER`, `SECRETS`, `share()`), `libraryDialog()` / `shareDialog()` in `app.js`; library repo `astukestarr/routeros-scripts` |
 | Alerts (kinds, thresholds, tickets, Teams) | `alerts.py` (`KINDS`, `conditions()`, `notify_open/resolved()`), `Integrations.cw_ticket/cw_close/teams_post`, `alertsPage()` in `app.js` |
+| Connectivity test (outside-in ports) | `reachability.py`, `reachBox()` + `SEC_FIXES.net_*` in `app.js` |
 | Website security grade (Mozilla Observatory) | `observatory.py`, `obsBox()` in `app.js`; `TM_OBSERVATORY` |
 | Security page (events, flags, router log parsing) | `secevents.py` (`parse_router()`, `summary()`), `deploy/collect-auth.py` (Ubuntu side), `secev.record(...)` calls in `server.py`, `securityPage()` in `app.js` |
 | Discovered page (which neighbours count as new) | `discovered.py` (`known_sets()` / `match()`), `RouterOS.mikrotik_neighbors()` (+ `SimRouter`), poller (every `INVENTORY_SECONDS`), `discoveredPage()` in `app.js` |

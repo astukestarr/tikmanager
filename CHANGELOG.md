@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.14.0 - 2026-10-11
+
+- **Connectivity test** (Admin > Version & updates > **Run test**): checks from the internet, the way routers and people
+  reach TikManager, that the firewall is set up right:
+  - **DNS**: the public name points at this server (Cloudflare's public DNS).
+  - **Open**: HTTPS (TCP 443 - sign-in, router adoption) and HTTP (TCP 80 - certificate renewals, redirect), each tried
+    from 3 servers in different countries (check-host.net).
+  - **Closed**: SSH (TCP 22) and TikManager's own app port - they must not be reachable from the internet.
+  - **WireGuard (UDP 51820)** can't be tested by a public checker (WireGuard only answers routers that have its key), so
+    routers online over their tunnels from other places are the proof.
+  Each problem has **How to fix** steps. It runs on request and once after every upgrade; only the host name is sent to
+  those services. A failed check can raise an alert (Alerts > Settings > "Connectivity test finds a port problem").
+
 ## 1.13.0 - 2026-10-09
 
 - **Community script library** (Tasks > Scripts > **Community library**): browse and search RouterOS scripts shared by

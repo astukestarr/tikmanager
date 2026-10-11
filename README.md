@@ -475,6 +475,11 @@ TikManager server (SSH, as a user with sudo), then click **Run check** again.
 | Service sandbox changed | `sudo rm -rf /etc/systemd/system/tikmanager.service.d`, `sudo cp /opt/tikmanager/deploy/tikmanager.service /etc/systemd/system/`, `sudo systemctl daemon-reload && sudo systemctl restart tikmanager` |
 | No database copy / old copy | `sudo systemctl stop tikmanager && sudo tar czf /root/tikmanager-$(date +%F).tgz /var/lib/tikmanager /etc/tikmanager; sudo systemctl start tikmanager`, then download it to a safe place and delete it from the server - it contains the master key |
 
+**Connectivity test**: Admin > Version & updates > **Run test** checks from the internet that HTTPS (443) and HTTP (80)
+are reachable, SSH (22) and TikManager's own app port are not, and the DNS name points here - tried from 3 countries by
+check-host.net - and confirms WireGuard (UDP 51820) by routers connecting from elsewhere. Each problem says how to fix
+it. It also runs once after every upgrade.
+
 **Website security grade**: Admin > Version & updates also shows the grade Mozilla's
 [HTTP Observatory](https://developer.mozilla.org/en-US/observatory) gives TikManager's public address (security headers,
 cookies, HTTPS redirects), checked weekly, after every upgrade and on **Scan now**. Only the host name is sent to

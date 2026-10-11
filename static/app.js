@@ -1439,6 +1439,11 @@ async function versionCard() {
     b.setAttribute("aria-expanded", String(open));
     b.textContent = open ? "Hide steps" : "How to fix";
   }));
+  $("reachRun")?.addEventListener("click", async () => {
+    $("reachRun").disabled = true;
+    try { await post("/api/admin/reachability-test"); versionCard(); }
+    catch (e) { $("reachRun").disabled = false; $("secStatus").textContent = e.message; $("secStatus").className = "status err"; }
+  });
   $("obsScan")?.addEventListener("click", async () => {
     $("obsScan").disabled = true;
     $("obsScan").textContent = "Scanning…";
@@ -1460,7 +1465,7 @@ async function versionCard() {
     try { await post("/api/admin/upgrade", { version: u.latest }); versionCard(); }
     catch (err) { e.target.disabled = false; $("verStatus").textContent = err.message; $("verStatus").className = "status err"; }
   });
-  if (busy || u.security?.running) setTimeout(versionCard, 4000);
+  if (busy || u.security?.running || u.reachability?.running) setTimeout(versionCard, 4000);
 }
 
 // "How to fix" for each server security finding (ids come from deploy/check.sh; README "Fixing server security
@@ -1541,6 +1546,41 @@ const SEC_FIXES = {
     cmds: ["sudo systemctl stop tikmanager && sudo tar czf /root/tikmanager-$(date +%F).tgz /var/lib/tikmanager /etc/tikmanager; sudo systemctl start tikmanager"] },
 };
 SEC_FIXES.sandbox = SEC_FIXES.caps = SEC_FIXES.service_user;
+Object.assign(SEC_FIXES, {
+  net_dns: { why: "Routers and people find TikManager by its name - it must point at the public address your firewall forwards to this server.",
+    steps: ["At your DNS provider, set an A record for TikManager's name to your public IP (the one your firewall forwards to this server). Check it from your PC:"],
+    pc: ["Resolve-DnsName <your TikManager name> -Server 1.1.1.1"] },
+  net_443: { why: "People sign in and routers adopt over HTTPS - without it nothing can reach TikManager.",
+    steps: ["On your internet firewall / router, forward (or allow) TCP 443 to this server's address. On the server itself it's already allowed - check:"],
+    cmds: ["sudo ufw status | grep 443"] },
+  net_80: { why: "Caddy renews the HTTPS certificate through port 80 (Let's Encrypt checks it) and redirects plain HTTP to HTTPS. Without it the certificate expires within 90 days.",
+    steps: ["On your internet firewall / router, forward (or allow) TCP 80 to this server, like 443. On the server:"], cmds: ["sudo ufw status | grep 80"] },
+  net_22: { why: "SSH open to the internet gets password-guessing all day; manage the server from your LAN or a VPN instead.",
+    steps: ["Remove the port forward / allow rule for TCP 22 on your internet firewall, and allow SSH on the server from your LAN only:"],
+    cmds: ["sudo ufw allow from 192.168.1.0/24 to any port 22 proto tcp", "sudo ufw status numbered", "sudo ufw delete <number of the 22/tcp ALLOW Anywhere rule>"] },
+  net_app: { why: "TikManager's app port must only be reachable through Caddy (HTTPS) - open, it bypasses HTTPS entirely.",
+    steps: ["Remove any port forward for it on your internet firewall, and make sure the app only listens locally:"],
+    cmds: ["grep TM_HOST /etc/tikmanager/tikmanager.env   # should say TM_HOST=127.0.0.1", "sudo systemctl restart tikmanager"] },
+  net_wg: { why: "Routers build their tunnel to TikManager over UDP 51820 - blocked, they register but never come online.",
+    steps: ["On your internet firewall / router, forward UDP 51820 to this server (it can't be tested from outside: WireGuard only answers routers that have its key). On the server:"],
+    cmds: ["sudo ufw status | grep 51820", "sudo wg show wg0 latest-handshakes"] },
+  net_ip: { why: "The test couldn't learn this server's public address (Cloudflare didn't answer) - the other results still count.", steps: ["Run the test again in a minute."] },
+});
+
+// connectivity test from the internet (reachability.py): DNS, TCP 443 / 80 open, 22 / app port closed, WireGuard via routers
+function reachBox(r, row) {
+  if (!r.supported) return `<div class="obs"><h3>Connectivity test</h3><p class="small muted">Checks from the internet that the right ports are open
+    (and the wrong ones closed) once TikManager has a public address - not in dev mode.</p></div>`;
+  const res = r.results || [], fails = res.filter((x) => x.status === "fail").length, warns = res.filter((x) => x.status === "warn").length;
+  return `<div class="obs"><div class="row"><h3>Connectivity test</h3>
+      ${r.running ? `<span class="status">Testing from the internet… (about 20 seconds)</span>`
+        : r.at ? `<span class="small muted">Tested ${ago(r.at)}</span>${fails ? `<span class="pill sec-pill-fail">${fails} problem${fails === 1 ? "" : "s"}</span>` : ""}${warns ? `<span class="pill sec-pill-warn">${warns} to look at</span>` : ""}${!fails && !warns ? `<span class="pill sec-pill-ok">Reachable and locked down</span>` : ""}`
+        : `<span class="small muted">Not run yet.</span>`}
+      <span class="spacer"></span><button class="btn" type="button" id="reachRun" ${r.running ? "disabled" : ""}>Run test</button></div>
+    <p class="small muted">Checks from outside, the way routers and people reach ${esc(r.host)}: DNS, HTTPS (443) and HTTP (80) open, SSH (22) and TikManager's own
+      app port closed - tried from 3 countries by check-host.net - and WireGuard (UDP 51820) confirmed by routers connecting from elsewhere. Only the host name is sent.</p>
+    ${res.length ? `<ul class="sec-list">${res.slice().sort((a, b) => ({ fail: 0, warn: 1, pass: 2 }[a.status] - { fail: 0, warn: 1, pass: 2 }[b.status])).map((x) => row({ ...x, section: { net_dns: "DNS", net_wg: "WireGuard", net_ip: "Network" }[x.id] || "Ports" })).join("")}</ul>` : ""}</div>`;
+}
 
 // Mozilla HTTP Observatory grade of the public address (observatory.py): weekly, after upgrades, or Scan now
 function obsBox(o) {
@@ -1585,6 +1625,7 @@ function securityBox(s, u = {}) {
     ${bad.length ? `<ul class="sec-list">${bad.map(row).join("")}</ul>` : ""}
     ${ok.length ? `<details><summary class="small">${ok.length} passed</summary><ul class="sec-list">${ok.map(row).join("")}</ul></details>` : ""}
     ${obsBox(u.observatory || {})}
+    ${reachBox(u.reachability || {}, row)}
     <details class="sec-best"><summary><b>Security best practices</b> <span class="small muted">- what the check can't see for you</span></summary>
       <ul class="small">
         <li><b>Keep a copy of <span class="mono">/etc/tikmanager/master.key</span> and the database off this server</b> (password manager or offline

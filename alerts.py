@@ -33,6 +33,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "security": ("Security warnings (password guessing, a sign-in right after failures ...)", True, None, None),
     "server": ("Server security check finds a FAIL", True, None, None),
     "website": ("Website security grade drops below A", True, None, None),
+    "connectivity": ("Connectivity test finds a port problem (e.g. HTTPS not reachable from the internet)", True, None, None),
     "cpu": ("Router CPU high (15-minute average)", False, "percent", 90),
     "firmware": ("New RouterOS available for a router", False, None, None),
 }
@@ -125,6 +126,12 @@ class Alerts:
             fails = [r["text"] for r in sec.get("results") or [] if r.get("status") == "fail"]
             if fails:
                 out["server-check"] = ("server", None, None, f"Server security check: {len(fails)} to fix", "\n".join(f"- {x}" for x in fails))
+        reach = getattr(self, "reach", None)
+        if k["connectivity"]["on"] and reach:
+            bad = [r["text"] for r in reach.info().get("results") or [] if r.get("status") == "fail"]
+            if bad:
+                out["connectivity"] = ("connectivity", None, None, f"Connectivity test: {len(bad)} problem{'s' if len(bad) != 1 else ''}",
+                                       "\n".join(f"- {x}" for x in bad))
         if k["website"]["on"]:
             o = self.observatory.info()
             if o.get("grade") and not str(o["grade"]).upper().startswith("A"):

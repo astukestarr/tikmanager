@@ -32,6 +32,7 @@ from vpn import VpnError, Vpns
 from firewall import Firewall, FirewallError
 from secevents import SecurityEvents
 from observatory import Observatory
+from reachability import Reachability
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -87,9 +88,11 @@ integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 firewall = Firewall(db, poller.client, backups)
 observatory = Observatory(db, settings)   # Mozilla Observatory grade of the public URL
+reach = Reachability(db, settings, observatory)   # connectivity test from the internet (on request)
 secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubuntu server, routers
 library = ScriptLibrary(db, integ)   # community RouterOS script library on GitHub
 alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWise tickets / Teams when something's wrong
+alerts.reach = reach
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -354,7 +357,7 @@ class Handler(BaseHTTPRequestHandler):
                               "backups": db.one("SELECT COUNT(*) AS n FROM backups")["n"]})
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)
-            return self.json({**updates.info(), "observatory": observatory.info()})
+            return self.json({**updates.info(), "observatory": observatory.info(), "reachability": reach.info()})
         if path == "/api/login/options":
             return self.json({"entra": settings.entra_configured, "dev": self.dev_login_allowed()})
         if path == "/api/me":
@@ -1255,6 +1258,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "test alert sent", ip=self.client_ip(), detail=msg)
             return self.json({"ok": True, "detail": msg})
+        if path == "/api/admin/reachability-test":   # connectivity test from the internet (runs ~20 s in the background)
+            s = self.require(tech=True, admin=True)
+            try:
+                reach.start()
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "connectivity test started", observatory.host, self.client_ip())
+            return self.json({"ok": True, "reachability": reach.info()})
         if path == "/api/admin/observatory-scan":   # Mozilla Observatory scan of the public URL, now
             s = self.require(tech=True, admin=True)
             try:
@@ -1620,6 +1631,7 @@ def main():
     vpns.start()
     secev.start()
     observatory.start()
+    reach.start_loop()
     alerts.start()
     if settings.dev:
         secev.seed_dev()
