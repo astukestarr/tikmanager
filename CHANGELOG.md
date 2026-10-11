@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.17.2 - 2026-10-11
+
+- Fixed: on the router page, the Winbox address, login and password (and their Copy / Show buttons) ran off the side
+  panel. Each value now has its own full-width line with the buttons underneath, and a long address breaks at a dot
+  or before the port - never in the middle of the port number. Copying still copies the whole address.
+
 ## 1.17.1 - 2026-10-11
 
 - **Winbox session password hidden**: it shows as dots on the router page (and isn't in the page's text, so it stays out

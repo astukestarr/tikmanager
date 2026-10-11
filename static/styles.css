@@ -496,6 +496,10 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .lib-body { max-height: 45vh; overflow: auto; white-space: pre-wrap; }
 
 /* Winbox through TikManager */
-.wb-addr { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
-.wb-addr .mono { flex: 1; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); user-select: all; font-size: 14px; }
+.wb-addr { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 6px; margin: 4px 0 8px; }
+/* the side panel is narrow: the value gets its own full-width line (wrapping long host names), the buttons go under it */
+.wb-addr .mono { flex: 1 1 100%; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  user-select: all; font-size: 13px; overflow-wrap: anywhere; }
+.wb-addr .btn { padding: 3px 10px; font-size: 12px; }
 .wb-secret { letter-spacing: .08em; }
+.wb-addr .wb-host { overflow-wrap: normal; word-break: keep-all; }   /* break at the <wbr>s (dots, before the port), not mid-number */

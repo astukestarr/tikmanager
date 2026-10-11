@@ -412,7 +412,7 @@ async function loadWinbox(d) {
   let body;
   if (s && s.mine) {
     body = `<p class="small">In Winbox, <b>Connect To</b>:</p>
-      <div class="wb-addr"><span class="mono" data-copy>${esc(w.host)}:${s.port}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
+      <div class="wb-addr"><span class="mono wb-host" data-copy>${esc(w.host).replace(/\./g, ".<wbr>")}<wbr>:${s.port}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
       <p class="small">Login <span class="small muted">(${s.group === "read" ? "read-only - you can look, not change" : "full"}; only for this session)</span>:</p>
       <div class="wb-addr"><span class="mono" data-copy>${esc(s.router_user)}</span><button class="btn" type="button" data-copybtn>Copy</button></div>
       <div class="wb-addr"><span class="mono wb-secret" id="wbPass" aria-label="Password (hidden)">••••••••••••••••</span>
