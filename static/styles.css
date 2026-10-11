@@ -169,7 +169,9 @@ input[type=color] { width: 56px; height: 34px; padding: 2px; }
 /* router page: UniFi-style summary panel + activity chart */
 .dev-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
 .dev-layout > .dev-main > .card:first-child { margin-top: 0; }
-.dev-side { position: sticky; top: 12px; margin-top: 0; }
+/* the left panel stays in view below the sticky top bar, and scrolls on its own when it's taller than the window */
+.dev-side { position: sticky; top: calc(var(--stick-top, 64px) + 12px); margin-top: 0; max-height: calc(100vh - var(--stick-top, 64px) - 24px);
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .dev-head { display: flex; justify-content: center; padding: 6px 0 10px; }
 .dev-side .thumb-lg { width: 200px; height: 130px; border: 0; }
 .dev-name { font-size: 18px; font-weight: 700; text-align: center; word-break: break-word; }
@@ -206,7 +208,7 @@ input[type=color] { width: 56px; height: 34px; padding: 2px; }
 .hcell { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
 .hcell .hv { font-size: 22px; font-weight: 800; } .hcell .hl { color: var(--muted); font-size: 12px; }
 .hcell.good .hv { color: var(--good); } .hcell.warn .hv { color: var(--warn); } .hcell.bad .hv { color: var(--bad); }
-@media (max-width: 900px) { .dev-layout { grid-template-columns: 1fr; } .dev-side { position: static; } }
+@media (max-width: 900px) { .dev-layout { grid-template-columns: 1fr; } .dev-side { position: static; max-height: none; overflow: visible; } }
 /* site map */
 .sm-org { margin-top: 18px; } .sm-org h2 { font-size: 15px; margin: 0 0 8px; }
 .sm-tree { border-left: 1.5px dashed var(--border); margin-left: 6px; padding-left: 0; }
@@ -503,3 +505,6 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .wb-addr .btn { padding: 3px 10px; font-size: 12px; }
 .wb-secret { letter-spacing: .08em; }
 .wb-addr .wb-host { overflow-wrap: normal; word-break: keep-all; }   /* break at the <wbr>s (dots, before the port), not mid-number */
+
+/* router page tabs */
+.rtabs { margin: 0 0 12px; }

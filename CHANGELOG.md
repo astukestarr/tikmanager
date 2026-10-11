@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.18.0 - 2026-10-11
+
+- **Router page in tabs**: the right side is split into **Overview** (traffic chart, health, interfaces), **Network**
+  (DHCP clients, VPNs, network map), **Firewall**, **Backups**, **Events** and **Settings** (location, manage) instead
+  of one very long page. Only the open tab is loaded, so pages open faster; the tab you were on is remembered when you
+  move to another router. **Back up now** on the left opens Backups and starts the backup there.
+- **The left panel scrolls on its own** when it's taller than the window (it stays below the top bar), so everything in
+  it - upgrades, Winbox, health - is reachable without scrolling to the bottom of the page first.
+
 ## 1.17.2 - 2026-10-11
 
 - Fixed: on the router page, the Winbox address, login and password (and their Copy / Show buttons) ran off the side

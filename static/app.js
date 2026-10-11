@@ -231,6 +231,13 @@ async function router(id) {
   const kv = (k, v, raw) => `<div class="kv"><span>${k}</span><span class="${raw ? "" : "mono"}">${raw ? v : esc(v || "—")}</span></div>`;
   const meter = (label, pct, text) => `<div class="meter"><div class="row small"><span>${label}</span><span class="spacer"></span><span class="muted">${text}</span></div>
     <div class="bar"><i data-pct="${pct ?? 0}" class="${pct >= 90 ? "hot" : pct >= 75 ? "warm" : ""}"></i></div></div>`;
+  // the right side is split into tabs (only the open one is built and loaded); remembered across routers and refreshes
+  const adopted = d.state === "adopted";
+  const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["firewall", "Firewall"]] : []),
+    ["backups", "Backups"], ["events", "Events"], ["settings", canWrite() ? "Settings" : "Location"]] : [];
+  if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
+  const tab = adopted ? rView.rtab : "events";
+  const on = (k) => !adopted || tab === k;
   $("main").innerHTML = `<p><a href="#" id="back">← Routers</a></p>
   <div class="dev-layout">
     <aside class="card dev-side">
@@ -260,8 +267,10 @@ async function router(id) {
       <button class="btn wide" type="button" id="sideScript" ${d.online ? "" : "disabled"}>Run script...</button>` : ""}` : ""}
     </aside>
     <section class="dev-main">
-      ${d.state === "adopted" ? `
-      ${d.last_error && !d.online ? `<div class="card"><span class="status err">${esc(d.last_error)}</span></div>` : ""}
+      ${adopted ? `<div class="tabs rtabs" role="tablist" aria-label="Router sections">${tabs.map(([k, l]) =>
+        `<button type="button" role="tab" data-rtab="${k}" class="${k === tab ? "active" : ""}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>` : ""}
+      ${adopted && d.last_error && !d.online ? `<div class="card"><span class="status err">${esc(d.last_error)}</span></div>` : ""}
+      ${adopted && tab === "overview" ? `
       <div class="card">
         <div class="chart-toolbar">
           <select id="cIface" aria-label="Interface"><option value="">WAN (internet)</option></select>
@@ -280,19 +289,21 @@ async function router(id) {
         ${(d.interfaces || []).map((i) => `<tr><td class="mono">${esc(i.name)}</td><td>${esc(i.type)}</td>
           <td>${i.disabled ? `<span class="pill">disabled</span>` : i.running ? `<span class="dot on"></span>up` : `<span class="dot off"></span>down`}</td>
           <td class="small">${esc(ifaceDetail(i))}</td><td class="mono">${i.running ? bps(i.rx_bps) : ""}</td><td class="mono">${i.running ? bps(i.tx_bps) : ""}</td>
-          <td class="small nowrap">${bytes(i.rx)} / ${bytes(i.tx)}</td><td class="muted">${esc(i.comment)}</td></tr>`).join("")}</tbody></table></div></div>
+          <td class="small nowrap">${bytes(i.rx)} / ${bytes(i.tx)}</td><td class="muted">${esc(i.comment)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+      ${adopted && tab === "network" ? `
+      ${d.online ? "" : `<div class="card"><p class="muted">The router is offline - DHCP clients and the network map are read live from it.</p></div>`}
       ${d.online ? `<div class="card" id="dhcpCard"><div class="row"><h2>DHCP clients</h2><span class="spacer"></span>
         <input id="dhcpQ" type="search" placeholder="Search name, IP, MAC" aria-label="Search DHCP clients">
         <button class="btn" type="button" id="dhcpRefresh">Refresh</button></div><div id="dhcpBody"><p class="muted small">Reading leases...</p></div></div>` : ""}
       ${d.vpn_found && d.vpn_found.length ? `<div class="card"><div class="row"><h2>VPNs on this router</h2><span class="spacer"></span><span class="small muted">read ${ago(d.vpn_inv_at)}</span></div>
         <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th></tr></thead>
         <tbody>${tunnelRows(d.vpn_found.map((t) => ({ r: d, t })), false)}</tbody></table></div></div>` : ""}
-      ${d.online ? `<div class="card" id="topoCard"><h2>Network map</h2><p class="muted small">Reading the router's routes, neighbours and devices...</p></div>` : ""}
-      ${d.online && isTech() ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
-      <div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>
-      <div class="card" id="locCard"><h2>Location</h2></div>` : ""}
-      <div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>
-      ${canWrite() ? `<div class="card"><h2>Manage</h2>
+      ${d.online ? `<div class="card" id="topoCard"><h2>Network map</h2><p class="muted small">Reading the router's routes, neighbours and devices...</p></div>` : ""}` : ""}
+      ${adopted && tab === "firewall" ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
+      ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
+      ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
+      ${on("events") ? `<div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>` : ""}
+      ${canWrite() && on("settings") ? `<div class="card"><h2>Manage</h2>
         ${d.state === "adopted" ? `<div class="row"><label class="field">Router identity (on the MikroTik) <input id="rIdent" value="${esc(d.identity || "")}" maxlength="64" spellcheck="false"></label>
           <button class="btn" type="button" id="rIdentSet" ${d.online ? "" : "disabled title=\"The router is offline\""}>Set on router</button></div>
           <p class="small muted">Changes <span class="mono">/system identity</span> on the router; the name in TikManager follows it.${d.online ? "" : " The router must be online."}</p>
@@ -309,6 +320,7 @@ async function router(id) {
   </div>`;
   setBars($("main"));
   $("back").addEventListener("click", (e) => { e.preventDefault(); go("routers"); });
+  document.querySelectorAll("[data-rtab]").forEach((b) => b.addEventListener("click", () => { rView.rtab = b.dataset.rtab; router(d.id); }));
   bindPending();
   $("rIdentSet")?.addEventListener("click", async () => {
     const v = $("rIdent").value.trim();
@@ -338,16 +350,23 @@ async function router(id) {
     try { await post(`/api/devices/${d.id}/delete`); go("routers"); } catch (err) { $("mStatus").textContent = err.message; $("mStatus").className = "status err"; }
   });
   if (d.state !== "adopted") return;
-  $("sideBackup")?.addEventListener("click", () => $("bkNow") ? $("bkNow").click() : null);
+  $("sideBackup")?.addEventListener("click", () => {   // opens the Backups tab and starts one there
+    if ($("bkNow")) return $("bkNow").click();
+    rView.rtab = "backups";
+    rView.backupNow = true;
+    router(d.id);
+  });
   $("sideScript")?.addEventListener("click", () => runScriptOn(d));
   $("rUpgrade")?.addEventListener("click", () => upgradeDialog([d], () => router(d.id)));
   $("rUpCancel")?.addEventListener("click", async () => { await post(`/api/upgrades/${d.upgrade.id}/cancel`); router(d.id); });
-  loadBackups(d);
+  if ($("bkCard")) loadBackups(d).then(() => { if (rView.backupNow) { rView.backupNow = false; $("bkNow")?.click(); } });
   if ($("dhcpCard")) loadDhcp(d);
   if ($("topoCard")) loadTopology(d);
   if ($("fwCard")) loadFirewall(d);
   if ($("wbBox")) loadWinbox(d);
   loadLocation(d);
+  api(`/api/devices/${d.id}/series?range=1h`).then((s) => sparkline($("spark"), s.traffic)).catch(() => {});
+  if (tab !== "overview") return;
   const load = async () => {
     const s = await api(`/api/devices/${d.id}/series?range=${rView.range}&iface=${encodeURIComponent(rView.iface)}`);
     const sel = $("cIface");
@@ -367,7 +386,6 @@ async function router(id) {
     load();
   }));
   await load();
-  api(`/api/devices/${d.id}/series?range=1h`).then((s) => sparkline($("spark"), s.traffic)).catch(() => {});
 }
 
 // DHCP leases (read live from the router when the page opens or on Refresh)
@@ -2823,7 +2841,17 @@ async function go(v, arg) {
   } catch (e) { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; }
 }
 
+// keep --stick-top = the sticky top bar's height (it grows when the update banner shows), for panels that stick below it
+function trackStickyTop() {
+  const bar = document.querySelector(".top-sticky");
+  if (!bar) return;
+  const set = () => document.documentElement.style.setProperty("--stick-top", `${bar.offsetHeight}px`);
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(bar);
+}
+
 async function init() {
+  trackStickyTop();
   me = await api("/api/me");
   $("who").textContent = `${me.name || me.email}${me.org ? ` · ${me.org}` : ""}`;
   // who's signed in, at the top of the sidebar
