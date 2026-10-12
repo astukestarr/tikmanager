@@ -179,6 +179,11 @@ was last seen, and its **age**. Filter by client, status (including **Discontinu
 puts offline routers first). Routers that registered but aren't approved yet are listed above, under **Waiting for
 approval**. Click a router for its page: charts, interfaces, DHCP clients, backups, upgrades, scripts and events.
 
+**Wireless** (tab on routers with radios - legacy wireless, wifi or 60 GHz): each radio's settings and, read live every
+10 seconds, either the **point-to-point link** (signal at both ends, SNR, CCQ, rates, distance, link uptime, the other
+end) or, for an **access point**, its **clients** (signal, SNR, CCQ, rates, connected time, traffic; weakest first,
+searchable) - handy for an office AP or an ISP sector full of CPEs.
+
 **Lifecycle - how old, and still sold?** Each router's page shows when it was **made** and whether MikroTik has
 **discontinued** the model; the Dashboard lists discontinued and 5+-year-old routers, oldest first, so replacements can
 be planned (clients see their own). Both come from MikroTik: the age from the router's factory firmware (the RouterOS

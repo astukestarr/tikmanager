@@ -270,7 +270,9 @@ async function router(id) {
     <div class="bar"><i data-pct="${pct ?? 0}" class="${pct >= 90 ? "hot" : pct >= 75 ? "warm" : ""}"></i></div></div>`;
   // the right side is split into tabs (only the open one is built and loaded); remembered across routers and refreshes
   const adopted = d.state === "adopted";
-  const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["firewall", "Firewall"]] : []),
+  const radios = (d.interfaces || []).some((i) => WL_TYPES.includes(i.type));
+  const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(radios ? [["wireless", "Wireless"]] : []),
+    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []),
     ["backups", "Backups"], ["events", "Events"], ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
@@ -342,6 +344,12 @@ async function router(id) {
         <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th></tr></thead>
         <tbody>${tunnelRows(d.vpn_found.map((t) => ({ r: d, t })), false)}</tbody></table></div></div>` : ""}
       ${d.online ? `<div class="card" id="topoCard"><h2>Network map</h2><p class="muted small">Reading the router's routes, neighbours and devices...</p></div>` : ""}` : ""}
+      ${adopted && tab === "wireless" ? (d.online ? `<div class="card" id="wlCard"><div class="row"><h2>Wireless</h2><span class="spacer"></span>
+          <input id="wlQ" type="search" placeholder="Search client, IP, MAC" aria-label="Search wireless clients" value="${esc(wlView.q)}">
+          <select id="wlSort" aria-label="Sort clients"><option value="weak">Weakest signal first</option><option value="strong">Strongest signal first</option><option value="name">Name</option></select>
+          <button class="btn" type="button" id="wlLive" aria-pressed="${wlView.live}">${wlView.live ? "Pause" : "Resume"}</button></div>
+          <p class="small muted" id="wlAt">Reading the radios...</p></div><div id="wlBody"></div>`
+        : `<div class="card"><h2>Wireless</h2><p class="muted">The router is offline - wireless information is read live from it.</p></div>`) : ""}
       ${adopted && tab === "firewall" ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
@@ -404,6 +412,7 @@ async function router(id) {
   $("rUpCancel")?.addEventListener("click", async () => { await post(`/api/upgrades/${d.upgrade.id}/cancel`); router(d.id); });
   if ($("bkCard")) loadBackups(d).then(() => { if (rView.backupNow) { rView.backupNow = false; $("bkNow")?.click(); } });
   if ($("dhcpCard")) loadDhcp(d);
+  if ($("wlCard")) loadWireless(d);
   if ($("topoCard")) loadTopology(d);
   if ($("fwCard")) loadFirewall(d);
   if ($("wbBox")) loadWinbox(d);
@@ -429,6 +438,116 @@ async function router(id) {
     load();
   }));
   await load();
+}
+
+// Wireless tab: radios (legacy wireless, wifi, 60 GHz), point-to-point link quality and AP client lists, read live every 10 s
+const WL_TYPES = ["wlan", "wifi", "w60g", "wifiwave2"];
+const wlView = { q: "", sort: "weak", live: true, token: 0 };
+const wlTone = { good: "ok", warn: "warn", bad: "err" };
+function wlSig(dbm) {   // received signal (dBm) -> [word, tone]
+  if (dbm == null) return ["", ""];
+  return dbm >= -60 ? ["Excellent", "good"] : dbm >= -70 ? ["Good", "good"] : dbm >= -78 ? ["Fair", "warn"] : ["Poor", "bad"];
+}
+const wlPct = (q) => (q == null ? ["", ""] : q >= 80 ? ["Excellent", "good"] : q >= 60 ? ["Good", "good"] : q >= 40 ? ["Fair", "warn"] : ["Poor", "bad"]);
+const wlRange = (v, good, ok) => (v == null ? "" : v >= good ? "good" : v >= ok ? "warn" : "bad");
+function wlMode(r) {
+  const m = r.mode || "";
+  if (m === "ap-bridge" || (r.kind === "wifi" && m === "ap")) return "Access point";
+  if (m === "bridge") return "Point-to-point (AP end)";
+  if (m.startsWith("station")) return "Station";
+  return m || "—";
+}
+const wlIsLink = (r, peers) => r.mode === "bridge" || (r.mode || "").startsWith("station") || (r.kind === "w60g" && r.mode !== "ap-bridge" && peers.length <= 1);
+const wlRate = (s) => String(s || "").replace(/-\d+MHz.*$/, "").replace(/Mbps$/, " Mbps").replace(/Gbps$/, " Gbps");
+
+async function loadWireless(d) {
+  let token = ++wlView.token;
+  const alive = () => token === wlView.token && $("wlCard") && rView.rtab === "wireless";
+  $("wlSort").value = wlView.sort;
+  let last = null;
+  const draw = () => {
+    if (!last || !$("wlBody")) return;
+    const q = wlView.q.toLowerCase();
+    const anyAp = last.radios.some((r) => !wlIsLink(r, last.peers.filter((p) => p.interface === r.name)));
+    $("wlQ").classList.toggle("hidden", !anyAp);
+    $("wlSort").classList.toggle("hidden", !anyAp);
+    $("wlBody").innerHTML = last.radios.length ? last.radios.map((r) => {
+      const peers = last.peers.filter((p) => p.interface === r.name);
+      const facts = [r.ssid && `SSID <b>${esc(r.ssid)}</b>`, r.band && esc(r.band), (r.channel || r.frequency) && `<span class="mono">${esc(r.channel || `${r.frequency} MHz`)}</span>`,
+        r.width && `width ${esc(r.width)}`, r.protocol && esc(r.protocol.toUpperCase()), r.noise != null && `noise ${r.noise} dBm`,
+        r.ccq != null && `CCQ ${r.ccq}%`, r.tx_power && `TX power ${esc(String(r.tx_power).replace(/dBm$/, ""))} dBm`].filter(Boolean).join(" · ");
+      const head = `<div class="row"><h2 class="mono">${esc(r.name)}</h2><span class="pill">${esc(wlMode(r))}</span>
+        ${r.disabled ? `<span class="pill">disabled</span>` : r.running ? (r.status ? `<span class="small muted">${esc(r.status)}</span>` : "") : `<span class="status err">not running</span>`}
+        ${r.master ? `<span class="small muted">virtual AP on ${esc(r.master)}</span>` : ""}</div>${facts ? `<p class="small muted wl-facts">${facts}</p>` : ""}`;
+      if (wlIsLink(r, peers)) {
+        const p = peers[0];
+        if (!p) return `<div class="card">${head}<p class="status err">Not connected${r.mode.startsWith("station") ? " - searching for its access point" : " - no station connected"}.</p></div>`;
+        const [sw, st] = r.kind === "w60g" && p.quality != null ? wlPct(p.quality) : wlSig(p.signal);
+        const [rw, rt] = wlSig(p.remote_signal);
+        const cells = [
+          ["Signal", r.kind === "w60g" && p.quality != null ? `${p.quality}%` : p.signal != null ? `${p.signal} dBm` : "—", st, sw],
+          ...(p.remote_signal != null ? [["Remote end hears", `${p.remote_signal} dBm`, rt, rw]] : []),
+          ...(p.snr != null ? [["Signal / noise", `${p.snr} dB`, wlRange(p.snr, 30, 20), ""]] : []),
+          ...(p.ccq != null ? [["CCQ", `${p.ccq}%`, wlRange(p.ccq, 80, 60), ""]] : []),
+          ["TX rate", wlRate(p.tx_rate) || "—", "", p.mcs ? `MCS ${esc(p.mcs)}` : ""],
+          ...(p.rx_rate ? [["RX rate", wlRate(p.rx_rate), "", ""]] : []),
+          ...(p.distance ? [["Distance", `${esc(p.distance)}${/^\d+$/.test(p.distance) ? (r.kind === "w60g" ? " m" : " km") : ""}`, "", ""]] : []),
+          ["Link up", p.uptime ? uptime(p.uptime, true) : "—", "", ""]];
+        return `<div class="card">${head}<div class="health">${cells.map(([k, v, c, sub]) => `<div class="hcell ${c}"><div class="hv">${v}</div>
+            <div class="hl">${k}${sub ? ` · ${sub}` : ""}</div></div>`).join("")}</div>
+          <p class="small">Connected to <b>${esc(p.name || "(no name)")}</b>${p.ip ? ` · <span class="mono">${esc(p.ip)}</span>` : ""} · <span class="mono">${esc(p.mac)}</span>
+            ${p.version ? ` · RouterOS ${esc(p.version)}` : ""}${p.tx_bytes != null ? ` · ${bytes(p.tx_bytes)} sent, ${bytes(p.rx_bytes)} received` : ""}</p></div>`;
+      }
+      // access point: its clients
+      const shown = peers.filter((p) => !q || `${p.name} ${p.ip} ${p.mac} ${p.comment}`.toLowerCase().includes(q))
+        .sort((a, b) => wlView.sort === "name" ? String(a.name || a.mac).localeCompare(String(b.name || b.mac), undefined, { numeric: true })
+          : ((a.signal ?? 0) - (b.signal ?? 0)) * (wlView.sort === "weak" ? 1 : -1));
+      const sigs = peers.map((p) => p.signal).filter((v) => v != null);
+      const avg = sigs.length ? Math.round(sigs.reduce((x, y) => x + y, 0) / sigs.length) : null;
+      const weak = sigs.filter((v) => v < -78).length;
+      const has = (k) => peers.some((p) => p[k] != null && p[k] !== "");
+      const col = { snr: has("snr"), ccq: has("ccq"), dist: has("distance"), band: has("band"), ver: has("version") };
+      return `<div class="card">${head}
+        <p class="small">${peers.length} client${peers.length === 1 ? "" : "s"}${avg != null ? ` · average signal <b class="status ${wlTone[wlSig(avg)[1]]}">${avg} dBm</b>` : ""}${weak ? ` · <span class="status warn">${weak} weak (below -78 dBm)</span>` : ""}</p>
+        ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Client</th><th>IP</th><th>Signal</th>${col.snr ? "<th>SNR</th>" : ""}${col.ccq ? "<th>CCQ</th>" : ""}
+          <th>TX / RX rate</th>${col.band ? "<th>Band</th>" : ""}${col.dist ? "<th>Distance</th>" : ""}<th>Connected</th><th>Traffic (to / from)</th>${col.ver ? "<th>RouterOS</th>" : ""}</tr></thead><tbody>
+          ${shown.map((p) => { const [w, t] = wlSig(p.signal); const pct = p.signal == null ? 0 : Math.max(4, Math.min(100, Math.round((p.signal + 95) * 100 / 55)));
+            return `<tr><td>${p.name ? esc(p.name) : `<span class="muted">—</span>`}<div class="small muted mono">${esc(p.mac)}</div></td><td class="mono small">${esc(p.ip || "")}</td>
+              <td class="nowrap"><div class="row wl-sig"><div class="bar"><i data-pct="${pct}" class="${t === "bad" ? "hot" : t === "warn" ? "warm" : ""}"></i></div>
+                <span class="status ${wlTone[t] || ""}">${p.signal ?? "—"}</span></div><div class="small muted">${w}${p.remote_signal != null ? ` · remote ${p.remote_signal}` : ""}</div></td>
+              ${col.snr ? `<td class="status ${wlTone[wlRange(p.snr, 30, 20)] || ""}">${p.snr ?? ""}</td>` : ""}${col.ccq ? `<td class="status ${wlTone[wlRange(p.ccq, 80, 60)] || ""}">${p.ccq != null ? `${p.ccq}%` : ""}</td>` : ""}
+              <td class="small nowrap">${esc(wlRate(p.tx_rate))} / ${esc(wlRate(p.rx_rate))}</td>${col.band ? `<td class="small">${esc(p.band || "")}</td>` : ""}
+              ${col.dist ? `<td class="small">${p.distance ? `${esc(p.distance)} km` : ""}</td>` : ""}<td class="small nowrap">${esc(p.uptime ? uptime(p.uptime, true) : "")}</td>
+              <td class="small nowrap">${p.tx_bytes != null ? `${bytes(p.tx_bytes)} / ${bytes(p.rx_bytes)}` : ""}</td>${col.ver ? `<td class="small">${esc(p.version || "")}</td>` : ""}</tr>`; }).join("")}
+          </tbody></table></div>` : `<p class="muted small">${peers.length ? "No clients match." : "No clients connected."}</p>`}</div>`;
+    }).join("") : `<div class="card"><p class="muted">No radios found on this router.</p></div>`;
+    setBars($("wlBody"));
+  };
+  const tick = async () => {
+    if (!alive()) return;
+    try {
+      last = await api(`/api/devices/${d.id}/wireless`);
+      if (!alive()) return;
+      $("wlAt").textContent = `Read live from the router at ${new Date(last.read_at * 1000).toLocaleTimeString()}${wlView.live ? " - updates every 10 seconds" : " - paused"}.`;
+      $("wlAt").className = "small muted";
+      draw();
+    } catch (e) {
+      if (!alive()) return;
+      $("wlAt").textContent = e.message;
+      $("wlAt").className = "status err small";
+    }
+    if (wlView.live) setTimeout(() => { if (!document.hidden) tick(); else setTimeout(tick, 10000); }, 10000);
+  };
+  $("wlQ").addEventListener("input", (e) => { wlView.q = e.target.value; draw(); });
+  $("wlSort").addEventListener("change", (e) => { wlView.sort = e.target.value; draw(); });
+  $("wlLive").addEventListener("click", () => {
+    wlView.live = !wlView.live;
+    $("wlLive").textContent = wlView.live ? "Pause" : "Resume";
+    $("wlLive").setAttribute("aria-pressed", String(wlView.live));
+    if (wlView.live) { token = ++wlView.token; tick(); } else wlView.token++;   // resuming starts a fresh loop; pausing stops the old one
+    if (!wlView.live) $("wlAt").textContent = $("wlAt").textContent.replace(" - updates every 10 seconds", " - paused");
+  });
+  await tick();
 }
 
 // DHCP leases (read live from the router when the page opens or on Refresh)

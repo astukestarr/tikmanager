@@ -633,6 +633,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({**firewall.view(d), "can_edit": s["role"] != "readonly"})
             except FirewallError as e:
                 raise HttpError(502, str(e)) from None
+        if m := re.fullmatch(r"/api/devices/(\d+)/wireless", path):   # radios, links and connected clients, read live
+            s = self.require()
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            try:
+                return self.json({**poller.client(d).wireless(), "read_at": now()})
+            except RouterError as e:
+                raise HttpError(502, str(e)) from None
         if m := re.fullmatch(r"/api/devices/(\d+)/dhcp", path):   # DHCP leases, read live from the router
             s = self.require()
             d = self.device_for(s, m.group(1))

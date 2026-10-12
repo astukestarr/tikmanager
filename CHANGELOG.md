@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.23.0 - 2026-10-11
+
+- **Wireless tab** on the router page (routers with radios): read live from the router and refreshed every 10 seconds
+  while it's open (**Pause** stops it). Works with all three MikroTik radio menus - legacy wireless (incl. NV2 /
+  Nstreme), the wifi package and 60 GHz (w60g).
+  - Each radio: mode, SSID, band, channel / frequency, width, protocol, noise floor, CCQ and TX power.
+  - **Point-to-point links** (station, or an AP in bridge mode): signal at both ends, signal-to-noise, CCQ, TX / RX
+    rates, distance, link uptime and who it's connected to - coloured excellent / good / fair / poor.
+  - **Access points** (office Wi-Fi or an ISP sector): every client with name, IP, MAC, signal (bar and dBm, plus what
+    the client hears where the radio reports it), SNR, CCQ, rates, band, distance, connected time, traffic and
+    RouterOS version; average signal and how many are weak; weakest first, searchable. Names and IPs come from the
+    radio, DHCP leases or ARP.
+
 ## 1.22.0 - 2026-10-11
 
 - **Router lifecycle**: how old each router is and whether MikroTik has discontinued the model, so replacements can be

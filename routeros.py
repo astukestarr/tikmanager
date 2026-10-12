@@ -141,6 +141,79 @@ class RouterOS:
                         "expires": _dur_s(l.get("expires-after")), "comment": l.get("comment") or ""})
         return out
 
+    def wireless(self):
+        """Radios and who is connected to them, read live for the router page's Wireless tab. Covers the three MikroTik
+        radio menus: legacy wireless (wlan, incl. NV2 / Nstreme point-to-point), the newer wifi package and 60 GHz (w60g)."""
+        radios, peers = [], []
+        one = lambda m: (m[0] if isinstance(m, list) and m else m) or {}
+        # legacy wireless
+        for w in self.optional(lambda: self.get("/interface/wireless"), []) or []:
+            n, on = w.get("name"), w.get("disabled") != "true" and w.get("running") == "true"
+            mon = one(self.optional(lambda n=n: self.post("/interface/wireless/monitor", {"numbers": n, "once": ""}), {})) if on else {}
+            radios.append({"name": n, "kind": "wireless", "mode": w.get("mode") or "", "ssid": w.get("ssid") or "", "band": w.get("band") or "",
+                           "frequency": mon.get("frequency") or w.get("frequency") or "", "channel": mon.get("channel") or "",
+                           "width": w.get("channel-width") or "", "protocol": mon.get("wireless-protocol") or w.get("wireless-protocol") or "",
+                           "radio_name": w.get("radio-name") or "", "mac": w.get("mac-address") or "", "running": w.get("running") == "true",
+                           "disabled": w.get("disabled") == "true", "status": mon.get("status") or "", "noise": _int(mon.get("noise-floor")),
+                           "ccq": _int(mon.get("overall-tx-ccq")), "tx_power": mon.get("current-tx-power") or w.get("tx-power") or "",
+                           "count": _int(mon.get("registered-clients"))})
+        for r in self.optional(lambda: self.get("/interface/wireless/registration-table"), []) or []:
+            tx, rx = _pair(r.get("bytes"))
+            peers.append({"interface": r.get("interface") or "", "mac": r.get("mac-address") or "", "name": r.get("radio-name") or "",
+                          "ip": r.get("last-ip") or "", "is_ap": r.get("ap") == "true", "signal": _int(r.get("signal-strength")),
+                          "remote_signal": _int(r.get("tx-signal-strength")), "snr": _int(r.get("signal-to-noise")),
+                          "ccq": _int(r.get("tx-ccq")), "tx_rate": r.get("tx-rate") or "", "rx_rate": r.get("rx-rate") or "",
+                          "uptime": r.get("uptime") or "", "idle": r.get("last-activity") or "", "distance": r.get("distance") or "",
+                          "tx_bytes": tx, "rx_bytes": rx, "version": r.get("routeros-version") or "", "comment": r.get("comment") or ""})
+        # wifi package (wifiwave2 on early RouterOS 7 versions)
+        for base in ("/interface/wifi", "/interface/wifiwave2"):
+            ws = self.optional(lambda b=base: self.get(b), None)
+            if ws is None:
+                continue
+            for w in ws:
+                n, on = w.get("name"), w.get("disabled") != "true" and w.get("running") == "true"
+                mon = one(self.optional(lambda n=n, b=base: self.post(f"{b}/monitor", {"numbers": n, "once": ""}), {})) if on else {}
+                radios.append({"name": n, "kind": "wifi", "mode": w.get("configuration.mode") or "ap", "ssid": w.get("configuration.ssid") or "",
+                               "band": w.get("channel.band") or "", "frequency": w.get("channel.frequency") or "", "channel": mon.get("channel") or "",
+                               "width": w.get("channel.width") or "", "protocol": "", "radio_name": "", "mac": w.get("mac-address") or "",
+                               "running": w.get("running") == "true", "disabled": w.get("disabled") == "true", "status": mon.get("state") or "",
+                               "noise": None, "ccq": None, "tx_power": mon.get("tx-power") or "", "count": _int(mon.get("registered-peers")),
+                               "master": w.get("master-interface") or ""})
+            for r in self.optional(lambda b=base: self.get(f"{b}/registration-table"), []) or []:
+                tx, rx = _pair(r.get("bytes"))
+                peers.append({"interface": r.get("interface") or "", "mac": r.get("mac-address") or "", "name": "", "ip": "",
+                              "is_ap": False, "signal": _int(r.get("signal")), "remote_signal": None, "snr": None, "ccq": None,
+                              "tx_rate": r.get("tx-rate") or "", "rx_rate": r.get("rx-rate") or "", "uptime": r.get("uptime") or "",
+                              "idle": r.get("last-activity") or "", "distance": "", "tx_bytes": tx, "rx_bytes": rx, "version": "",
+                              "comment": "", "band": r.get("band") or ""})
+            break
+        # 60 GHz (Cube, wAP 60G, LHG 60G ...)
+        for w in self.optional(lambda: self.get("/interface/w60g"), []) or []:
+            n, on = w.get("name"), w.get("disabled") != "true" and w.get("running") == "true"
+            mon = one(self.optional(lambda n=n: self.post("/interface/w60g/monitor", {"numbers": n, "once": ""}), {})) if on else {}
+            radios.append({"name": n, "kind": "w60g", "mode": w.get("mode") or "", "ssid": w.get("ssid") or "", "band": "60 GHz",
+                           "frequency": mon.get("frequency") or w.get("frequency") or "", "channel": "", "width": "", "protocol": "",
+                           "radio_name": "", "mac": w.get("mac-address") or "", "running": w.get("running") == "true",
+                           "disabled": w.get("disabled") == "true", "status": "connected" if mon.get("connected") == "true" else "",
+                           "noise": None, "ccq": None, "tx_power": "", "count": None})
+            stations = self.optional(lambda: self.get("/interface/w60g/station"), []) or []
+            for st in [x for x in stations if x.get("interface") in (None, n)] or ([mon] if mon.get("connected") == "true" else []):
+                peers.append({"interface": n, "mac": st.get("remote-address") or st.get("mac-address") or "", "name": "", "ip": "",
+                              "is_ap": False, "signal": _int(st.get("rssi")), "quality": _int(st.get("signal")), "remote_signal": None,
+                              "snr": None, "ccq": None, "tx_rate": st.get("tx-phy-rate") or "", "rx_rate": "", "mcs": st.get("tx-mcs") or "",
+                              "uptime": st.get("connected-time") or st.get("uptime") or "", "idle": "", "distance": st.get("distance") or "",
+                              "tx_bytes": None, "rx_bytes": None, "version": "", "comment": ""})
+        # names and addresses for peers the radio itself doesn't know (wifi / w60g): DHCP leases, then ARP
+        if any(not p["ip"] for p in peers):
+            leases = {str(l.get("active-mac-address") or l.get("mac-address") or "").upper(): l
+                      for l in self.optional(lambda: self.get("/ip/dhcp-server/lease"), []) or []}
+            arp = {str(a.get("mac-address") or "").upper(): a.get("address") for a in self.optional(lambda: self.get("/ip/arp"), []) or []}
+            for p in peers:
+                l = leases.get(p["mac"].upper(), {})
+                p["ip"] = p["ip"] or l.get("active-address") or l.get("address") or arp.get(p["mac"].upper()) or ""
+                p["name"] = p["name"] or l.get("host-name") or l.get("comment") or ""
+        return {"radios": radios, "peers": peers}
+
     def winbox_service(self):
         """The router's Winbox service: {disabled, port, address (who may connect; "" = anyone)}."""
         s = (self.get("/ip/service?name=winbox") or [{}])[0]
@@ -513,6 +586,21 @@ def _dur_s(t):
     return int(total)
 
 
+def _int(v):
+    """'-62dBm@6Mbps' / '-62@HT20-7' / '85' / '85%' -> the leading whole number (None if there isn't one)."""
+    m = re.match(r"\s*(-?\d+)", str(v or ""))
+    return int(m.group(1)) if m else None
+
+
+def _pair(v):
+    """'1234,5678' -> (1234, 5678): the registration tables' bytes (sent to the peer, received from it)."""
+    a = str(v or "").split(",")
+    try:
+        return int(a[0]), int(a[1])
+    except (IndexError, ValueError):
+        return None, None
+
+
 def _num(v):
     try:
         return float(v)
@@ -860,6 +948,51 @@ class SimRouter:
                         "expires": None if static else r.randint(60, 600), "comment": "Reserved" if static else ""})
         return out
 
+    def wireless(self):
+        r = random.Random(int(time.time() // 10) + self.id)   # changes a little every 10 s, like a live radio
+        rs = random.Random(self.id * 31)
+        mac = lambda k: "DC:2C:6E:%02X:%02X:%02X" % (self.id % 256, k, rs.randint(0, 255))
+        radios, peers = [], []
+        if self.board == "hap-ax3":   # office access point (wifi package) with laptops and phones
+            for n, band, freq, ch in (("wifi1", "5ghz-ax", "5180", "5180/ax/Ceee"), ("wifi2", "2ghz-ax", "2437", "2437/ax")):
+                radios.append({"name": n, "kind": "wifi", "mode": "ap", "ssid": "Office", "band": band, "frequency": freq, "channel": ch,
+                               "width": "20/40/80mhz" if n == "wifi1" else "20mhz", "protocol": "", "radio_name": "", "mac": mac(len(radios)),
+                               "running": True, "disabled": False, "status": "running-ap", "noise": None, "ccq": None, "tx_power": "23",
+                               "count": None, "master": ""})
+            hosts = ["Laptop-Jenn", "iPhone", "Galaxy-S24", "FrontDesk-PC", "iPad", "Thermostat", "Laptop-Mark", "Pixel-8"]
+            for k, h in enumerate(hosts[: 4 + self.id % 5]):
+                sig = -48 - rs.randint(0, 30) + r.randint(-2, 2)
+                peers.append({"interface": "wifi1" if k % 3 else "wifi2", "mac": mac(10 + k), "name": h, "ip": f"192.168.{self.id * 10}.{40 + k}",
+                              "is_ap": False, "signal": sig, "remote_signal": None, "snr": None, "ccq": None,
+                              "tx_rate": f"{max(6, 1200 + sig * 12)}Mbps", "rx_rate": f"{max(6, 860 + sig * 10)}Mbps",
+                              "uptime": f"{rs.randint(0, 9)}h{rs.randint(0, 59)}m", "idle": f"{r.randint(0, 900)}ms", "distance": "",
+                              "tx_bytes": rs.randint(10 ** 6, 10 ** 9), "rx_bytes": rs.randint(10 ** 6, 10 ** 8), "version": "", "comment": "",
+                              "band": "5ghz-ax" if k % 3 else "2ghz-ax"})
+        elif self.id % 5 == 0:   # point-to-point backhaul: this end is the station of an NV2 link
+            radios.append({"name": "wlan1", "kind": "wireless", "mode": "station-bridge", "ssid": "PTP-Tower2", "band": "5ghz-a/n/ac",
+                           "frequency": "5745", "channel": "5745/20-80/ac(17dBm)", "width": "20/40/80mhz-Ceee", "protocol": "nv2",
+                           "radio_name": self.name, "mac": mac(0), "running": True, "disabled": False, "status": "connected-to-ess",
+                           "noise": -104 + r.randint(-1, 1), "ccq": 92 + r.randint(-4, 4), "tx_power": "17", "count": 1})
+            peers.append({"interface": "wlan1", "mac": mac(1), "name": "Tower2-AP", "ip": "10.20.0.1", "is_ap": True,
+                          "signal": -58 + r.randint(-2, 2), "remote_signal": -60 + r.randint(-2, 2), "snr": 46 + r.randint(-2, 2),
+                          "ccq": 92 + r.randint(-4, 4), "tx_rate": "866.7Mbps-80MHz/2S", "rx_rate": "780Mbps-80MHz/2S", "uptime": "18d4h12m",
+                          "idle": "10ms", "distance": "3", "tx_bytes": rs.randint(10 ** 10, 10 ** 12), "rx_bytes": rs.randint(10 ** 11, 10 ** 12),
+                          "version": "7.19.4", "comment": ""})
+        elif self.id % 7 == 0:   # ISP sector: legacy wireless AP with customer CPEs on NV2
+            radios.append({"name": "wlan1", "kind": "wireless", "mode": "ap-bridge", "ssid": "WISP-North", "band": "5ghz-a/n",
+                           "frequency": "5260", "channel": "5260/20-Ce/an", "width": "20/40mhz-Ce", "protocol": "nv2", "radio_name": self.name,
+                           "mac": mac(0), "running": True, "disabled": False, "status": "running-ap", "noise": -102 + r.randint(-1, 1),
+                           "ccq": 78 + r.randint(-5, 5), "tx_power": "20", "count": 12})
+            for k in range(12):
+                sig = -55 - rs.randint(0, 32) + r.randint(-2, 2)
+                peers.append({"interface": "wlan1", "mac": mac(20 + k), "name": f"CPE-{rs.choice(['Smith', 'Garcia', 'Lee', 'Patel', 'Brown', 'Nguyen'])}-{100 + k}",
+                              "ip": f"100.64.{self.id}.{10 + k}", "is_ap": False, "signal": sig, "remote_signal": sig - rs.randint(-3, 5),
+                              "snr": 100 + sig, "ccq": max(20, min(100, 160 + sig + r.randint(-5, 5))), "tx_rate": f"{max(6, 300 + sig * 3)}Mbps-40MHz/2S",
+                              "rx_rate": f"{max(6, 270 + sig * 3)}Mbps-40MHz/2S", "uptime": f"{rs.randint(0, 40)}d{rs.randint(0, 23)}h",
+                              "idle": f"{r.randint(0, 200)}ms", "distance": str(rs.randint(1, 12)), "tx_bytes": rs.randint(10 ** 8, 10 ** 11),
+                              "rx_bytes": rs.randint(10 ** 7, 10 ** 10), "version": rs.choice(["6.49.15", "7.16.2", "7.19.4"]), "comment": ""})
+        return {"radios": radios, "peers": peers}
+
     def set_identity(self, name):
         self.name = name   # the poller builds SimRouter with the stored name, so the new identity "sticks" once saved
         return name
@@ -936,6 +1069,10 @@ class SimRouter:
                         "freq": "5180", "mode": "ap"},
                        {"name": "wifi2", "type": "wifi", "running": True, "disabled": False, "comment": "", "ssid": "Office", "band": "2ghz-ax",
                         "freq": "2437", "mode": "ap"}]
+        if self.board != "hap-ax3" and (self.id % 5 == 0 or self.id % 7 == 0):
+            ifaces += [{"name": "wlan1", "type": "wlan", "running": True, "disabled": False, "comment": "PtP to Tower2" if self.id % 5 == 0 else "Sector North",
+                        "ssid": "PTP-Tower2" if self.id % 5 == 0 else "WISP-North", "band": "5ghz-a/n/ac", "freq": "5745" if self.id % 5 == 0 else "5260",
+                        "mode": "station-bridge" if self.id % 5 == 0 else "ap-bridge"}]
         if self.id % 4 == 0:
             ifaces += [{"name": "lte1", "type": "lte", "running": True, "disabled": False, "comment": "Backup WAN", "operator": "T-Mobile",
                         "rsrp": str(-80 - self.r.randint(0, 35)), "rsrq": str(-8 - self.r.randint(0, 9)), "sinr": str(self.r.randint(-2, 22)),
@@ -947,7 +1084,7 @@ class SimRouter:
             i["tx"] = int(rate * 0.35 * up)
             i["rx_bps"] = round(rate * 8 * (0.3 + r.random()), 0) if i["running"] else 0.0
             i["tx_bps"] = round(rate * 8 * 0.3 * (0.3 + r.random()), 0) if i["running"] else 0.0
-            i["mac"] = mac(k) if i["type"] in ("ether", "bridge", "vlan", "wifi") else ""
+            i["mac"] = mac(k) if i["type"] in ("ether", "bridge", "vlan", "wifi", "wlan") else ""
             i["mtu"] = "1420" if i["type"] == "wg" else "1500"
         total = {"rb5009": 1024, "hap-ax3": 1024, "ccr2004": 4096, "hex-s": 256, "chr": 2048}[self.board] * 1024 * 1024
         return self._apply_sim({"identity": self.name, "version": self.r.choice(["7.16.2 (stable)", "7.18.1 (stable)", "7.19.4 (stable)", "7.20 (stable)"]),
