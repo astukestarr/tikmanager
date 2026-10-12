@@ -1506,7 +1506,7 @@ function upStatus(j) {
   if (!j) return "";
   if (j.status === "running") return `<span class="pill up-run">Upgrading</span> <span class="small muted">${esc(j.step || "")}</span>`;
   if (j.status === "scheduled") return `<span class="pill up-sched">Scheduled</span> <span class="small muted">${when(j.scheduled_at)}</span>`;
-  return `<span class="pill up-${j.status}">${esc({ done: "Done", failed: "Failed", cancelled: "Cancelled" }[j.status] || j.status)}</span>`;
+  return `<span class="pill up-${j.status}">${esc({ done: "Done", failed: "Failed", cancelled: "Cancelled", held: "Held", skipped: "Skipped" }[j.status] || j.status)}</span>`;
 }
 
 function upgradeDialog(list, onDone) {
@@ -1525,10 +1525,28 @@ function upgradeDialog(list, onDone) {
       ${bulk ? `<label class="field">Stagger (minutes between routers) <input id="upStag" type="number" min="0" max="240" value="0"></label>` : ""}
     </div>
     <label class="chk"><input type="checkbox" id="upFw" checked> Also update the RouterBOARD firmware (one more reboot)</label>
+    ${bulk ? `<fieldset class="up-safe"><legend class="small muted">Safety</legend>
+      <label class="chk"><input type="checkbox" id="upStop" checked> Safety stop: hold the rest after <input id="upMaxFail" type="number" min="1" max="500" value="1"> failed upgrade(s)</label>
+      <label class="chk"><input type="checkbox" id="upSeq"> One at a time, in this order (each starts when the previous one has finished)</label>
+      <ol class="up-order hidden" id="upOrder"></ol></fieldset>` : ""}
+    <label class="chk"><input type="checkbox" id="upPin" checked> Only install the RouterOS version shown now - if MikroTik publishes a newer one before this runs, skip it</label>
     <p class="small muted">Each router is backed up first (the upgrade stops if the backup fails), then reboots - expect 2-5 minutes offline per reboot.
-      ${bulk ? "At most 4 routers upgrade at the same time; with a stagger they start one after another." : ""}</p>
+      ${bulk ? "At most 4 routers upgrade at the same time (or one at a time, if ticked); with a stagger they start one after another." : ""}</p>
     <div class="actions"><button class="btn primary" type="button" id="upOk">Upgrade now</button><button class="btn" type="button" data-close>Cancel</button>
       <span class="status" id="upStatus"></span></div>`);
+  const order = [...list];
+  const drawOrder = () => {
+    if (!$("upOrder")) return;
+    $("upOrder").innerHTML = order.map((d, i) => `<li><span>${esc(d.name)} <span class="muted small">${esc(d.org || "")}</span></span><span class="spacer"></span>
+      <button class="linkish" type="button" data-mv="${i}" data-dir="-1" ${i ? "" : "disabled"} aria-label="Move ${esc(d.name)} up">↑</button>
+      <button class="linkish" type="button" data-mv="${i}" data-dir="1" ${i < order.length - 1 ? "" : "disabled"} aria-label="Move ${esc(d.name)} down">↓</button></li>`).join("");
+    $("upOrder").querySelectorAll("[data-mv]").forEach((b) => b.addEventListener("click", () => {
+      const i = +b.dataset.mv, j = i + +b.dataset.dir;
+      [order[i], order[j]] = [order[j], order[i]];
+      drawOrder();
+    }));
+  };
+  $("upSeq")?.addEventListener("change", (e) => { $("upOrder").classList.toggle("hidden", !e.target.checked); if ($("upStag")) $("upStag").disabled = e.target.checked; drawOrder(); });
   const sync = () => { $("upOk").textContent = document.querySelector("[name=upWhen]:checked").value === "now" ? "Upgrade now" : "Schedule"; };
   document.querySelectorAll("[name=upWhen]").forEach((r) => r.addEventListener("change", sync));
   $("upAt").addEventListener("focus", () => { document.querySelector("[name=upWhen][value=later]").checked = true; sync(); });
@@ -1538,8 +1556,9 @@ function upgradeDialog(list, onDone) {
     if (later && !(at > Date.now() / 1000 - 60)) { $("upStatus").textContent = "Pick a time in the future."; $("upStatus").className = "status err"; return; }
     $("upOk").disabled = true;
     try {
-      const r = await post("/api/upgrades", { device_ids: list.map((d) => d.id), when: at, channel: $("upChan").value, firmware: $("upFw").checked,
-                                              stagger: $("upStag") ? $("upStag").value : 0 });
+      const r = await post("/api/upgrades", { device_ids: order.map((d) => d.id), when: at, channel: $("upChan").value, firmware: $("upFw").checked,
+                                              stagger: $("upStag") ? $("upStag").value : 0, sequential: $("upSeq")?.checked || false,
+                                              max_fail: $("upStop")?.checked ? $("upMaxFail").value : 0, pin: $("upPin").checked });
       if (r.skipped.length) {
         dialog(`<h2>${r.created ? `${r.created} upgrade${r.created === 1 ? "" : "s"} ${later ? "scheduled" : "started"}` : "Nothing scheduled"}</h2>
           <p class="small">Skipped:</p><ul class="small">${r.skipped.map((x) => `<li>${esc(x.name)} - ${esc(x.reason)}</li>`).join("")}</ul>
@@ -1576,6 +1595,14 @@ async function upgradesView() {
       <div class="table-wrap"><table><thead><tr>${canWrite() ? `<th><input type="checkbox" id="upAll" aria-label="Select all shown"></th>` : ""}<th></th><th>Router</th><th>Model</th>
         <th>RouterOS</th><th>Newest</th><th>RouterBOARD</th><th>Upgrade</th></tr></thead><tbody id="upRows"></tbody></table></div>
     </div>
+    ${(() => {
+      const held = {};
+      r.jobs.filter((j) => j.status === "held" && j.batch).forEach((j) => { (held[j.batch] = held[j.batch] || []).push(j); });
+      return Object.entries(held).map(([b, js]) => `<div class="card flag-card"><h2>Safety stop: ${js.length} upgrade${js.length === 1 ? "" : "s"} held</h2>
+        <p class="small">${esc(js[0].detail || "")}</p><p class="small muted">${esc(js.slice(0, 8).map((j) => j.device).join(", "))}${js.length > 8 ? ` and ${js.length - 8} more` : ""}</p>
+        ${canWrite() ? `<div class="actions"><button class="btn primary" type="button" data-batch="${b}" data-act="resume">Resume them</button>
+          <button class="btn" type="button" data-batch="${b}" data-act="cancel">Cancel them</button></div>` : ""}</div>`).join("");
+    })()}
     <div class="card"><h2>Upgrade jobs</h2>${r.jobs.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Change</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>
       ${r.jobs.map((j) => `<tr><td class="nowrap">${when(j.finished_at || j.started_at || j.scheduled_at)}</td><td><a href="#router/${j.device_id}">${esc(j.device)}</a></td><td>${esc(j.org || "")}</td>
         <td class="nowrap">${esc(j.from_version || "")}${j.to_version && j.to_version !== j.from_version ? ` → ${esc(j.to_version)}` : ""}${j.channel ? ` <span class="small muted">(${esc(j.channel)})</span>` : ""}</td>
@@ -1621,6 +1648,7 @@ async function upgradesView() {
     } catch (e) { $("upMsg").textContent = e.message; $("upCheck").disabled = false; }
   });
   document.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", async () => { await post(`/api/upgrades/${b.dataset.cancel}/cancel`); upgradesView(); }));
+  document.querySelectorAll("[data-batch]").forEach((b) => b.addEventListener("click", async () => { await post(`/api/upgrades/batch/${b.dataset.batch}/${b.dataset.act}`); upgradesView(); }));
   draw();
 }
 // --- tasks: scripts, groups, scheduled script runs and firmware upgrades ---------------------------------------------

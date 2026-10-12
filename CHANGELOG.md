@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.35.0 - 2026-10-12
+
+- **Safer mass upgrades** (Upgrade dialog with several routers):
+  - **Safety stop** (on by default): after N upgrades in the batch fail (default 1), the rest are **held** - nothing
+    more is touched until someone presses **Resume them** or **Cancel them** on the Upgrades page.
+  - **One at a time, in this order**: routers upgrade strictly one after another, each starting only when the previous
+    one has finished; ↑ / ↓ set the order (e.g. the switch that powers the APs last).
+  - **Only install the version shown now** (on by default): the job remembers the newest RouterOS when it was
+    scheduled; if MikroTik publishes something newer before it runs, nothing is installed and the job shows
+    **Skipped** - nobody installs a release they didn't review.
+  - Held and skipped jobs are listed with the reason; the router's events say so too.
+
 ## 1.34.0 - 2026-10-12
 
 - **Logs** (new page, technicians; and a **Logs** tab on each router): every line your routers send - info, warning,

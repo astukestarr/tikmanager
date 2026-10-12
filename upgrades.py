@@ -7,6 +7,13 @@ Each job, in order:
   4. downloads the new RouterOS, reboots and waits for the router to come back on the new version,
   5. optionally stages the matching RouterBOARD firmware and reboots once more.
 Routers are also asked twice a day which version is newest on their channel, so the Upgrades page shows what's available.
+
+Safer mass upgrades (options when scheduling several routers):
+- **Safety stop**: after max_fail upgrades in the batch fail, the rest are held (status 'held') until someone resumes
+  or cancels them - a bad release or a bad night stops at the first casualties.
+- **One at a time**: the batch runs in the order chosen, each router only after the previous one finished.
+- **Pinned version**: a job remembers the newest RouterOS when it was scheduled; if MikroTik has published something
+  newer by the time it runs, nothing is installed (status 'skipped') - nobody installs a release they didn't review.
 """
 import re
 import threading
@@ -37,8 +44,8 @@ class Upgrades:
         self.lock = threading.Lock()
 
     # --- scheduling -------------------------------------------------------------------------------------------
-    def schedule(self, devices, when, channel, firmware, user, stagger_min=0):
-        """One job per router; returns (created, skipped [(name, reason)])."""
+    def schedule(self, devices, when, channel, firmware, user, stagger_min=0, sequential=False, max_fail=0, pin=False):
+        """One job per router, in the order given; returns (created, skipped [(name, reason)])."""
         if channel and channel not in CHANNELS:
             raise ValueError("Unknown update channel.")
         batch = uuid.uuid4().hex[:12] if len(devices) > 1 else None
@@ -50,14 +57,24 @@ class Upgrades:
             if self.db.one("SELECT id FROM upgrades WHERE device_id=? AND status IN ('scheduled','running')", (d["id"],)):
                 skipped.append((d["name"], "already has an upgrade scheduled"))
                 continue
-            at = when + n * stagger_min * 60
+            at = when if sequential else when + n * stagger_min * 60
+            pin_v = d.get("ros_latest") if pin and d.get("ros_latest") and (not channel or channel == d.get("ros_channel")) else None
             jid = self.db.run("""INSERT INTO upgrades (device_id, org_id, batch, scheduled_at, channel, firmware, status, from_version,
-                                 created_by, created_at) VALUES (?,?,?,?,?,?,'scheduled',?,?,?)""",
+                                 created_by, created_at, seq, sequential, max_fail, pin_version) VALUES (?,?,?,?,?,?,'scheduled',?,?,?,?,?,?,?)""",
                               (d["id"], d["org_id"], batch, at, channel or None, 1 if firmware else 0, (d["version"] or "").split(" ")[0],
-                               user, time.time()))
+                               user, time.time(), n, 1 if sequential and batch else 0, max_fail or None, pin_v))
             self.db.event(d["id"], d["org_id"], "upgrade scheduled", f"by {user} for {time.strftime('%Y-%m-%d %H:%M', time.localtime(at))}")
             created.append(jid)
         return created, skipped
+
+    def resume(self, batch, user):
+        n = self.db.run("UPDATE upgrades SET status='scheduled', detail=NULL, scheduled_at=? WHERE batch=? AND status='held'", (time.time(), batch))
+        self.db.audit(user, "upgrade batch resumed", batch)
+        return n
+
+    def cancel_batch(self, batch, user):
+        self.db.run("UPDATE upgrades SET status='cancelled', finished_at=? WHERE batch=? AND status IN ('held','scheduled')", (time.time(), batch))
+        self.db.audit(user, "upgrade batch cancelled", batch)
 
     def cancel(self, job_id):
         j = self.db.one("SELECT * FROM upgrades WHERE id=?", (job_id,))
@@ -90,7 +107,18 @@ class Upgrades:
     def _finish(self, j, status, detail, to_version=None):
         self.db.run("UPDATE upgrades SET status=?, step=NULL, detail=?, to_version=COALESCE(?, to_version), finished_at=? WHERE id=?",
                     (status, detail[:500], to_version, time.time(), j["id"]))
-        self.db.event(j["device_id"], j["org_id"], "upgraded" if status == "done" else "upgrade failed", detail[:300])
+        self.db.event(j["device_id"], j["org_id"], {"done": "upgraded", "skipped": "upgrade skipped"}.get(status, "upgrade failed"), detail[:300])
+        if status == "failed" and j.get("batch") and j.get("max_fail"):   # safety stop
+            failed = self.db.one("SELECT COUNT(*) AS n FROM upgrades WHERE batch=? AND status='failed'", (j["batch"],))["n"]
+            if failed >= j["max_fail"]:
+                held = self.db.q("SELECT id, device_id, org_id FROM upgrades WHERE batch=? AND status='scheduled'", (j["batch"],))
+                self.db.run("UPDATE upgrades SET status='held', detail=? WHERE batch=? AND status='scheduled'",
+                            (f"Held by the safety stop: {failed} upgrade{'s' if failed != 1 else ''} in this batch failed. Resume or cancel on the Upgrades page.",
+                             j["batch"]))
+                for h in held:
+                    self.db.event(h["device_id"], h["org_id"], "upgrade held", f"Safety stop: {failed} upgrade(s) in the same batch failed")
+                if held:
+                    self.db.audit("upgrades", "safety stop", f"batch {j['batch']}", detail=f"{failed} failed, {len(held)} held")
         d = self._device(j)
         self.db.audit(j["created_by"], f"upgrade {status}", d["name"] if d else j["device_id"], detail=detail[:500], org_id=j["org_id"])
 
@@ -134,6 +162,10 @@ class Upgrades:
             self._step(jid, "checking for updates")
             info = self.check(d, j["channel"])
             installed, latest = info["installed"] or (d["version"] or "").split(" ")[0], info["latest"]
+            pin = j.get("pin_version")
+            if pin and latest and vkey(latest) > vkey(pin):
+                return self._finish(j, "skipped", f"RouterOS {latest} was published after this upgrade was scheduled for {pin} - not installed. "
+                                                  f"Read its release notes and schedule it again if it's fine.")
             notes = []
             if latest and vkey(latest) > vkey(installed):
                 self._step(jid, f"downloading RouterOS {latest}")
@@ -178,7 +210,11 @@ class Upgrades:
         last_check = 0
         while True:
             try:
-                for j in self.db.q("SELECT * FROM upgrades WHERE status='scheduled' AND scheduled_at <= ? ORDER BY scheduled_at", (time.time(),)):
+                for j in self.db.q("SELECT * FROM upgrades WHERE status='scheduled' AND scheduled_at <= ? ORDER BY scheduled_at, seq", (time.time(),)):
+                    if j.get("sequential") and j.get("batch") and self.db.one(   # one at a time: wait for the earlier ones in the batch
+                            "SELECT 1 FROM upgrades WHERE batch=? AND id<>? AND (status='running' OR (status='scheduled' AND seq < ?))",
+                            (j["batch"], j["id"], j["seq"] or 0)):
+                        continue
                     with self.lock:
                         if len(self.running) >= MAX_PARALLEL:
                             break

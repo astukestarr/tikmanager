@@ -558,8 +558,8 @@ class Handler(BaseHTTPRequestHandler):
                               WHERE d.state='adopted' ORDER BY o.name, d.name""")
             jobs = db.q("""SELECT u.*, d.name AS device, o.name AS org FROM upgrades u JOIN devices d ON d.id = u.device_id
                            LEFT JOIN orgs o ON o.id = u.org_id
-                           WHERE u.status IN ('scheduled','running') OR u.created_at > ? ORDER BY
-                           CASE u.status WHEN 'running' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END, COALESCE(u.finished_at, u.scheduled_at) DESC
+                           WHERE u.status IN ('scheduled','running','held') OR u.created_at > ? ORDER BY
+                           CASE u.status WHEN 'running' THEN 0 WHEN 'held' THEN 1 WHEN 'scheduled' THEN 2 ELSE 3 END, COALESCE(u.finished_at, u.scheduled_at) DESC
                            LIMIT 300""", (now() - 30 * 86400,))
             return self.json({"routers": routers, "jobs": jobs, "channels": list(UPGRADE_CHANNELS)})
         if path == "/api/library":   # the community script library (cached for an hour; ?refresh=1)
@@ -1402,14 +1402,26 @@ class Handler(BaseHTTPRequestHandler):
             if when < now() - 300 or when > now() + 366 * 86400:
                 raise HttpError(400, "Pick a time from now up to a year ahead.")
             try:
+                max_fail = max(0, min(500, int(b.get("max_fail") or 0)))
+            except (TypeError, ValueError):
+                max_fail = 0
+            try:
                 created, skipped = upgrades.schedule(devices, max(when, now()), str(b.get("channel") or ""), bool(b.get("firmware", True)),
-                                                     s["email"], stagger)
+                                                     s["email"], stagger, sequential=bool(b.get("sequential")), max_fail=max_fail, pin=bool(b.get("pin")))
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "upgrade scheduled", f"{len(created)} router(s)", self.client_ip(),
                      detail=f"at {time.strftime('%Y-%m-%d %H:%M', time.localtime(when))}, channel {b.get('channel') or 'router default'}, "
-                            f"firmware {'yes' if b.get('firmware', True) else 'no'}, stagger {stagger} min")
+                            f"firmware {'yes' if b.get('firmware', True) else 'no'}, stagger {stagger} min, one at a time {'yes' if b.get('sequential') else 'no'}, "
+                            f"safety stop {max_fail or 'off'}, pinned {'yes' if b.get('pin') else 'no'}")
             return self.json({"ok": True, "created": len(created), "skipped": [{"name": n, "reason": r} for n, r in skipped]})
+        if m := re.fullmatch(r"/api/upgrades/batch/([0-9a-f]{12})/(resume|cancel)", path):   # a batch held by the safety stop
+            s = self.require(tech=True, write=True)
+            if m.group(2) == "resume":
+                upgrades.resume(m.group(1), s["email"])
+            else:
+                upgrades.cancel_batch(m.group(1), s["email"])
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/upgrades/(\d+)/cancel", path):
             s = self.require(tech=True, write=True)
             j = upgrades.cancel(int(m.group(1)))

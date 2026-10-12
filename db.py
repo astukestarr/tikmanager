@@ -91,9 +91,12 @@ CREATE INDEX IF NOT EXISTS backups_dev ON backups(device_id, ts);
 CREATE TABLE IF NOT EXISTS upgrades (                 -- RouterOS / RouterBOARD upgrade jobs, now or scheduled
   id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, org_id INTEGER,
   batch TEXT, scheduled_at REAL NOT NULL, channel TEXT, firmware INTEGER NOT NULL DEFAULT 1,
-  status TEXT NOT NULL DEFAULT 'scheduled',          -- scheduled / running / done / failed / cancelled
+  status TEXT NOT NULL DEFAULT 'scheduled',          -- scheduled / running / done / failed / cancelled / held (safety stop) / skipped (pinned)
   step TEXT, from_version TEXT, to_version TEXT, detail TEXT,
-  created_by TEXT, created_at REAL NOT NULL, started_at REAL, finished_at REAL
+  created_by TEXT, created_at REAL NOT NULL, started_at REAL, finished_at REAL,
+  seq INTEGER, sequential INTEGER NOT NULL DEFAULT 0,  -- order in its batch; 1 = one at a time, each after the previous succeeded
+  max_fail INTEGER,                                   -- safety stop: hold the rest of the batch after this many failures
+  pin_version TEXT                                    -- don't install anything newer than this (the version reviewed when scheduling)
 );
 CREATE INDEX IF NOT EXISTS upgrades_due ON upgrades(status, scheduled_at);
 CREATE TABLE IF NOT EXISTS vpns (                     -- site-to-site WireGuard VPN, hub and spoke, one client each
@@ -204,6 +207,11 @@ class DB:
             c.execute("ALTER TABLE users ADD COLUMN entra_oid TEXT")
         if "users" in tables and "prefs" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
             c.execute("ALTER TABLE users ADD COLUMN prefs TEXT")
+        if "upgrades" in tables:
+            ucols = {r[1] for r in c.execute("PRAGMA table_info(upgrades)")}
+            for col, ddl in (("seq", "INTEGER"), ("sequential", "INTEGER NOT NULL DEFAULT 0"), ("max_fail", "INTEGER"), ("pin_version", "TEXT")):
+                if col not in ucols:
+                    c.execute(f"ALTER TABLE upgrades ADD COLUMN {col} {ddl}")
         if "metrics" in tables:
             mcols = {r[1] for r in c.execute("PRAGMA table_info(metrics)")}
             for col in ("latency", "loss"):

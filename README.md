@@ -418,6 +418,10 @@ Only technicians can view, compare ("What changed") or download versions; every 
 
 ## Router upgrades (RouterOS and firmware)
 
+When upgrading several routers: a **safety stop** holds the rest after N failures (resume or cancel them on the
+Upgrades page), **one at a time** runs them strictly in the order you set, and **only the version shown now** skips a
+release MikroTik publishes between scheduling and running.
+
 (For upgrading TikManager itself, see [Updating TikManager](#updating-tikmanager).)
 
 **Upgrades** (technicians) lists every router's RouterOS version, the newest on its update channel (each router asks
