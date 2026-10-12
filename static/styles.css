@@ -459,6 +459,9 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .pill.sec-pill-fail { border-color: var(--bad); color: var(--bad); } .pill.sec-pill-warn { border-color: var(--warn); color: var(--warn); }
 .pill.lc-disc { border-color: var(--warn); color: var(--warn); } .pill.lc-old { color: var(--muted); }
 .lc-note { margin: 4px 0 8px; }
+.pill.dm-flag { border-color: var(--bad); color: var(--bad); font-weight: 700; }
+.flag-card { border-left: 5px solid var(--bad); }
+.flag-card h2 { color: var(--bad); }
 .wl-facts { margin: 2px 0 8px; }
 .wl-sig { gap: 6px; flex-wrap: nowrap; } .wl-sig .bar { width: 56px; }
 .pill.sec-pill-ok { border-color: var(--good); color: var(--good); }

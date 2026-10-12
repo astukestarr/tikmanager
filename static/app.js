@@ -94,7 +94,11 @@ async function dashboard() {
       <div class="tile good"><div class="v">${adopted.length - offline.length}</div><div class="l">Online</div></div>
       <div class="tile ${offline.length ? "bad" : ""}"><div class="v">${offline.length}</div><div class="l">Offline</div></div>
       <div class="tile warn"><div class="v">${devices.length - adopted.length}</div><div class="l">Waiting for approval</div></div>
+      ${adopted.some((d) => d.dm_flagged) ? `<div class="tile bad"><div class="v">${adopted.filter((d) => d.dm_flagged).length}</div><div class="l">Flagged as compromised</div></div>` : ""}
     </div>
+    ${adopted.some((d) => d.dm_flagged) ? `<div class="card flag-card"><h2>Flagged as possibly compromised</h2>
+      <p class="small">RouterOS found signs of unauthorized access in their configuration. Open each one for what to do.</p>
+      ${table(adopted.filter((d) => d.dm_flagged), ["state", "org", "name", "model", "version", "last_seen"])}</div>` : ""}
     ${isTech() && devices.length > adopted.length ? `<div class="card"><h2>Waiting for approval</h2>${pendingTable(devices.filter((d) => d.state !== "adopted"))}</div>` : ""}
     ${lifecycleCard(adopted)}
     <div class="card"><h2>Offline routers</h2>${offline.length ? table(offline, ["state", "org", "name", "last_seen", "last_error"]) : `<p class="muted">Everything is online.</p>`}</div>
@@ -192,7 +196,8 @@ function table(rows, cols, sort) {
     : c === "uptime" ? `<span class="nowrap" title="${esc(uptime(d.uptime))}">${esc(d.uptime ? uptime(d.uptime, true) : "")}</span>`
     : c === "version" ? esc((d.version || "").replace(" (stable)", ""))
     : c === "age" ? `<span class="nowrap"${d.lc_made ? ` title="Made ${esc(lcMade(d))}"` : ""}>${esc(lcAge(d))}</span> ${lcFlag(d)}`
-    : c === "org" ? (d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`) : esc(d[c] ?? "");
+    : c === "org" ? (d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`)
+    : c === "name" ? `${esc(d.name ?? "")}${d.dm_flagged ? ` <span class="pill dm-flag" title="RouterOS flagged it as possibly compromised">Flagged</span>` : ""}` : esc(d[c] ?? "");
   return `<div class="table-wrap"><table><thead><tr>${cols.map(th).join("")}</tr></thead><tbody>
     ${rows.map((d) => `<tr class="click" data-dev="${d.id}">${cols.map((c) => `<td>${cell(d, c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
@@ -292,7 +297,7 @@ async function router(id) {
         ${kv("Client", d.org || "Unassigned")}${d.site ? kv("Site", d.site) : ""}
         ${kv("WAN IP", d.wan_ip)}${kv("Tunnel IP", d.tunnel_ip)}${kv("Uptime", uptime(d.uptime))}
         ${kv("RouterOS", esc((d.version || "—").replace(" (stable)", "")), true)}${d.fw_current ? kv("Firmware", `${esc(d.fw_current)} ${fwState}`, true) : ""}
-        ${kv("Model", d.model)}${kv("Serial", d.serial)}
+        ${kv("Model", d.model)}${kv("Serial", d.serial)}${d.dm_mode ? kv("Device mode", `${esc(d.dm_mode)}${d.dm_flagged ? ` <span class="pill dm-flag">flagged</span>` : ""}`, true) : ""}
         ${d.state === "adopted" ? kv("Made", d.lc_made ? `${esc(lcMade(d))} <span class="muted">(${esc(lcAge(d))})</span>` : d.lc_status === "virtual" ? `<span class="muted">Virtual (CHR)</span>` : `<span class="muted">—</span>`, true) : ""}
         ${d.state === "adopted" && d.lc_status && d.lc_status !== "virtual" ? kv("Lifecycle", `${d.lc_status === "discontinued" ? `<span class="status warn">Discontinued by MikroTik</span>` : `<span class="status ok">Current model</span>`}
           ${d.lc_slug ? ` <a href="https://mikrotik.com/product/${encodeURIComponent(d.lc_slug)}" target="_blank" rel="noopener noreferrer">product page</a>` : ""}`, true) : ""}
@@ -319,6 +324,13 @@ async function router(id) {
       ${adopted ? `<div class="tabs rtabs" role="tablist" aria-label="Router sections">${tabs.map(([k, l]) =>
         `<button type="button" role="tab" data-rtab="${k}" class="${k === tab ? "active" : ""}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>` : ""}
       ${adopted && d.last_error && !d.online ? `<div class="card"><span class="status err">${esc(d.last_error)}</span></div>` : ""}
+      ${adopted && d.dm_flagged ? `<div class="card flag-card"><h2>RouterOS has flagged this router as possibly compromised</h2>
+        <p>At startup RouterOS checks its own configuration; it found signs of unauthorized access, turned off the risky settings and flagged itself
+          (<span class="mono">/system device-mode</span>). MikroTik's guidance is to <b>treat it as compromised</b>.</p>
+        <ol class="small"><li>Look for users, scheduler entries, scripts, files, SOCKS / proxy settings and firewall rules you didn't add (the Backups tab compares configurations over time).</li>
+          <li>The safe way back: <b>Netinstall</b> the router, install current RouterOS, change every password, then restore a configuration you trust.</li>
+          <li>Clearing the flag needs someone at the router: <span class="mono">/system device-mode update flagged=no</span>, then press the button or power-cycle it when asked.</li></ol>
+        ${d.dm_info && d.dm_info.attempts ? `<p class="small muted">Device-mode change attempts: ${d.dm_info.attempts}</p>` : ""}</div>` : ""}
       ${adopted && tab === "overview" ? `
       <div class="card">
         <div class="chart-toolbar">

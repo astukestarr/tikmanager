@@ -179,6 +179,10 @@ was last seen, and its **age**. Filter by client, status (including **Discontinu
 puts offline routers first). Routers that registered but aren't approved yet are listed above, under **Waiting for
 approval**. Click a router for its page: charts, interfaces, DHCP clients, backups, upgrades, scripts and events.
 
+**Flagged routers:** RouterOS 7.13+ flags itself when it finds signs of unauthorized access in its configuration
+(device-mode); MikroTik says to treat such a router as compromised. TikManager reads the flag hourly and shows it on the
+router's page (with what to do), in the routers list and on the Dashboard, and raises an alert.
+
 **Wireless** (tab on routers with radios - legacy wireless, wifi or 60 GHz): each radio's settings and, read live every
 10 seconds, either the **point-to-point link** (signal at both ends, SNR, CCQ, rates, distance, link uptime, the other
 end) or, for an **access point**, its **clients** (signal, SNR, CCQ, rates, connected time, traffic; weakest first,
@@ -332,7 +336,7 @@ discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on 
 
 **Alerts** (technicians; administrators change the settings) - when something's wrong, TikManager opens a
 **ConnectWise ticket**, posts to **Teams** and / or sends an **email**, and closes the ticket / posts "resolved" when it clears:
-- **What**: a router offline for N minutes (not during an upgrade), a failed backup, Security-page warnings, a FAIL
+- **What**: a router offline for N minutes (not during an upgrade), a router RouterOS flagged as possibly compromised, a failed backup, Security-page warnings, a FAIL
   from the server security check, the website grade dropping below A; optionally high CPU and new RouterOS versions.
 - **ConnectWise**: tickets go to the client's linked company (Clients page) or a default company you choose; pick the
   board, the status for new tickets, the status when it clears (or leave it open with a note) and the priority. The

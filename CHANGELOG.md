@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.25.0 - 2026-10-12
+
+- **Compromised-router detection**: RouterOS (7.13+) checks its own configuration at startup and, on finding signs of
+  unauthorized access, turns off the risky settings and flags itself (device-mode). MikroTik's guidance is to treat a
+  flagged router as compromised - but the flag lived only on the router. TikManager now reads it every hour:
+  - a red banner on the router's page with what to do (look for what you didn't add, Netinstall and restore a trusted
+    configuration, how the flag is cleared), a **Flagged** badge in the routers list, and a tile and card on the Dashboard;
+  - an event when a router becomes flagged, and a new alert (**Router flagged as possibly compromised**, on by
+    default) as a ConnectWise ticket / Teams card / email;
+  - the router's device mode is shown on its page. Read-only: device-mode can only be changed at the router.
+
 ## 1.24.2 - 2026-10-11
 
 - **Wireless tab, 60 GHz access point side**: in multipoint mode the AP's own interface reports "not running" while

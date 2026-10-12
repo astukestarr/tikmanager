@@ -229,6 +229,19 @@ class RouterOS:
                 p["name"] = p["name"] or l.get("host-name") or l.get("comment") or ""
         return {"radios": radios, "peers": peers, "types": types}   # types: only when no radio was found (to explain why)
 
+    DM_FEATURES = ("scheduler", "socks", "fetch", "pptp", "l2tp", "bandwidth-test", "traffic-gen", "sniffer", "ipsec", "romon",
+                   "proxy", "hotspot", "smb", "email", "zerotier", "container", "install-any-version", "partitions", "routerboard")
+
+    def device_mode(self) -> dict:
+        """RouterOS device-mode (7.13+): the mode, and whether RouterOS flagged itself as possibly compromised (it checks
+        its configuration at startup; MikroTik says to treat a flagged router as compromised). Raises RouterError on
+        RouterOS versions without it."""
+        m = self.get("/system/device-mode") or {}
+        m = (m[0] if isinstance(m, list) and m else m) or {}
+        yes = lambda v: str(v).lower() in ("true", "yes")
+        return {"mode": m.get("mode") or "", "flagged": yes(m.get("flagged")), "attempts": _int(m.get("attempt-count")),
+                "off": [f for f in self.DM_FEATURES if f in m and not yes(m[f])]}
+
     def winbox_service(self):
         """The router's Winbox service: {disabled, port, address (who may connect; "" = anyone)}."""
         s = (self.get("/ip/service?name=winbox") or [{}])[0]
@@ -1007,6 +1020,9 @@ class SimRouter:
                               "idle": f"{r.randint(0, 200)}ms", "distance": str(rs.randint(1, 12)), "tx_bytes": rs.randint(10 ** 8, 10 ** 11),
                               "rx_bytes": rs.randint(10 ** 7, 10 ** 10), "version": rs.choice(["6.49.15", "7.16.2", "7.19.4"]), "comment": ""})
         return {"radios": radios, "peers": peers}
+
+    def device_mode(self):
+        return {"mode": "advanced", "flagged": self.id % 6 == 3, "attempts": 0, "off": ["container"]}
 
     def set_identity(self, name):
         self.name = name   # the poller builds SimRouter with the stored name, so the new identity "sticks" once saved

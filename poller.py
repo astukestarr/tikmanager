@@ -99,6 +99,15 @@ class Poller:
                 self.db.run("UPDATE devices SET neighbors=?, neighbors_at=? WHERE id=?", (json.dumps(cl.mikrotik_neighbors()), now, d["id"]))
             except RouterError:
                 pass
+        if now - (d.get("dm_checked") or 0) > 3600 and hasattr(cl, "device_mode"):   # hourly: has RouterOS flagged itself?
+            try:
+                dm = cl.device_mode()
+            except RouterError:
+                dm = None   # RouterOS before 7.13 has no device-mode
+            if dm and dm["flagged"] and not d.get("dm_flagged"):
+                self.db.event(d["id"], d["org_id"], "flagged", "RouterOS flagged this router as possibly compromised (device-mode)")
+            self.db.run("UPDATE devices SET dm_mode=?, dm_flagged=?, dm_info=?, dm_checked=? WHERE id=?",
+                        ((dm or {}).get("mode"), 1 if dm and dm["flagged"] else 0, json.dumps(dm) if dm else None, now, d["id"]))
         if not d["online"]:
             self.db.event(d["id"], d["org_id"], "online", f"RouterOS {st['version']}, up {st['uptime']}")
         # product picture: matched once (retried daily if MikroTik's catalog had no match)

@@ -6,7 +6,8 @@ and closed when it clears.
   default company for server-wide problems) and / or a Teams card is posted; when it clears, the ticket gets an internal
   note and the closed status, and Teams gets a "resolved" card.
 - Kinds (Alerts page > Settings turns each on / off and sets thresholds):
-  offline (router offline N minutes - not while it's being upgraded), backup_failed (latest backup attempt failed),
+  offline (router offline N minutes - not while it's being upgraded), flagged (RouterOS device-mode says possibly
+  compromised), backup_failed (latest backup attempt failed),
   cpu (average over 15 minutes), firmware (new RouterOS on its channel), security (Security page warnings),
   server (server security check FAILs), website (Mozilla Observatory grade below A).
 - No storms: if more than STORM routers go offline in the same minute (TikManager's own internet, most likely), one
@@ -29,6 +30,7 @@ def short(text, n=95):
     return text if len(text) <= n else text[:n].rsplit(" ", 1)[0].rstrip(" -,;:") + "…"
 KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "offline": ("Router offline", True, "minutes", 5),
+    "flagged": ("Router flagged as possibly compromised (RouterOS device-mode)", True, None, None),
     "backup_failed": ("Configuration backup failed", True, None, None),
     "security": ("Security warnings (password guessing, a sign-in right after failures ...)", True, None, None),
     "server": ("Server security check finds a FAIL", True, None, None),
@@ -111,6 +113,12 @@ class Alerts:
                     out[f"offline:{d['id']}"] = ("offline", d["id"], d["org_id"], f"{label(d)} is offline",
                                                  f"Not reachable over its tunnel since {time.strftime('%Y-%m-%d %H:%M', time.localtime(d['last_seen'] or now))}. "
                                                  f"Last error: {d['last_error'] or 'none'}")
+        if k["flagged"]["on"]:
+            for d in devs:
+                if d.get("dm_flagged"):
+                    out[f"flagged:{d['id']}"] = ("flagged", d["id"], d["org_id"], f"{label(d)} flagged as possibly compromised",
+                                                 "RouterOS checked its configuration at startup, found signs of unauthorized access and flagged "
+                                                 "itself (device-mode). MikroTik's guidance is to treat it as compromised - see its page in TikManager.")
         if k["backup_failed"]["on"]:
             for d in devs:
                 if d["last_backup_error"] and (d["last_backup_try"] or 0) > (d["last_backup_at"] or 0):
