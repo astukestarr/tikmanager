@@ -140,6 +140,11 @@ class Backups:
             org = self.db.one("SELECT name FROM orgs WHERE id=?", (d["org_id"],)) if d.get("org_id") else None
             folder = self.mirror_dir() / safe(org["name"] if org else "Unassigned")
             folder.mkdir(parents=True, exist_ok=True)
+            for f in (self.mirror_dir(), folder):
+                try:
+                    os.chmod(f, 0o700)   # client names and plain configurations: TikManager only
+                except OSError:
+                    pass
             path = folder / f"{safe(d['name'])}-{d['id']}.rsc"
             if only_if_missing and path.exists():
                 return

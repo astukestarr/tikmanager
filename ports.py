@@ -57,7 +57,18 @@ def members(s) -> list:
 
 
 def q(v) -> str:
-    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    """A value as a RouterOS script string: quotes and backslashes escaped, and $ / ? too - inside a string RouterOS
+    expands $variables and runs $[commands], so a comment like "$[/system reset-configuration]" must stay text."""
+    v = re.sub(r"[\x00-\x1f\x7f]", " ", str(v))
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("?", "\\?") + '"'
+
+
+FRAME_TYPES = ("admit-all", "admit-only-untagged-and-priority-tagged", "admit-only-vlan-tagged")
+POE_MODES = ("auto-on", "forced-on", "off")
+
+
+def num(v, default=1) -> int:
+    return int(v) if str(v or "").isdigit() and 0 < int(v) <= 4094 else default
 
 
 def speed_class(rate: str) -> str:
@@ -388,7 +399,7 @@ class Ports:
     def undo_script(raw: dict, touched_eth) -> str:
         lines = []
         for b in raw.get("bridges") or []:
-            lines.append(f"/interface bridge set [find name={q(b.get('name'))}] vlan-filtering={'yes' if b.get('vlan-filtering') == 'true' else 'no'} pvid={b.get('pvid') or 1}")
+            lines.append(f"/interface bridge set [find name={q(b.get('name'))}] vlan-filtering={'yes' if b.get('vlan-filtering') == 'true' else 'no'} pvid={num(b.get('pvid'))}")
         lines.append(":do { /interface bridge vlan remove [find dynamic=no] } on-error={}")
         for v in raw.get("vlans") or []:
             if v.get("dynamic") == "true":
@@ -399,10 +410,11 @@ class Ports:
             if p.get("dynamic") == "true" or not p.get("interface"):
                 continue
             extra = f" ingress-filtering={'yes' if p.get('ingress-filtering') == 'true' else 'no'}" if p.get("ingress-filtering") else ""
-            lines.append(f":do {{ /interface bridge port set [find interface={q(p['interface'])}] pvid={p.get('pvid') or 1} frame-types={p.get('frame-types') or 'admit-all'}{extra} }} on-error={{}}")
+            ft = p.get("frame-types") if p.get("frame-types") in FRAME_TYPES else "admit-all"
+            lines.append(f":do {{ /interface bridge port set [find interface={q(p['interface'])}] pvid={num(p.get('pvid'))} frame-types={ft}{extra} }} on-error={{}}")
         for e in raw.get("ethernet") or []:
             if e.get("name") in touched_eth:
-                poe = f" poe-out={e['poe-out']}" if e.get("poe-out") else ""
+                poe = f" poe-out={e['poe-out']}" if e.get("poe-out") in POE_MODES else ""
                 lines.append(f":do {{ /interface ethernet set [find name={q(e['name'])}] comment={q(e.get('comment') or '')} disabled={'yes' if e.get('disabled') == 'true' else 'no'}{poe} }} on-error={{}}")
         return "\n".join(lines) + f"\n/system scheduler remove [find name={q(UNDO_NAME)}]\n"
 

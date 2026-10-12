@@ -105,7 +105,7 @@ function secCard(d) {   // router page, Overview tab
     ${s.fixes.length ? `<p>MikroTik has released <b>security fixes</b> newer than ${esc(shortVer(d.version))} on this router's channel - upgrade to at least
       <b>${esc(s.fixes[s.fixes.length - 1].version)}</b>${d.ros_latest ? ` (newest: ${esc(d.ros_latest)})` : ""}.</p>
       <ul class="sec-fixes">${s.fixes.map((f) => `<li><b>${esc(f.version)}</b>${f.date ? ` <span class="small muted">${esc(f.date)}</span>` : ""}
-        <button class="linkish" type="button" data-notes="${esc(f.version)}">what's new</button><div class="small">${f.items.map(esc).join("<br>")}</div></li>`).join("")}</ul>` : ""}
+        ${isTech() ? `<button class="linkish" type="button" data-notes="${esc(f.version)}">what's new</button>` : ""}<div class="small">${f.items.map(esc).join("<br>")}</div></li>`).join("")}</ul>` : ""}
     ${s.cves.length ? `<h3>Known vulnerabilities (CVEs) for RouterOS ${esc(shortVer(d.version))}</h3>
       <div class="table-wrap"><table><thead><tr><th>CVE</th><th>Score</th><th>What</th><th>Fixed in</th></tr></thead><tbody>
       ${s.cves.map((c) => `<tr><td class="nowrap"><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(c.id)}" target="_blank" rel="noopener noreferrer">${esc(c.id)}</a></td>

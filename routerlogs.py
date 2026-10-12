@@ -134,6 +134,8 @@ class RouterLogs:
                 re.compile(pattern[1:-1], re.I)
             except re.error as e:
                 raise ValueError(f"The regular expression doesn't work: {e}") from None
+            if re.search(r"\([^)]*[+*}][^)]*\)\s*[+*{]|\\\d", pattern):   # (a+)+ style nesting or back-references: can take for ever
+                raise ValueError("That regular expression has a repeated group inside a repeat (like (a+)+), which can hang the checker - simplify it.")
         try:
             count, minutes = int(b.get("count") or 1), int(b.get("minutes") or 10)
         except (TypeError, ValueError):

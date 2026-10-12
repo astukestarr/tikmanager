@@ -128,6 +128,7 @@ topo_cache: dict = {}                  # device id -> (read at, raw tables) for 
 geo_lock = threading.Lock()
 geo_last = [0.0]
 adopt_limit = RateLimiter(30, 300)     # per IP
+notes_limit = RateLimiter(60, 300)     # release-note lookups per technician (each may fetch from MikroTik)
 pending_logins: dict = {}              # ticket -> {user_id, created, enroll_secret}
 pending_lock = threading.Lock()
 
@@ -620,7 +621,9 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require(tech=True)
             return self.json({"sessions": winbox.view(s)})
         if path == "/api/routeros/notes":   # MikroTik's release notes for one RouterOS version (the "What's new" dialog)
-            self.require()
+            s = self.require(tech=True)
+            if not notes_limit.allow(s["email"]):
+                raise HttpError(429, "Too many release-note lookups - try again in a few minutes.")
             try:
                 return self.json(rossec.notes(str(q.get("v") or "")[:20]))
             except ValueError as e:
@@ -640,9 +643,10 @@ class Handler(BaseHTTPRequestHandler):
                 out = io.StringIO()
                 w = csv.writer(out)
                 w.writerow(["time", "router", "client", "severity", "topics", "message"])
+                cell = lambda v: ("'" + v) if str(v or "")[:1] in ("=", "+", "-", "@", "\t", "\r") else str(v or "")   # no spreadsheet formulas
                 for r in rows:
-                    w.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["device"], r["org"] or "", r["severity"], r["topics"],
-                                ("'" + r["message"]) if r["message"][:1] in "=+-@" else r["message"]])
+                    w.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), cell(r["device"]), cell(r["org"]), cell(r["severity"]),
+                                cell(r["topics"]), cell(r["message"])])
                 db.audit(s["email"], "router logs exported", f"{len(rows)} lines", self.client_ip())
                 return self.send(200, out.getvalue().encode("utf-8-sig"), "text/csv; charset=utf-8",
                                  headers=[("Content-Disposition", f'attachment; filename="router-logs-{time.strftime("%Y%m%d-%H%M")}.csv"')])

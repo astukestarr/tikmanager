@@ -3,6 +3,27 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.37.1 - 2026-10-12
+
+Security review of everything added since 1.19.1 (email, lifecycle, wireless, flagged routers, RouterOS security,
+auto-block, hardware health, internet links, restarts, tags, webhooks, logs, safer upgrades, ports / VLANs, sidebar,
+integrations). Every new endpoint requires the right sign-in and role, every POST is CSRF-checked, and router / server
+text reaches the page escaped. Fixed:
+- **Ports / VLANs undo script**: values written into the on-router undo script weren't escaped for RouterOS's `$` and
+  `?` - RouterOS expands `$variables` and runs `$[commands]` inside quoted strings, so a port or VLAN comment
+  containing `$[...]` could have run a command when the undo fired. Now escaped (as the firewall undo already was),
+  and raw values from the router (pvid, frame types, PoE mode) are checked before they go in.
+- **Webhooks**: redirects are no longer followed (a public endpoint could have redirected an alert to a LAN address),
+  and the connection goes to the address that was checked rather than looking the name up again (DNS rebinding).
+  Line breaks in header values (e.g. an ntfy title from a router name) are removed, and one failing webhook can no
+  longer stop the remaining alerts of that round from being sent.
+- **Release notes** ("What's new") are for technicians only, accept only plausible RouterOS version numbers and are
+  rate-limited - before, any signed-in user could make the server fetch arbitrary version numbers.
+- **Log alert rules**: regular expressions that can backtrack for ever ((a+)+, back-references) are refused, so a rule
+  can't hang the alert checker.
+- **Log CSV export**: every text column (not only the message) is protected against spreadsheet formulas.
+- **Plain-text backup copy**: its folders are now readable by TikManager only (the files already were).
+
 ## 1.37.0 - 2026-10-12
 
 - **New sidebar**, laid out like Report Center's: collapsible groups with counts - **Devices**, **Network** (site map,

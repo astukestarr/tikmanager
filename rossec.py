@@ -23,7 +23,7 @@ from pathlib import Path
 
 UA = {"User-Agent": "TikManager (RouterOS security; https://github.com/astukestarr/tikmanager)"}
 RELEASE = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?$")
-ANY_VERSION = re.compile(r"^\d+\.\d+(?:\.\d+)?(?:(?:rc|beta)\d+)?$")
+ANY_VERSION = re.compile(r"^[67]\.\d{1,3}(?:\.\d{1,3})?(?:(?:rc|beta)\d{1,2})?$")
 NVD = "https://services.nvd.nist.gov/rest/json/cves/2.0?virtualMatchString=cpe:2.3:o:mikrotik:routeros&resultsPerPage=2000&startIndex={}"
 NVD_EVERY = 86400
 DEVICE_EVERY = 6 * 3600

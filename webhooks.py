@@ -12,9 +12,11 @@
 import base64
 import hashlib
 import hmac
+import http.client
 import ipaddress
 import json
 import re
+import ssl
 import secrets as pysecrets
 import socket
 import threading
@@ -32,8 +34,8 @@ class WebhookError(Exception):
     pass
 
 
-def check_url(url: str) -> str:
-    """Only https:// to a host whose every address is public. Returns the URL; raises WebhookError."""
+def resolve(url: str):
+    """(parsed URL, the public IP to connect to) - only https:// to a host whose every address is public."""
     u = urllib.parse.urlsplit(str(url or "").strip())
     if u.scheme != "https" or not u.hostname:
         raise WebhookError("The URL must start with https://")
@@ -44,7 +46,28 @@ def check_url(url: str) -> str:
     for info in infos:
         if not ipaddress.ip_address(info[4][0].split("%")[0]).is_global:
             raise WebhookError(f"{u.hostname} points to a private / local address - webhooks only go to the internet.")
+    return u, infos[0][4][0]
+
+
+def check_url(url: str) -> str:
+    resolve(url)
     return url.strip()
+
+
+class _PinnedHTTPS(http.client.HTTPSConnection):
+    """HTTPS to the address that was checked (no second DNS lookup an attacker could change in between), with the
+    certificate still checked against the host name."""
+    def __init__(self, host, ip, port, timeout):
+        super().__init__(host, port, timeout=timeout, context=ssl.create_default_context())
+        self._ip = ip
+
+    def connect(self):
+        sock = socket.create_connection((self._ip, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def _clean_header(v) -> str:
+    return re.sub(r"[\r\n\x00]", " ", str(v))[:1000]
 
 
 def _escape_json(v: str) -> str:
@@ -185,15 +208,21 @@ class Webhooks:
         if not s.get("url"):
             raise WebhookError("No URL saved - edit the webhook and paste it again.")
         method, url, data, headers = self.build(h, s, ev)
-        check_url(url)
-        req = urllib.request.Request(url, data=data or None, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                return r.status
-        except urllib.error.HTTPError as e:
-            raise WebhookError(f"HTTP {e.code}: {e.read(300).decode('utf-8', 'replace')}") from None
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            raise WebhookError(f"Couldn't reach it: {getattr(e, 'reason', e)}") from None
+        u, ip = resolve(url)
+        path = (u.path or "/") + (f"?{u.query}" if u.query else "")
+        conn = _PinnedHTTPS(u.hostname, ip, u.port or 443, 10)
+        try:   # http.client never follows redirects - a redirect can't send the alert somewhere else (or onto the LAN)
+            conn.request(method, path, body=data or None, headers={k: _clean_header(v) for k, v in headers.items()})
+            r = conn.getresponse()
+            body = r.read(300)
+            if r.status >= 300:
+                raise WebhookError(f"HTTP {r.status}" + (" (redirects aren't followed - use the final URL)" if 300 <= r.status < 400 else "")
+                                   + f": {body.decode('utf-8', 'replace')}")
+            return r.status
+        except (OSError, http.client.HTTPException, ssl.SSLError) as e:
+            raise WebhookError(f"Couldn't reach it: {e}") from None
+        finally:
+            conn.close()
 
     def _record(self, hid, ok, msg):
         with self.lock:
@@ -210,6 +239,8 @@ class Webhooks:
                 self._record(h["id"], True, f"HTTP {code}")
             except WebhookError as e:
                 self._record(h["id"], False, e)
+            except Exception as e:  # noqa: BLE001 - one broken webhook must never stop the other alerts going out
+                self._record(h["id"], False, f"Error: {e}")
 
     def test(self, hid, link):
         h = next((x for x in self._all() if x["id"] == hid), None)
