@@ -69,6 +69,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Wireless tab (radios, links, AP clients) | `RouterOS.wireless()` / `SimRouter.wireless()`, `/api/devices/{id}/wireless`, `loadWireless()` in `app.js` |
 | Internet links (ISP / WAN / LTE state) | `Poller.isp_links/track_isp`, `isp` alert kind, `ispCard/ispSettings` in `app.js` |
 | Hardware health (sensors, SFP) | `RouterOS.health()`, `health_metrics` table, `/api/devices/{id}/health`, `hwCard()` in `app.js` |
+| Ports and VLANs | `ports.py` (`build`, `plan`, `undo_script`, `apply/keep/undo`), `RouterOS.port_data/br_*`, `portsTab/portEditor/ptChange` in `app.js` |
 | Router logs and log alert rules | `routerlogs.py` (`parse`, `query`, `conditions`), `logsPage/logViewer/logRulesCard` in `app.js` |
 | Webhooks (alert destinations) | `webhooks.py` (`build`, `send_all`, `check_url`), `alerts._hooks`, `webhooksCard/webhookDialog` in `app.js` |
 | Auto-block (fleet-wide blocklist) | `autoblock.py` (`candidates`, `block`, `release`, `push`, `add_rule`), `autoBlockCard()` in `app.js` |

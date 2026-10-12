@@ -3,6 +3,28 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.36.0 - 2026-10-12
+
+- **Ports tab** on the router page (technicians), laid out like UniFi's Ports page:
+  - **Port diagram**: odd ports on top, even below, SFP ports as their own block; coloured by link speed (FE / GbE /
+    2.5 GbE / 10 GbE), no link and disabled; PoE out ⚡ and uplink ↑; the connected device's name above / below each
+    port (neighbour, DHCP name, IP or MAC). Click ports to select them, shift-click for a range.
+  - **VLANs on**: a **Native VLAN** row and a **VLAN tagging** grid per VLAN (tagged / blocked / native), with the
+    VLAN's name and subnet, and a search.
+  - **VLANs off**: a **port table** - port, name, status / speed, connection, PoE (mode and watts), native VLAN, tagged
+    VLANs, hardware offload - with status and native-VLAN filters.
+- **Managing ports and VLANs** (MikroTik bridge VLAN filtering):
+  - Selected ports: native VLAN, tagged VLANs (leave / allow all / block all / custom), name, enabled, PoE out.
+  - VLANs: add (optionally with the router itself tagged), rename, delete; VLAN filtering on / off per bridge.
+  - Every change is shown as **RouterOS commands** to review first; then the router is backed up and an **automatic
+    undo** is armed on the router - it puts the bridge VLAN table, bridge ports, VLAN filtering and touched ports back
+    exactly as they were unless you press **Keep** within 5 minutes, so a change that cuts TikManager off undoes itself.
+  - The port and VLAN TikManager reaches the router through are protected: that port can't be disabled, keeps its
+    management VLAN (other VLANs can be added or removed), and VLAN filtering can't be turned on until the management
+    VLAN is set up to survive it. Rows shared by several VLANs (vlan-ids=30,40) are split as needed.
+  - Older switch-chip VLAN setups (CRS1xx/2xx) are shown read-only.
+- The router page's tabs wrap onto a second line when there are many.
+
 ## 1.35.0 - 2026-10-12
 
 - **Safer mass upgrades** (Upgrade dialog with several routers):

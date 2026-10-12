@@ -238,6 +238,35 @@ class RouterOS:
                 p["name"] = p["name"] or l.get("host-name") or l.get("comment") or ""
         return {"radios": radios, "peers": peers, "types": types}   # types: only when no radio was found (to explain why)
 
+    # --- ports and bridge VLANs (ports.py drives these, with an automatic undo) ------------------------------------
+    def port_data(self) -> dict:
+        """Everything the Ports tab needs, read live: physical ports with link / PoE, bridges, bridge ports, the bridge
+        VLAN table, VLAN interfaces, who is connected where (bridge hosts, neighbours, DHCP, ARP) and the default route."""
+        g = lambda p: self.optional(lambda: self.get(p), []) or []
+        one = lambda m: m if isinstance(m, list) else [m] if m else []
+        eth = g("/interface/ethernet")
+        names = [e["name"] for e in eth if e.get("name")]
+        mon = {m.get("name"): m for m in one(self.optional(lambda: self.post("/interface/ethernet/monitor", {"numbers": ",".join(names), "once": ""}), []))} if names else {}
+        poe_names = [e["name"] for e in eth if e.get("poe-out") not in (None, "", "forced-on-unsupported")]
+        poe = {m.get("name"): m for m in one(self.optional(lambda: self.post("/interface/ethernet/poe/monitor", {"numbers": ",".join(poe_names), "once": ""}), []))} if poe_names else {}
+        return {"ethernet": eth, "monitor": mon, "poe": poe, "interfaces": g("/interface"), "bridges": g("/interface/bridge"),
+                "ports": g("/interface/bridge/port"), "vlans": g("/interface/bridge/vlan"), "vlan_ifs": g("/interface/vlan"),
+                "hosts": g("/interface/bridge/host"), "neighbors": g("/ip/neighbor"), "leases": g("/ip/dhcp-server/lease"), "arp": g("/ip/arp"),
+                "addresses": g("/ip/address"), "routes": g("/ip/route?dst-address=0.0.0.0/0&active=true"),
+                "switch_vlans": g("/interface/ethernet/switch/vlan")}
+
+    def br_set(self, menu, rid, props):   # menu: "" (bridges), "/port" or "/vlan"
+        return self._req("PATCH", f"/interface/bridge{menu}/{rid}", props, timeout=20)
+
+    def br_add(self, menu, props):
+        return self._req("PUT", f"/interface/bridge{menu}", props, timeout=20)
+
+    def br_remove(self, menu, rid):
+        return self._req("DELETE", f"/interface/bridge{menu}/{rid}", timeout=20)
+
+    def eth_set(self, rid, props):
+        return self._req("PATCH", f"/interface/ethernet/{rid}", props, timeout=20)
+
     UNITS = {"C": "°C", "V": "V", "A": "A", "W": "W", "RPM": "RPM", "%": "%"}
 
     def health(self) -> list:
@@ -827,13 +856,16 @@ class SimRouter:
     def undo_arm(self, name, script=None, delay="5m"):
         st = self._fw()
         if script is not None and name not in st["undo"]:   # the state before the test's first change
-            st["undo"][name] = copy.deepcopy(st["fw"])
+            st["undo"][name] = copy.deepcopy({"fw": st["fw"], "sw": self._sim().get("sw")})
         st["sched"][name] = time.time() + int(delay.rstrip("m")) * 60
 
     def undo_run(self, name):
         st = self._fw()
         if name in st["undo"]:
-            st["fw"] = copy.deepcopy(st["undo"][name])
+            saved = copy.deepcopy(st["undo"][name])
+            st["fw"] = saved["fw"]
+            if saved.get("sw") is not None:
+                self._sim()["sw"] = saved["sw"]
         self.undo_cancel(name)
 
     def undo_cancel(self, name):
@@ -1054,6 +1086,84 @@ class SimRouter:
 
     def device_mode(self):
         return {"mode": "advanced", "flagged": self.id % 6 == 3, "attempts": 0, "off": ["container"]}
+
+    # --- simulated switch: a bridge with VLANs over the router's ports ---------------------------------------------
+    def _sw(self):
+        st = self._sim()
+        if "sw" not in st:
+            ifs = [i for i in self.status()["interfaces"] if i["type"] == "ether"]
+            r = random.Random(self.id * 17)
+            eth, ports, n = [], [], 1
+            for i in ifs:
+                poe = self.id % 2 == 0 and i["name"] in ("ether2", "ether3", "ether4", "ether5")
+                eth.append({".id": f"*{n:X}", "name": i["name"], "default-name": i["name"], "comment": i.get("comment") or "", "disabled": "false",
+                            **({"poe-out": "auto-on"} if poe else {}), **({"sfp-shutdown-temperature": "95"} if i["name"].startswith("sfp") else {})})
+                n += 1
+            members = [i["name"] for i in ifs if i["name"] != "ether1"]
+            for k, name in enumerate(members):
+                pvid = 1 if k == 0 else r.choice([1, 1, 10, 10, 20, 30])
+                ports.append({".id": f"*{0x40 + k:X}", "interface": name, "bridge": "bridge", "pvid": str(pvid), "disabled": "false",
+                              "frame-types": "admit-all" if k == 0 else "admit-only-untagged-and-priority-tagged", "ingress-filtering": "true",
+                              "hw": "true", "hw-offload": "true"})
+            trunk = members[0] if members else ""
+            vlans = [{".id": "*80", "bridge": "bridge", "vlan-ids": "10", "tagged": f"bridge,{trunk}".strip(","), "untagged": "", "dynamic": "false", "comment": "Staff"},
+                     {".id": "*81", "bridge": "bridge", "vlan-ids": "20", "tagged": f"bridge,{trunk}".strip(","), "untagged": "", "dynamic": "false", "comment": "Guest"},
+                     {".id": "*82", "bridge": "bridge", "vlan-ids": "30,40", "tagged": trunk, "untagged": "", "dynamic": "false", "comment": "Cameras / IoT"}]
+            st["sw"] = {"next": 0x100, "ethernet": eth, "ports": ports, "vlans": vlans,
+                        "bridges": [{".id": "*B1", "name": "bridge", "vlan-filtering": "true" if self.id % 3 else "false", "pvid": "1", "comment": "LAN"}]}
+        return st["sw"]
+
+    def port_data(self):
+        sw = copy.deepcopy(self._sw())
+        status = self.status()
+        ifs = status["interfaces"]
+        r = random.Random(self.id * 23)
+        mon = {i["name"]: {"name": i["name"], "status": "link-ok" if i["running"] else "no-link", "rate": (i.get("speed") or "1Gbps") if i["running"] else ""} for i in ifs if i["type"] == "ether"}
+        poe = {e["name"]: {"name": e["name"], "poe-out-status": "powered-on" if mon.get(e["name"], {}).get("status") == "link-ok" else "waiting-for-load",
+                           "poe-out-power": f"{r.uniform(3, 12):.1f}W" if mon.get(e["name"], {}).get("status") == "link-ok" else ""} for e in sw["ethernet"] if e.get("poe-out")}
+        hosts, leases = [], []
+        for k, p in enumerate(sw["ports"]):
+            if mon.get(p["interface"], {}).get("status") == "link-ok":
+                mac = "AC:1F:6B:%02X:%02X:%02X" % (self.id, k, r.randint(0, 255))
+                hosts.append({"mac-address": mac, "on-interface": p["interface"], "bridge": "bridge", "vid": p["pvid"], "local": "false"})
+                leases.append({"mac-address": mac, "active-mac-address": mac, "host-name": r.choice(["NVR-01", "Printer-HP", "AP-Lobby", "POS-1", "Desk-PC", "Camera-Door", ""]),
+                               "active-address": f"192.168.{self.id * 10}.{50 + k}"})
+        return {**sw, "monitor": mon, "poe": poe, "interfaces": [{"name": i["name"], "type": i["type"], "running": "true" if i["running"] else "false",
+                                                                  "disabled": "false", "comment": i.get("comment") or ""} for i in ifs],
+                "vlan_ifs": [{"name": "vlan10-staff", "vlan-id": "10", "interface": "bridge"}, {"name": "vlan20-guest", "vlan-id": "20", "interface": "bridge"}],
+                "hosts": hosts, "neighbors": [], "leases": leases, "arp": [],
+                "addresses": [{"address": f"192.168.{self.id * 10}.1/24", "interface": "bridge"}, {"address": "10.10.10.1/24", "interface": "vlan10-staff"},
+                              {"address": "10.20.20.1/24", "interface": "vlan20-guest"}],
+                "routes": [{"immediate-gw": "203.0.113.1%ether1"}], "switch_vlans": []}
+
+    def _sw_find(self, menu, rid):
+        sw = self._sw()
+        rows = {"": sw["bridges"], "/port": sw["ports"], "/vlan": sw["vlans"], "eth": sw["ethernet"]}[menu]
+        row = next((x for x in rows if x[".id"] == rid), None)
+        if row is None:
+            raise RouterError(f"HTTP 404: no such item ({rid})")
+        return rows, row
+
+    def br_set(self, menu, rid, props):
+        rows, row = self._sw_find(menu, rid)
+        row.update({k: str(v) for k, v in props.items()})
+        return dict(row)
+
+    def br_add(self, menu, props):
+        sw = self._sw()
+        row = {".id": f"*{sw['next']:X}", "dynamic": "false", **{k: str(v) for k, v in props.items()}}
+        sw["next"] += 1
+        {"": sw["bridges"], "/port": sw["ports"], "/vlan": sw["vlans"]}[menu].append(row)
+        return dict(row)
+
+    def br_remove(self, menu, rid):
+        rows, row = self._sw_find(menu, rid)
+        rows.remove(row)
+
+    def eth_set(self, rid, props):
+        rows, row = self._sw_find("eth", rid)
+        row.update({k: str(v) for k, v in props.items()})
+
 
     def health(self):
         t = time.time()

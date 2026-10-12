@@ -333,7 +333,7 @@ async function router(id) {
   // the right side is split into tabs (only the open one is built and loaded); remembered across routers and refreshes
   const adopted = d.state === "adopted";
   const radios = (d.interfaces || []).some(isRadio);
-  const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(radios ? [["wireless", "Wireless"]] : []),
+  const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["ports", "Ports"]] : []), ...(radios ? [["wireless", "Wireless"]] : []),
     ...(d.online && isTech() ? [["firewall", "Firewall"]] : []),
     ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
@@ -428,6 +428,7 @@ async function router(id) {
         : `<div class="card"><h2>Wireless</h2><p class="muted">The router is offline - wireless information is read live from it.</p></div>`) : ""}
       ${adopted && tab === "firewall" ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
       ${adopted && tab === "logs" ? `<div class="card" id="rLogs"></div>` : ""}
+      ${adopted && tab === "ports" ? `<div id="ptRoot"><div class="card"><h2>Ports</h2><p class="muted small">Reading the ports…</p></div></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Tags &amp; notes</h2>
@@ -497,6 +498,7 @@ async function router(id) {
   if ($("dhcpCard")) loadDhcp(d);
   if ($("wlCard")) loadWireless(d);
   if ($("rLogs")) logViewer($("rLogs"), { device_id: d.id });
+  if ($("ptRoot")) portsTab(d);
   if ($("mSave")) {
     api("/api/devices").then((all) => { $("mTagList").innerHTML = [...new Set(all.flatMap((x) => x.tags || []))].map((t) => `<option value="${esc(t)}">`).join(""); }).catch(() => {});
     $("mSave").addEventListener("click", async () => {
@@ -3033,6 +3035,207 @@ function webhookDialog(x, h) {
   $("whDel")?.addEventListener("click", async (e) => {
     if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
     await post("/api/admin/webhooks/delete", { id: h.id }); $("dlg").close(); webhooksCard();
+  });
+}
+
+// --- Ports: port diagram, VLAN grids / port table, port + VLAN changes tested with automatic undo (ports.py) -----------
+const ptView = { vlans: true, diagram: true, devices: true, sel: new Set(), q: "", status: "", native: "", tick: 0 };
+const ptNum = (n) => (n.match(/(\d+)(?:-\d+)?$/) || [, n])[1];
+function ptLayout(ports) {   // UniFi-style: odd ports on top, even below; SFP ports as their own block
+  const split = (list) => list.length > 6 ? [list.filter((_, i) => i % 2 === 0), list.filter((_, i) => i % 2 === 1)] : [list, []];
+  return [split(ports.filter((p) => !p.sfp)), split(ports.filter((p) => p.sfp))];
+}
+function ptGrid(ports, cell, labels) {
+  const block = ([top, bottom]) => !top.length ? "" : `<div class="pt-block">
+    ${labels ? `<div class="pt-row pt-labels">${top.map((p) => `<span title="${esc(labels(p))}">${esc(labels(p))}</span>`).join("")}</div>` : ""}
+    <div class="pt-row">${top.map(cell).join("")}</div>${bottom.length ? `<div class="pt-row">${bottom.map(cell).join("")}${"<span class=\"pt-gap\"></span>".repeat(top.length - bottom.length)}</div>` : ""}
+    ${labels && bottom.length ? `<div class="pt-row pt-labels">${bottom.map((p) => `<span title="${esc(labels(p))}">${esc(labels(p))}</span>`).join("")}</div>` : ""}</div>`;
+  return `<div class="pt-face">${ptLayout(ports).map(block).join("")}</div>`;
+}
+const ptDevice = (p) => p.neighbor || (p.devices[0] && (p.devices[0].name || p.devices[0].ip || p.devices[0].mac.slice(-5))) || "";
+async function portsTab(d) {
+  const token = ++ptView.tick;
+  let v;
+  try { v = await api(`/api/devices/${d.id}/ports`); } catch (e) { if ($("ptRoot")) $("ptRoot").innerHTML = `<div class="card"><h2>Ports</h2><p class="status err">${esc(e.message)}</p></div>`; return; }
+  if (!$("ptRoot") || token !== ptView.tick) return;
+  const byName = Object.fromEntries(v.ports.map((p) => [p.name, p]));
+  [...ptView.sel].forEach((n) => { if (!byName[n]) ptView.sel.delete(n); });
+  const sel = () => v.ports.filter((p) => ptView.sel.has(p.name));
+  const vname = (id) => { const x = v.vlans.find((y) => y.id === id); return x && x.name ? `${x.name} (${id})` : `VLAN ${id}`; };
+  const tip = (p) => [p.name, p.comment, p.disabled ? "disabled" : p.running ? p.rate || "up" : "no link", p.poe ? `PoE ${p.poe}${p.poe_watts ? ` ${p.poe_watts}` : ""}` : "",
+    p.pvid ? `native ${vname(p.pvid)}` : "", p.tagged.length ? `tagged ${p.tagged.join(", ")}` : "", p.mgmt ? "TikManager's way in" : "", ...p.devices.slice(0, 3).map((x) => x.name || x.ip || x.mac)].filter(Boolean).join("\n");
+  const cell = (inner, cls) => (p) => `<button type="button" class="pt ${cls(p)} ${ptView.sel.has(p.name) ? "sel" : ""}" data-pt="${esc(p.name)}" title="${esc(tip(p))}">${inner(p)}</button>`;
+  const faceCls = (p) => p.disabled ? "pt-off" : !p.running ? "pt-down" : `pt-${(p.speed || "1g").replace(".", "")}`;
+  const face = cell((p) => `<span class="pt-n">${esc(ptNum(p.name))}</span>${p.poe_status === "powered-on" ? `<i class="pt-poe" aria-hidden="true">⚡</i>` : ""}${p.uplink ? `<i class="pt-up" aria-hidden="true">↑</i>` : ""}`, faceCls);
+  const native = cell((p) => `<span class="pt-n">${p.pvid ?? "–"}</span>`, (p) => p.bridge ? "pt-native" : "pt-none");
+  const vgrid = (vl) => cell((p) => `<span class="pt-n">${esc(ptNum(p.name))}</span>`, (p) => !p.bridge || p.bridge !== vl.bridge ? "pt-none" : p.pvid === vl.id ? "pt-nat" : p.tagged.includes(vl.id) ? "pt-tag" : "pt-blk");
+  const vq = ptView.q.toLowerCase();
+  const shownV = v.vlans.filter((x) => !vq || `${x.id} ${x.name} ${x.subnet}`.toLowerCase().includes(vq));
+  const rows = v.ports.filter((p) => (!ptView.status || (ptView.status === "up" ? p.running && !p.disabled : !p.running || p.disabled)) && (!ptView.native || String(p.pvid) === ptView.native));
+  const secs = v.pending ? v.pending.seconds : 0;
+  $("ptRoot").innerHTML = `
+    ${v.pending ? `<div class="card pt-pending"><div class="row"><b>Testing port / VLAN changes</b><span class="spacer"></span><span id="ptCount" class="mono">${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}</span></div>
+      <p class="small">The router undoes them by itself when the timer runs out - press <b>Keep</b> once everything still works. ${v.pending.by ? `By ${esc(v.pending.by)}.` : ""}</p>
+      <ul class="small mono pt-changes">${v.pending.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+      <div class="actions"><button class="btn primary" type="button" id="ptKeep">Keep</button><button class="btn" type="button" id="ptUndo">Undo now</button><span class="status" id="ptPStatus"></span></div></div>` : ""}
+    ${v.switch_chip ? `<div class="card"><p class="status warn">This router's VLANs are set up on the switch chip (older CRS1xx/2xx style) - shown here read-only; TikManager changes bridge VLAN filtering only.</p></div>` : ""}
+    ${v.bridges.filter((b) => !b.filtering && v.ports.some((p) => p.bridge === b.name)).map((b) => `<div class="card ab-warn"><b>VLAN filtering is off on ${esc(b.name)}</b> - its ports pass every VLAN;
+      the native / tagged settings below are only enforced once it's on. Turn it on in the VLANs card below when the ports are set up.</div>`).join("")}
+    <div class="card"><div class="row"><h2>Ports</h2><span class="spacer"></span>
+      <label class="chk"><input type="checkbox" data-ptopt="diagram" ${ptView.diagram ? "checked" : ""}> Port diagram</label>
+      <label class="chk"><input type="checkbox" data-ptopt="devices" ${ptView.devices ? "checked" : ""}> Connected devices</label>
+      <label class="chk"><input type="checkbox" data-ptopt="vlans" ${ptView.vlans ? "checked" : ""}> VLANs</label>
+      <button class="btn" type="button" id="ptRefresh">Refresh</button></div>
+      ${ptView.diagram ? `${ptGrid(v.ports, face, ptView.devices ? ptDevice : null)}
+        <div class="pt-legend small"><span><i class="sw2 pt-100m"></i>FE</span><span><i class="sw2 pt-1g"></i>GbE</span><span><i class="sw2 pt-25g"></i>2.5 GbE</span>
+          <span><i class="sw2 pt-10g"></i>10 GbE</span><span><i class="sw2 pt-down"></i>No link</span><span><i class="sw2 pt-off"></i>Disabled</span><span>⚡ PoE out</span><span>↑ Uplink</span>
+          <span class="muted">Click ports to select them (shift-click: a range)</span></div>` : ""}
+      ${ptView.vlans ? `<h3>Native VLAN</h3>${ptGrid(v.ports, native)}
+        <div class="row pt-vhead"><h3>VLAN tagging</h3><span class="pt-legend small"><span><i class="sw2 pt-tag"></i>Tagged</span><span><i class="sw2 pt-blk"></i>Blocked</span><span><i class="sw2 pt-nat"></i>Native</span></span>
+          <span class="spacer"></span><input id="ptQ" type="search" placeholder="Search VLAN ID, name or subnet" value="${esc(ptView.q)}"></div>
+        ${shownV.map((x) => `<div class="pt-vlan"><div class="row small"><b>${esc(x.name || "VLAN")} (${x.id})</b>${x.mgmt ? ` <span class="pill">TikManager's way in</span>` : ""}<span class="spacer"></span>
+          <span class="muted">${esc(x.subnet || "")}${x.bridge ? ` · ${esc(x.bridge)}` : ""}</span></div>${ptGrid(v.ports, vgrid(x))}</div>`).join("") || `<p class="muted small">No VLANs${vq ? " match" : " in the bridge VLAN table yet"}.</p>`}`
+      : `<div class="row pt-filters"><select id="ptStatus" aria-label="Status"><option value="">Any status</option><option value="up">In use</option><option value="down">Not connected / disabled</option></select>
+          <select id="ptNative" aria-label="Native VLAN"><option value="">Any native VLAN</option>${[...new Set(v.ports.map((p) => p.pvid).filter((x) => x != null))].sort((a, b) => a - b).map((x) => `<option value="${x}">${esc(vname(x))}</option>`).join("")}</select>
+          <span class="small muted">${rows.length} of ${v.ports.length} ports</span></div>
+        <div class="table-wrap"><table><thead><tr><th><input type="checkbox" id="ptAll" aria-label="Select all shown"></th><th>Port</th><th>Name</th><th>Status</th><th>Connection</th><th>PoE</th><th>Native VLAN</th><th>Tagged VLANs</th><th>HW offload</th></tr></thead><tbody>
+        ${rows.map((p) => `<tr class="${ptView.sel.has(p.name) ? "pt-selrow" : ""}"><td><input type="checkbox" data-ptsel="${esc(p.name)}" ${ptView.sel.has(p.name) ? "checked" : ""} aria-label="Select ${esc(p.name)}"></td>
+          <td class="mono">${esc(p.name)}${p.uplink ? ` <span class="pill">uplink</span>` : ""}</td><td>${esc(p.comment)}</td>
+          <td>${p.disabled ? `<span class="pill">disabled</span>` : p.running ? `<span class="dot on"></span>${esc(p.rate || "up")}` : `<span class="dot off"></span>no link`}</td>
+          <td class="small">${esc(ptDevice(p))}${p.devices.length > 1 ? ` <span class="muted">+${p.devices.length - 1}</span>` : ""}</td>
+          <td class="small">${p.poe ? `${esc(p.poe)}${p.poe_watts ? ` · ${esc(p.poe_watts)}` : ""}` : "—"}</td>
+          <td>${p.bridge ? esc(vname(p.pvid)) : `<span class="muted">routed</span>`}</td>
+          <td class="small">${p.bridge ? (p.tagged.length ? esc(p.tagged.join(", ")) : `<span class="muted">none</span>`) : ""}</td>
+          <td class="small">${p.hw_offload == null ? "" : p.hw_offload ? `<span class="status ok">yes</span>` : `<span class="status warn">no</span>`}</td></tr>`).join("")}</tbody></table></div>`}
+    </div>
+    <div id="ptEdit"></div>
+    <div class="card"><div class="row"><h2>VLANs</h2><span class="spacer"></span>${canWrite() && v.bridges.length ? `<button class="btn" type="button" id="ptAddV">Add VLAN</button>` : ""}</div>
+      ${v.vlans.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Bridge</th><th>Subnet</th><th>Ports</th><th>Router</th><th></th></tr></thead><tbody>
+        ${v.vlans.map((x) => `<tr><td class="mono">${x.id}</td><td>${esc(x.name)}</td><td class="mono small">${esc(x.bridge || "")}</td><td class="mono small">${esc(x.subnet || "")}</td><td>${x.ports}</td>
+          <td class="small">${x.l3 ? esc(x.l3) : x.cpu ? "tagged on the bridge" : `<span class="muted">—</span>`}</td>
+          <td class="nowrap">${canWrite() && x.rows.length ? `<button class="btn" type="button" data-vren="${x.id}">Rename</button> <button class="btn" type="button" data-vdel="${x.id}">Delete</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted small">No VLANs yet.</p>`}
+      <h3>VLAN filtering</h3>${v.bridges.map((b) => `<div class="row small"><span class="mono">${esc(b.name)}</span><span>${b.filtering ? `<span class="status ok">on</span>` : `<span class="status warn">off</span>`}</span>
+        ${canWrite() ? `<button class="btn" type="button" data-vfilt="${esc(b.name)}" data-on="${b.filtering ? 0 : 1}">${b.filtering ? "Turn off" : "Turn on"}</button>` : ""}</div>`).join("") || `<p class="muted small">No bridges.</p>`}
+      <p class="small muted">Every change is shown as RouterOS commands first, the router is backed up, and the router undoes it by itself after ${v.test_minutes} minutes unless you press Keep -
+        so a change that cuts TikManager off puts itself back. The port and VLAN TikManager reaches the router through can't be changed here.</p></div>`;
+  // --- selection
+  let last = null;
+  const pick = (n, shift) => {
+    if (shift && last) {
+      const names = v.ports.map((p) => p.name), a = names.indexOf(last), b = names.indexOf(n);
+      names.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((x) => ptView.sel.add(x));
+    } else ptView.sel.has(n) ? ptView.sel.delete(n) : ptView.sel.add(n);
+    last = n;
+    redrawSel();
+  };
+  const redrawSel = () => {
+    document.querySelectorAll("#ptRoot [data-pt]").forEach((b) => b.classList.toggle("sel", ptView.sel.has(b.dataset.pt)));
+    document.querySelectorAll("#ptRoot [data-ptsel]").forEach((c) => { c.checked = ptView.sel.has(c.dataset.ptsel); c.closest("tr").classList.toggle("pt-selrow", c.checked); });
+    portEditor(d, v, sel());
+  };
+  document.querySelectorAll("#ptRoot [data-pt]").forEach((b) => b.addEventListener("click", (e) => pick(b.dataset.pt, e.shiftKey)));
+  document.querySelectorAll("#ptRoot [data-ptsel]").forEach((c) => c.addEventListener("change", () => pick(c.dataset.ptsel, false)));
+  $("ptAll")?.addEventListener("change", (e) => { rows.forEach((p) => (e.target.checked ? ptView.sel.add(p.name) : ptView.sel.delete(p.name))); redrawSel(); });
+  document.querySelectorAll("[data-ptopt]").forEach((c) => c.addEventListener("change", () => { ptView[c.dataset.ptopt] = c.checked; portsTab(d); }));
+  $("ptRefresh").addEventListener("click", () => portsTab(d));
+  $("ptQ")?.addEventListener("input", (e) => { ptView.q = e.target.value; clearTimeout(ptView.qt); ptView.qt = setTimeout(() => portsTab(d).then(() => { $("ptQ")?.focus(); }), 250); });
+  if ($("ptStatus")) { $("ptStatus").value = ptView.status; $("ptNative").value = ptView.native; }
+  $("ptStatus")?.addEventListener("change", (e) => { ptView.status = e.target.value; portsTab(d); });
+  $("ptNative")?.addEventListener("change", (e) => { ptView.native = e.target.value; portsTab(d); });
+  // --- pending test
+  if (v.pending) {
+    let left = secs;
+    const t = setInterval(() => {
+      if (!$("ptCount") || token !== ptView.tick) return clearInterval(t);
+      left = Math.max(0, left - 1);
+      $("ptCount").textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+      if (!left) { clearInterval(t); setTimeout(() => portsTab(d), 4000); }
+    }, 1000);
+    const act = (what) => async () => {
+      try { await post(`/api/devices/${d.id}/ports/${what}`); portsTab(d); }
+      catch (e) { $("ptPStatus").textContent = e.message; $("ptPStatus").className = "status err"; }
+    };
+    $("ptKeep").addEventListener("click", act("keep"));
+    $("ptUndo").addEventListener("click", act("undo"));
+  }
+  // --- VLAN management
+  $("ptAddV")?.addEventListener("click", () => {
+    dialog(`<h2>Add VLAN</h2><div class="grid2"><label class="field">VLAN ID <input id="avId" type="number" min="1" max="4094"></label>
+      <label class="field">Name <input id="avName" maxlength="60" placeholder="Cameras"></label></div>
+      <label class="field">Bridge <select id="avBr">${v.bridges.map((b) => `<option>${esc(b.name)}</option>`).join("")}</select></label>
+      <label class="chk"><input type="checkbox" id="avCpu"> The router itself is on this VLAN (tag the bridge - needed for its own VLAN interface / DHCP server)</label>
+      <div class="actions"><button class="btn primary" type="button" id="avOk">Review</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="avSt"></span></div>`);
+    $("avOk").addEventListener("click", () => ptChange(d, { op: "vlan_add", id: $("avId").value, name: $("avName").value, bridge: $("avBr").value, cpu: $("avCpu").checked }));
+  });
+  document.querySelectorAll("[data-vren]").forEach((b) => b.addEventListener("click", () => {
+    const x = v.vlans.find((y) => String(y.id) === b.dataset.vren);
+    dialog(`<h2>Rename VLAN ${x.id}</h2><label class="field">Name <input id="rvName" value="${esc(x.name)}" maxlength="60"></label>
+      <div class="actions"><button class="btn primary" type="button" id="rvOk">Review</button><button class="btn" type="button" data-close>Cancel</button></div>`);
+    $("rvOk").addEventListener("click", () => ptChange(d, { op: "vlan_rename", id: x.id, name: $("rvName").value }));
+  }));
+  document.querySelectorAll("[data-vdel]").forEach((b) => b.addEventListener("click", () => ptChange(d, { op: "vlan_delete", id: +b.dataset.vdel })));
+  document.querySelectorAll("[data-vfilt]").forEach((b) => b.addEventListener("click", () => ptChange(d, { op: "filtering", bridge: b.dataset.vfilt, on: b.dataset.on === "1" })));
+  portEditor(d, v, sel());
+}
+function portEditor(d, v, sel) {
+  const el = $("ptEdit");
+  if (!el) return;
+  if (!sel.length || !canWrite()) { el.innerHTML = ""; return; }
+  const bridged = sel.filter((p) => p.bridge), bridge = bridged[0]?.bridge;
+  const bvl = v.vlans.filter((x) => x.bridge === bridge);
+  const same = (f) => sel.every((p) => JSON.stringify(f(p)) === JSON.stringify(f(sel[0])));
+  const pv = same((p) => p.pvid) ? sel[0].pvid : null;
+  const poe = sel.some((p) => p.poe);
+  el.innerHTML = `<div class="card pt-editor"><div class="row"><h2>${sel.length === 1 ? `Port ${esc(sel[0].name)}` : `${sel.length} ports selected`}</h2><span class="spacer"></span>
+      <button class="btn" type="button" id="peClear">Clear selection</button></div>
+    <p class="small muted">${esc(sel.map((p) => p.name).join(", "))}${sel.some((p) => p.mgmt) ? ` - <b>${esc(v.mgmt.port)}</b> is how TikManager reaches this router: it keeps ${v.mgmt.vid ? `VLAN ${v.mgmt.vid}` : "its current setup"} and can't be disabled` : ""}</p>
+    <div class="grid2">
+      ${sel.length === 1 ? `<label class="field">Name (comment) <input id="peName" value="${esc(sel[0].comment)}" maxlength="100"></label>` : ""}
+      <label class="field">Port <select id="peEn"><option value="">Leave as is</option><option value="on">Enabled</option><option value="off">Disabled</option></select></label>
+      ${poe ? `<label class="field">PoE out <select id="pePoe"><option value="">Leave as is</option><option value="auto-on">Auto on</option><option value="off">Off</option></select></label>` : ""}
+      ${bridged.length === sel.length ? `<label class="field">Native VLAN (untagged) <select id="pePvid"><option value="">Leave as is${pv ? ` (${pv})` : " (mixed)"}</option>
+        ${bvl.map((x) => `<option value="${x.id}">${esc(x.name ? `${x.name} (${x.id})` : `VLAN ${x.id}`)}</option>`).join("")}<option value="1">Default (1)</option></select></label>` : ""}
+    </div>
+    ${bridged.length === sel.length ? `<fieldset class="pe-tag"><legend class="small muted">Tagged VLANs</legend>
+      <label class="chk"><input type="radio" name="peT" value="keep" checked> Leave as is</label>
+      <label class="chk"><input type="radio" name="peT" value="all"> Allow all</label>
+      <label class="chk"><input type="radio" name="peT" value="none"> Block all (access port)</label>
+      <label class="chk"><input type="radio" name="peT" value="custom"> Custom</label>
+      <div class="pe-vl hidden" id="peVl">${bvl.map((x) => `<label class="chk"><input type="checkbox" data-pev="${x.id}" ${sel.every((p) => p.tagged.includes(x.id)) ? "checked" : ""}> ${esc(x.name ? `${x.name} (${x.id})` : `VLAN ${x.id}`)}</label>`).join("") || `<span class="muted small">No VLANs on ${esc(bridge || "")} yet - add one below.</span>`}</div></fieldset>`
+      : `<p class="small muted">${bridged.length ? "Some" : "These"} ports aren't in a bridge (routed), so they have no VLANs here.</p>`}
+    <div class="actions"><button class="btn primary" type="button" id="peGo">Review changes</button><span class="status" id="peSt"></span></div></div>`;
+  $("peClear").addEventListener("click", () => { ptView.sel.clear(); portsTab(d); });
+  document.querySelectorAll("[name=peT]").forEach((r) => r.addEventListener("change", () => $("peVl").classList.toggle("hidden", r.value !== "custom" || !r.checked)));
+  $("peGo").addEventListener("click", () => {
+    const b = { op: "ports", ports: sel.map((p) => p.name) };
+    if ($("peName")) b.comment = $("peName").value;
+    if ($("peEn").value) b.disabled = $("peEn").value === "off";
+    if ($("pePoe")?.value) b.poe = $("pePoe").value;
+    if ($("pePvid")?.value) b.pvid = $("pePvid").value;
+    const tm = document.querySelector("[name=peT]:checked")?.value;
+    if (tm && tm !== "keep") { b.tagged_mode = tm; b.tagged = [...document.querySelectorAll("[data-pev]:checked")].map((c) => +c.dataset.pev); }
+    ptChange(d, b);
+  });
+}
+async function ptChange(d, body) {   // review the RouterOS commands, then apply them as a test with automatic undo
+  let r;
+  try { r = await post(`/api/devices/${d.id}/ports/review`, body); }
+  catch (e) { dialog(`<h2>Can't make this change</h2><p class="status err">${esc(e.message)}</p><div class="actions"><button class="btn" type="button" data-close>OK</button></div>`); return; }
+  dialog(`<h2>Review changes</h2><p class="small">TikManager will run these on <b>${esc(d.name)}</b>, after a backup, as a test: the router puts everything back by itself in 5 minutes unless you press Keep.</p>
+    <pre class="ros-notes">${esc(r.commands.join("\n"))}</pre>
+    ${r.warnings.map((w) => `<p class="small status warn">${esc(w)}</p>`).join("")}
+    <div class="actions"><button class="btn primary" type="button" id="pcGo">Apply (test for 5 minutes)</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="pcSt"></span></div>`);
+  $("dlg").classList.add("wide");
+  $("pcGo").addEventListener("click", async () => {
+    $("pcGo").disabled = true; $("pcSt").textContent = "Applying…"; $("pcSt").className = "status";
+    try {
+      const res = await post(`/api/devices/${d.id}/ports/apply`, body);
+      $("dlg").close();
+      if (!res.reachable) alert("TikManager can't reach the router after the change - it will undo it by itself within 5 minutes.");
+      ptView.sel.clear();
+      portsTab(d);
+    } catch (e) { $("pcGo").disabled = false; $("pcSt").textContent = e.message; $("pcSt").className = "status err"; portsTab(d); }
   });
 }
 

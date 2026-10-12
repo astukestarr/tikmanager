@@ -33,6 +33,7 @@ from routeros import RouterError
 from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from firewall import Firewall, FirewallError
+from ports import Ports, PortsError
 from secevents import SecurityEvents
 from observatory import Observatory
 from reachability import Reachability
@@ -99,6 +100,7 @@ tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 firewall = Firewall(db, poller.client, backups)
+ports = Ports(db, poller.client, backups)   # port diagram, VLAN grids, VLAN changes with automatic undo
 observatory = Observatory(db, settings)   # Mozilla Observatory grade of the public URL
 reach = Reachability(db, settings, observatory)   # connectivity test from the internet (on request)
 secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubuntu server, routers
@@ -704,6 +706,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({**firewall.view(d), "can_edit": s["role"] != "readonly"})
             except FirewallError as e:
                 raise HttpError(502, str(e)) from None
+        if m := re.fullmatch(r"/api/devices/(\d+)/ports", path):   # ports, PoE, bridge VLANs, connected devices - read live
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            try:
+                return self.json(ports.view(d))
+            except PortsError as e:
+                raise HttpError(502, str(e)) from None
         if m := re.fullmatch(r"/api/devices/(\d+)/wireless", path):   # radios, links and connected clients, read live
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -996,6 +1007,23 @@ class Handler(BaseHTTPRequestHandler):
                    (name or d["identity"] or d["name"], 1 if name else 0, str(b.get("site") if "site" in b else d["site"])[:120], d["id"]))
             db.audit(s["email"], "router renamed", f"{d['name']} -> {name or d['identity']}", self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/ports/(review|apply|keep|undo)", path):   # VLAN / port changes, tested like Safe Mode
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            b = self.body()
+            try:
+                if m.group(2) == "review":
+                    return self.json(ports.review(d, b))
+                if m.group(2) == "apply":
+                    return self.json(ports.apply(d, s["email"], b))
+                changes = ports.keep(d, s["email"]) if m.group(2) == "keep" else ports.undo(d, s["email"])
+                return self.json({"ok": True, "changes": changes})
+            except PortsError as e:
+                raise HttpError(400, str(e)) from None
+            except RouterError as e:
+                raise HttpError(502, str(e)) from None
         if m := re.fullmatch(r"/api/devices/(\d+)/meta", path):   # tags and notes (technicians)
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))
