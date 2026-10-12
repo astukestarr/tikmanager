@@ -193,18 +193,25 @@ class RouterOS:
         w60 = self.optional(lambda: self.get("/interface/w60g"), []) or []
         sta = {s.get("name") or s.get(".id"): s for s in (self.optional(lambda: self.get("/interface/w60g/station"), []) or [])}
         sta.update({w.get("name"): {**sta.get(w.get("name"), {}), **w} for w in w60 if w.get("parent")})
+        mon60 = lambda n: one(self.optional(lambda: self.post("/interface/w60g/monitor", {"numbers": n, "once": ""}), {})) \
+            or one(self.optional(lambda: self.post("/interface/w60g/station/monitor", {"numbers": n, "once": ""}), {}))
         for w in [x for x in w60 if not x.get("parent")]:
-            n, on = w.get("name"), w.get("disabled") != "true" and w.get("running") == "true"
-            mon = one(self.optional(lambda n=n: self.post("/interface/w60g/monitor", {"numbers": n, "once": ""}), {})) if on else {}
+            n = w.get("name")
+            mine = [s for s in sta.values() if (s.get("parent") or s.get("interface") or n) == n]
+            # in multipoint the AP's own interface reports "not running" while its stations carry the links
+            live = [s for s in mine if s.get("running") != "false" and s.get("disabled") != "true"]
+            mon = mon60(n) if w.get("disabled") != "true" else {}
             radios.append({"name": n, "kind": "w60g", "mode": w.get("mode") or "", "ssid": w.get("ssid") or "", "band": "60 GHz",
                            "frequency": mon.get("frequency") or w.get("frequency") or "", "channel": "", "width": "", "protocol": "",
-                           "radio_name": "", "mac": w.get("mac-address") or "", "running": w.get("running") == "true",
-                           "disabled": w.get("disabled") == "true", "status": "connected" if mon.get("connected") == "true" else "",
-                           "noise": None, "ccq": None, "tx_power": str(mon.get("tx-power") or ""), "count": None})
-            mine = [s for s in sta.values() if (s.get("parent") or s.get("interface") or n) == n]
+                           "radio_name": "", "mac": w.get("mac-address") or "", "running": w.get("running") == "true" or bool(live),
+                           "disabled": w.get("disabled") == "true",
+                           "status": "connected" if mon.get("connected") == "true" else f"{len(live)} station(s) connected" if live else "",
+                           "noise": None, "ccq": None, "tx_power": str(mon.get("tx-power") or ""), "count": len(live) if mine else None})
             if not mine and mon.get("connected") == "true":   # point-to-point: the link itself is in the monitor
                 mine = [mon]
             for st in mine:
+                if st.get("rssi") is None and st.get("name") and st is not mon:   # each station's signal is in its own monitor
+                    st = {**st, **{k: v for k, v in mon60(st["name"]).items() if v not in (None, "")}}
                 peers.append({"interface": n, "mac": st.get("remote-address") or st.get("mac-address") or "", "name": "", "ip": "",
                               "is_ap": False, "signal": _int(st.get("rssi")), "quality": _int(st.get("signal")), "remote_signal": None,
                               "snr": None, "ccq": None, "tx_rate": st.get("tx-phy-rate") or "", "rx_rate": "", "mcs": st.get("tx-mcs") or "",

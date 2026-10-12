@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.24.2 - 2026-10-11
+
+- **Wireless tab, 60 GHz access point side**: in multipoint mode the AP's own interface reports "not running" while
+  each connected station has its own interface, so the AP showed its station with no signal, rate or distance. Each
+  station's link is now read from its own interface (signal, quality %, MCS, rate, distance), and the radio shows how
+  many stations are connected. 60 GHz distances in the client table are in metres.
+
 ## 1.24.1 - 2026-10-11
 
 - **Wireless tab names the other end** when it's one of your routers in TikManager (matched by its interface MAC

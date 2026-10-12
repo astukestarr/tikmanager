@@ -520,10 +520,10 @@ async function loadWireless(d) {
           ${shown.map((p) => { const [w, t] = wlSig(p.signal); const pct = p.signal == null ? 0 : Math.max(4, Math.min(100, Math.round((p.signal + 95) * 100 / 55)));
             return `<tr><td>${wlPeer(p) || `<span class="muted">—</span>`}<div class="small muted mono">${esc(p.mac)}</div></td><td class="mono small">${esc(p.ip || "")}</td>
               <td class="nowrap"><div class="row wl-sig"><div class="bar"><i data-pct="${pct}" class="${t === "bad" ? "hot" : t === "warn" ? "warm" : ""}"></i></div>
-                <span class="status ${wlTone[t] || ""}">${p.signal ?? "—"}</span></div><div class="small muted">${w}${p.remote_signal != null ? ` · remote ${p.remote_signal}` : ""}</div></td>
+                <span class="status ${wlTone[t] || ""}">${p.signal ?? "—"}</span></div><div class="small muted">${p.quality != null ? `${p.quality}% · ${wlPct(p.quality)[0]}` : w}${p.remote_signal != null ? ` · remote ${p.remote_signal}` : ""}${p.mcs ? ` · MCS ${esc(p.mcs)}` : ""}</div></td>
               ${col.snr ? `<td class="status ${wlTone[wlRange(p.snr, 30, 20)] || ""}">${p.snr ?? ""}</td>` : ""}${col.ccq ? `<td class="status ${wlTone[wlRange(p.ccq, 80, 60)] || ""}">${p.ccq != null ? `${p.ccq}%` : ""}</td>` : ""}
               <td class="small nowrap">${esc(wlRate(p.tx_rate))} / ${esc(wlRate(p.rx_rate))}</td>${col.band ? `<td class="small">${esc(p.band || "")}</td>` : ""}
-              ${col.dist ? `<td class="small">${p.distance ? `${esc(p.distance)} km` : ""}</td>` : ""}<td class="small nowrap">${esc(p.uptime ? uptime(p.uptime, true) : "")}</td>
+              ${col.dist ? `<td class="small">${p.distance ? `${esc(p.distance)}${/^[\d.]+$/.test(p.distance) ? (r.kind === "w60g" ? " m" : " km") : ""}` : ""}</td>` : ""}<td class="small nowrap">${esc(p.uptime ? uptime(p.uptime, true) : "")}</td>
               <td class="small nowrap">${p.tx_bytes != null ? `${bytes(p.tx_bytes)} / ${bytes(p.rx_bytes)}` : ""}</td>${col.ver ? `<td class="small">${esc(p.version || "")}</td>` : ""}</tr>`; }).join("")}
           </tbody></table></div>` : `<p class="muted small">${peers.length ? "No clients match." : "No clients connected."}</p>`}</div>`;
     }).join("") : `<div class="card"><p class="muted">No radios found on this router.${last.types && last.types.length ? ` Its interface types: <span class="mono">${esc(last.types.join(", "))}</span>.` : ""}</p></div>`;
