@@ -1121,13 +1121,89 @@ async function adminTechs() {
 
 // --- Admin > Integrations: ConnectWise PSA and IT Glue ---------------------------------------------------------------
 // Keys are typed here and stored encrypted on the server; saved secrets are never sent back (the field shows "saved").
-const intView = { q: "" };
+const intView = { q: "", open: null, cat: "", iq: "", result: {} };
+// Admin > Integrations, laid out like Report Center's: category filter + search on the left, one card per integration
+// (status, Edit, Test); Edit opens that integration on its own.
+const INTEGRATIONS = [
+  { id: "cw", name: "ConnectWise PSA", cat: "PSA & documentation", color: "#0f6cbd", test: true,
+    about: "Import companies as clients, link clients, and open alert tickets." },
+  { id: "itg", name: "IT Glue", cat: "PSA & documentation", color: "#00a3a3", test: true,
+    about: "Document every router as an IT Glue configuration, kept up to date nightly." },
+  { id: "mail", name: "Email", cat: "Notifications", color: "#7a5af8", test: "Send a test to me",
+    about: "Send alerts, client invitations and tests via Microsoft 365 or SMTP." },
+  { id: "teams", name: "Microsoft Teams", cat: "Notifications", color: "#4b53bc", link: "alerts",
+    about: "Post alerts to a Teams channel (set up on the Alerts page)." },
+  { id: "webhooks", name: "Webhooks", cat: "Notifications", color: "#e8611a", link: "alerts",
+    about: "Alerts to Slack, Discord, ntfy or any HTTPS endpoint (Alerts page)." },
+  { id: "github", name: "GitHub script library", cat: "Scripts", color: "#24292f", test: true,
+    about: "Browse the community RouterOS script library; share scripts with a token." },
+  { id: "offsite", name: "Off-site backup", cat: "Backup", color: "#2e9d5b", link: "system",
+    about: "Encrypted copies of TikManager's data to FTPS, FTP or WebDAV (Admin > Settings)." },
+  { id: "entra", name: "Microsoft sign-in", cat: "Sign-in", color: "#0078d4", link: "system",
+    about: "Staff sign in with their Microsoft accounts (Entra ID - Admin > Settings)." },
+];
+const integInitials = (n) => n.replace(/[^A-Za-z0-9 ]/g, "").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+function integState(x, r) {
+  const res = intView.result[x.id];
+  if (x.id === "webhooks") return r.webhooks.count ? ["ok", `${r.webhooks.count} webhook${r.webhooks.count === 1 ? "" : "s"}`] : ["off", "Not set up"];
+  if (x.id === "github" && !r.github.configured) return ["ok", "Browsing (no token)"];
+  if (x.id === "offsite" && r.offsite.configured && r.offsite.last && r.offsite.last.ok === false) return ["err", "Last backup failed"];
+  if (!r[x.id]?.configured) return ["off", "Not set up"];
+  if (res) return res.ok ? ["ok", "Connected"] : ["err", "Error"];
+  return ["ok", "Set up"];
+}
 async function adminIntegrations() {
   const r = await api("/api/integrations");
-  const field = (kind, k, label, o = {}) => `<label class="field">${label}
-    <input id="i_${kind}_${k}" ${o.secret ? `type="password" autocomplete="new-password" placeholder="${r[kind][`${k}_set`] ? "saved - leave blank to keep" : ""}"` : `value="${esc(r[kind][k] || "")}" placeholder="${esc(o.ph || "")}"`} spellcheck="false"></label>`;
+  intView.result = intView.result || {};
+  if (intView.open) return integDetail(r, intView.open);
+  const counts = {};
+  INTEGRATIONS.forEach((x) => { counts[x.cat] = (counts[x.cat] || 0) + 1; });
+  const draw = () => {
+    const q = (intView.iq || "").toLowerCase();
+    const shown = INTEGRATIONS.filter((x) => (!intView.cat || x.cat === intView.cat) && (!q || `${x.name} ${x.about} ${x.cat}`.toLowerCase().includes(q)));
+    $("integGrid").innerHTML = shown.map((x) => {
+      const [cls, label] = integState(x, r), res = intView.result[x.id];
+      return `<div class="integ-card"><div class="integ-head"><span class="integ-logo" data-color="${x.color}">${integInitials(x.name)}</span>
+          <span class="integ-name">${esc(x.name)}</span><span class="integ-tag">${esc(x.cat)}</span></div>
+        <div class="integ-about">${esc(x.about)}</div>
+        <div class="integ-msg" title="${esc(res?.msg || "")}">${esc(res?.msg || "")}</div>
+        <div class="integ-btns"><button class="btn" type="button" data-iopen="${x.id}">✎ Edit${x.link ? " ↗" : ""}</button>
+          ${x.test && r[x.id]?.configured ? `<button class="btn ghost" type="button" data-iquick="${x.id}">${x.test === true ? "Test" : "Send test"}</button>` : ""}</div>
+        <div class="integ-status ${cls}">${esc(label)}</div></div>`;
+    }).join("") || `<p class="muted">No integrations match.</p>`;
+    document.querySelectorAll("#integGrid .integ-logo").forEach((el) => { el.style.background = el.dataset.color; });
+    document.querySelectorAll("[data-iopen]").forEach((b) => b.addEventListener("click", () => {
+      const x = INTEGRATIONS.find((y) => y.id === b.dataset.iopen);
+      if (x.link === "alerts") return go("alerts");
+      if (x.link === "system") return admin("system").then(() => setTimeout(() => (x.id === "offsite" ? $("offCard") : $("cfDomains")?.closest(".card"))?.scrollIntoView({ block: "start" }), 400));
+      intView.open = x.id;
+      adminIntegrations();
+    }));
+    document.querySelectorAll("[data-iquick]").forEach((b) => b.addEventListener("click", async () => {
+      const kind = b.dataset.iquick;
+      intView.result[kind] = { ok: true, msg: "Testing…" }; draw();
+      try { const t = await post(`/api/integrations/${kind}/test`); intView.result[kind] = { ok: t.ok, msg: t.detail }; }
+      catch (e) { intView.result[kind] = { ok: false, msg: e.message }; }
+      draw();
+    }));
+  };
+  $("adminBody").innerHTML = `<p class="muted">Every system TikManager connects to. Keys and passwords are stored encrypted and never shown again.</p>
+    <div class="integ-layout"><aside class="card integ-filter"><input id="integQ" type="search" placeholder="Search…" value="${esc(intView.iq || "")}">
+        <div class="small muted integ-ftitle">Category</div>
+        ${[["", "All", INTEGRATIONS.length], ...Object.entries(counts)].map(([k, l, n]) => `<label><input type="radio" name="integCat" value="${esc(k)}" ${(intView.cat || "") === k ? "checked" : ""}>
+          ${esc(k ? k : l)}<span class="n">${k ? counts[k] : n}</span></label>`).join("")}</aside>
+      <div class="integ-grid" id="integGrid"></div></div>`;
+  $("integQ").addEventListener("input", (e) => { intView.iq = e.target.value; draw(); });
+  document.querySelectorAll("[name=integCat]").forEach((c) => c.addEventListener("change", () => { intView.cat = c.value; draw(); }));
+  draw();
+}
+async function integDetail(r, kind) {
+  const x = INTEGRATIONS.find((y) => y.id === kind);
+  const field = (k2, k, label, o = {}) => `<label class="field">${label}
+    <input id="i_${k2}_${k}" ${o.secret ? `type="password" autocomplete="new-password" placeholder="${r[k2][`${k}_set`] ? "saved - leave blank to keep" : ""}"` : `value="${esc(r[k2][k] || "")}" placeholder="${esc(o.ph || "")}"`} spellcheck="false"></label>`;
   const pill = (c) => c ? `<span class="pill up-done">Set up</span>` : `<span class="pill">Not set up</span>`;
-  $("adminBody").innerHTML = `
+  const forms = {
+    cw: () => `
     <div class="card"><div class="row"><h2>ConnectWise PSA</h2>${pill(r.cw.configured)}</div>
       <p class="small muted">Import companies as TikManager clients, or link the clients you already have. Create an API member
         (System > Members > API Members) with a read-only security role, then generate its keys. The client ID comes from developer.connectwise.com.</p>
@@ -1140,7 +1216,8 @@ async function adminIntegrations() {
         <label class="chk"><input type="checkbox" id="cwActive" ${r.cw.active_only !== "0" ? "checked" : ""}> Active only</label><span class="spacer"></span>
         <button class="btn" type="button" id="cwLoad">Refresh from PSA</button></div>
         <div class="cw-types" id="cwTypes"></div><div id="cwBody"><p class="muted small">Loading companies...</p></div>` : ""}
-    </div>
+    </div>`,
+    mail: () => `
     <div class="card" id="mailCard"><div class="row"><h2>Email</h2>${pill(r.mail.configured)}</div>
       <p class="small muted">Lets TikManager send email: alerts (Alerts > Settings), client invitations and tests.</p>
       <label class="field">Send with <select id="i_mail_provider"><option value="graph">Microsoft 365 (recommended for Microsoft 365)</option><option value="smtp">SMTP server</option></select></label>
@@ -1155,14 +1232,16 @@ async function adminIntegrations() {
           <label class="field">Encryption <select id="i_mail_security"><option value="starttls">STARTTLS (port 587)</option><option value="tls">TLS (port 465)</option><option value="none">None (local relay only)</option></select></label>
           ${field("mail", "username", "User name")}${field("mail", "password", "Password", { secret: true })}</div></div>
       <div class="actions"><button class="btn primary" type="button" data-isave="mail">Save</button><button class="btn" type="button" data-itest="mail">Send a test to me</button>
-        <span class="status" id="iStatus_mail"></span></div></div>
+        <span class="status" id="iStatus_mail"></span></div></div>`,
+    github: () => `
     <div class="card"><div class="row"><h2>GitHub script library</h2>${r.github.configured ? `<span class="pill up-done">Sharing set up</span>` : `<span class="pill">Browse only</span>`}</div>
       <p class="small muted">The community library of RouterOS scripts (Tasks > Scripts > Community library). Browsing needs no account. To <b>share</b> scripts
         (as pull requests the library's owner reviews), save a GitHub token: a <b>classic</b> token with only the <span class="mono">public_repo</span> scope
         (github.com > Settings > Developer settings > Personal access tokens > Tokens (classic)).</p>
       <div class="grid2">${field("github", "library", "Library repository", { ph: "astukestarr/routeros-scripts" })}${field("github", "token", "GitHub token", { secret: true })}</div>
       <div class="actions"><button class="btn primary" type="button" data-isave="github">Save</button><button class="btn" type="button" data-itest="github">Test</button>
-        <span class="status" id="iStatus_github"></span></div></div>
+        <span class="status" id="iStatus_github"></span></div></div>`,
+    itg: () => `
     <div class="card"><div class="row"><h2>IT Glue</h2>${pill(r.itg.configured)}</div>
       <p class="small muted">Document every router in IT Glue as a configuration (name, model, serial, WAN IP, RouterOS version and a link back here).
         Create the key under Account > Settings > API Keys - leave "Password access" off.</p>
@@ -1171,17 +1250,25 @@ async function adminIntegrations() {
       <div class="actions"><button class="btn primary" type="button" data-isave="itg">Save</button><button class="btn" type="button" data-itest="itg">Test connection</button>
         <span class="status" id="iStatus_itg"></span></div>
       ${r.itg.configured ? `<div id="itgBody"><p class="muted small">Loading IT Glue organizations...</p></div>` : ""}
-    </div>`;
+    </div>`,
+  };
+  const [cls, label] = integState(x, r);
+  $("adminBody").innerHTML = `<div class="integ-back"><button class="linkish" type="button" id="integBack">← All integrations</button></div>
+    <div class="integ-detail-head"><span class="integ-logo" id="integLogo">${integInitials(x.name)}</span><div><h2>${esc(x.name)}</h2><div class="muted small">${esc(x.about)}</div></div>
+      <span class="spacer"></span><span class="integ-status ${cls}">${esc(label)}</span></div>
+    <div class="integ-detail-body">${forms[kind]()}</div>`;
+  $("integLogo").style.background = x.color;
+  $("integBack").addEventListener("click", () => { intView.open = null; adminIntegrations(); });
   const say = (kind, msg, ok) => { $(`iStatus_${kind}`).textContent = msg; $(`iStatus_${kind}`).className = `status ${ok ? "ok" : "err"}`; };
   document.querySelectorAll("[data-isave]").forEach((b) => b.addEventListener("click", async () => {
     const kind = b.dataset.isave, body = {};
     document.querySelectorAll(`[id^="i_${kind}_"]`).forEach((el) => { body[el.id.slice(kind.length + 3)] = el.value; });
-    try { await post(`/api/integrations/${kind}`, body); await adminIntegrations(); say(kind, "Saved.", true); } catch (e) { say(kind, e.message); }
+    try { await post(`/api/integrations/${kind}`, body); intView.result[kind] = { ok: true, msg: "Saved." }; await adminIntegrations(); say(kind, "Saved.", true); } catch (e) { say(kind, e.message); }
   }));
   document.querySelectorAll("[data-itest]").forEach((b) => b.addEventListener("click", async () => {
     const kind = b.dataset.itest;
     say(kind, "Testing...", true);
-    try { const x = await post(`/api/integrations/${kind}/test`); say(kind, x.detail, x.ok); } catch (e) { say(kind, e.message); }
+    try { const x = await post(`/api/integrations/${kind}/test`); intView.result[kind] = { ok: x.ok, msg: x.detail }; say(kind, x.detail, x.ok); } catch (e) { intView.result[kind] = { ok: false, msg: e.message }; say(kind, e.message); }
   }));
   if ($("i_mail_provider")) {   // Email card: show the fields for the chosen way of sending
     $("i_mail_provider").value = r.mail.provider || "graph";

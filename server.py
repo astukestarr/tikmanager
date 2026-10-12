@@ -451,7 +451,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/integrations":
             self.require(tech=True, admin=True)
             return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"), "mail": integ.public("mail"),
-                              "itg_last_sync": json.loads(db.setting("itg_last_sync") or "null"), "itg_sync": integ.sync_state})
+                              "itg_last_sync": json.loads(db.setting("itg_last_sync") or "null"), "itg_sync": integ.sync_state,
+                              # set up elsewhere, shown on the Integrations page too
+                              "teams": {"configured": integ.configured("teams")}, "webhooks": {"count": len(alerts.webhooks.public())},
+                              "offsite": {"configured": integ.configured("offsite"), "last": offsite.last()},
+                              "entra": {"configured": bool(settings.entra_configured)}})
         if path == "/api/integrations/cw/companies":   # PSA companies next to the TikManager clients they are linked to
             self.require(tech=True, admin=True)
             try:
