@@ -1286,8 +1286,8 @@ async function integDetail(r, kind) {
     $("i_mail_provider").addEventListener("change", mailKind);
     mailKind();
   }
-  if (r.cw.configured) loadCw(false);
-  if (r.itg.configured) loadItg(r, false);
+  if (kind === "cw" && r.cw.configured) loadCw(false);   // only the open integration's lists
+  if (kind === "itg" && r.itg.configured) loadItg(r, false);
 }
 
 // Which ConnectWise company types count as customers: saved on the server; first time, everything except the usual
