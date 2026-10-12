@@ -221,6 +221,9 @@ router that's already adopted - for example after a failed attempt. On the route
 `tikmanager` (the private key never leaves the router), a `tikmanager` user that may only log in from TikManager, a
 firewall rule letting TikManager in through the tunnel, web (REST) access for TikManager and log forwarding.
 
+**Tags and notes** (router page > Settings): tag routers (*core*, *poe-switch* ...) to filter the Routers page and to
+target Tasks by tag; notes (technicians only) hold rack positions, ISP contracts and the like, and are searchable.
+
 **Changing a router** (bottom of its page, **Manage**): set its identity on the router, its name and site in
 TikManager, or move it to another client (its backups and history move with it).
 

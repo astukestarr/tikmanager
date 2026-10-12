@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.31.0 - 2026-10-12
+
+- **Tags and notes** for routers (router page > Settings > **Tags & notes**): tags such as *core*, *poe-switch* or
+  *tower-north* (suggested from the ones already in use), and free-text notes - rack position, ISP contract, quirks.
+  - Tags show under the router's name in the list and on its page; the Routers page has a **tag filter**, and its
+    search also finds tags and notes. The Upgrades search finds tags too.
+  - **Tasks can target tags** - a task for *core* runs on whatever routers carry that tag when it runs.
+  - Notes are for technicians only: clients don't see them. Changes are audited.
+
 ## 1.30.0 - 2026-10-12
 
 - **Restart detection**: a router that restarts is noticed from its uptime going back - also when it was back before

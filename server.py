@@ -412,10 +412,13 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state, d.last_reboot, d.last_reboot_why
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state, d.last_reboot, d.last_reboot_why, d.tags, d.notes
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
             for r in rows:
                 r["isp_state"] = json.loads(r.get("isp_state") or "{}")
+                r["tags"] = json.loads(r.get("tags") or "[]")
+                if s["kind"] != "tech":
+                    r.pop("notes", None)   # notes are TikManager-internal
             return self.json(rows)
         if path == "/api/sites":   # site map: each adopted router with its WAN address and LAN networks
             s = self.require()
@@ -506,9 +509,12 @@ class Handler(BaseHTTPRequestHandler):
             groups = db.q("SELECT * FROM router_groups ORDER BY name COLLATE NOCASE")
             for g in groups:
                 g["device_ids"] = [r["device_id"] for r in db.q("SELECT device_id FROM group_members WHERE group_id=?", (g["id"],))]
-            routers = db.q("""SELECT d.id, d.name, d.org_id, o.name AS org, d.online, d.model FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
+            routers = db.q("""SELECT d.id, d.name, d.org_id, o.name AS org, d.online, d.model, d.tags FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                               WHERE d.state='adopted' ORDER BY o.name, d.name""")
-            return self.json({"groups": groups, "routers": routers, "orgs": db.q("SELECT id, name FROM orgs ORDER BY name")})
+            for r in routers:
+                r["tags"] = json.loads(r["tags"] or "[]")
+            tags = sorted({t for r in routers for t in r["tags"]}, key=str.lower)
+            return self.json({"groups": groups, "routers": routers, "tags": tags, "orgs": db.q("SELECT id, name FROM orgs ORDER BY name")})
         if path == "/api/tasks":
             self.require(tech=True)
             rows = db.q("SELECT t.*, s.name AS script_name FROM tasks t LEFT JOIN scripts s ON s.id = t.script_id ORDER BY t.enabled DESC, t.next_run IS NULL, t.next_run, t.name")
@@ -533,7 +539,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/upgrades":   # routers with their versions, plus scheduled / recent upgrade jobs
             s = self.require(tech=True)
             routers = db.q("""SELECT d.id, d.org_id, o.name AS org, d.name, d.model, d.online, d.version, d.ros_channel, d.ros_latest, d.ros_checked,
-                              d.fw_current, d.fw_upgrade, d.thumb_slug, d.sec_target, d.cve_n, d.cve_max FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
+                              d.fw_current, d.fw_upgrade, d.thumb_slug, d.sec_target, d.cve_n, d.cve_max, d.tags FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                               WHERE d.state='adopted' ORDER BY o.name, d.name""")
             jobs = db.q("""SELECT u.*, d.name AS device, o.name AS org FROM upgrades u JOIN devices d ON d.id = u.device_id
                            LEFT JOIN orgs o ON o.id = u.org_id
@@ -700,6 +706,7 @@ class Handler(BaseHTTPRequestHandler):
             d["health"] = json.loads(d.get("health") or "{}")
             d["isp_state"] = json.loads(d.get("isp_state") or "{}")
             d["isp_ifaces"] = json.loads(d.get("isp_ifaces") or "null")
+            d["tags"] = json.loads(d.get("tags") or "[]")
             org = db.one("SELECT name FROM orgs WHERE id=?", (d["org_id"],)) if d["org_id"] else None
             d["org"] = org["name"] if org else ""
             d["upgrade"] = db.one("""SELECT id, status, step, scheduled_at, channel, firmware, created_by FROM upgrades
@@ -934,6 +941,19 @@ class Handler(BaseHTTPRequestHandler):
                    (name or d["identity"] or d["name"], 1 if name else 0, str(b.get("site") if "site" in b else d["site"])[:120], d["id"]))
             db.audit(s["email"], "router renamed", f"{d['name']} -> {name or d['identity']}", self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/meta", path):   # tags and notes (technicians)
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            b = self.body()
+            tags = []
+            for x in b.get("tags") or []:
+                x = re.sub(r"[^\w .+-]", "", str(x)).strip()[:32]
+                if x and x.lower() not in {t.lower() for t in tags}:
+                    tags.append(x)
+            notes = str(b.get("notes") or "")[:4000]
+            db.run("UPDATE devices SET tags=?, notes=? WHERE id=?", (json.dumps(tags[:20]) if tags else None, notes, d["id"]))
+            db.audit(s["email"], "router tags / notes", d["name"], self.client_ip(), detail=f"tags: {', '.join(tags) or '-'}", org_id=d["org_id"])
+            return self.json({"ok": True, "tags": tags[:20]})
         if m := re.fullmatch(r"/api/devices/(\d+)/isp", path):   # which interfaces are the router's internet links ([] = automatic)
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))
@@ -1243,13 +1263,14 @@ class Handler(BaseHTTPRequestHandler):
             action = b.get("action") if b.get("action") in ("script", "upgrade") else "script"
             kind = b.get("kind") if b.get("kind") in ("once", "daily", "weekly", "hourly") else None
             targets = b.get("targets") or {}
-            targets = {"all": bool(targets.get("all")), **{k: [int(x) for x in targets.get(k) or [] if str(x).isdigit()][:1000] for k in ("orgs", "groups", "devices")}}
+            targets = {"all": bool(targets.get("all")), **{k: [int(x) for x in targets.get(k) or [] if str(x).isdigit()][:1000] for k in ("orgs", "groups", "devices")},
+                       "tags": [str(x)[:32] for x in targets.get("tags") or []][:50]}
             if not name or not kind:
                 raise HttpError(400, "Give the task a name and a schedule.")
             script_id = int(b.get("script_id") or 0) if action == "script" else None
             if action == "script" and not db.one("SELECT 1 FROM scripts WHERE id=?", (script_id,)):
                 raise HttpError(400, "Pick the script to run.")
-            if not (targets["all"] or targets["orgs"] or targets["groups"] or targets["devices"]):
+            if not (targets["all"] or targets["orgs"] or targets["groups"] or targets["devices"] or targets["tags"]):
                 raise HttpError(400, "Pick which routers it runs on.")
             at_time = str(b.get("at_time") or "02:00")
             if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at_time):

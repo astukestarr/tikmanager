@@ -115,6 +115,8 @@ function secCard(d) {   // router page, Overview tab
       <p class="small muted">From NIST's National Vulnerability Database, matched on the RouterOS version. Informational - NVD ranges are sometimes imprecise.</p>` : ""}</div>`;
 }
 
+const tagPills = (tags) => (tags || []).map((t) => `<span class="pill tag">${esc(t)}</span>`).join(" ");
+
 function stateDot(d) {
   if (d.state !== "adopted") return `<span class="dot pending"></span>Waiting for approval`;
   return d.online ? `<span class="dot on"></span>Online` : `<span class="dot off"></span>Offline`;
@@ -246,7 +248,7 @@ function table(rows, cols, sort) {
     : c === "version" ? esc((d.version || "").replace(" (stable)", ""))
     : c === "age" ? `<span class="nowrap"${d.lc_made ? ` title="Made ${esc(lcMade(d))}"` : ""}>${esc(lcAge(d))}</span> ${lcFlag(d)}`
     : c === "org" ? (d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`)
-    : c === "name" ? `${esc(d.name ?? "")}${d.dm_flagged ? ` <span class="pill dm-flag" title="RouterOS flagged it as possibly compromised">Flagged</span>` : ""}` : esc(d[c] ?? "");
+    : c === "name" ? `${esc(d.name ?? "")}${d.dm_flagged ? ` <span class="pill dm-flag" title="RouterOS flagged it as possibly compromised">Flagged</span>` : ""}${(d.tags || []).length ? `<div class="tag-row">${tagPills(d.tags)}</div>` : ""}` : esc(d[c] ?? "");
   return `<div class="table-wrap"><table><thead><tr>${cols.map(th).join("")}</tr></thead><tbody>
     ${rows.map((d) => `<tr class="click" data-dev="${d.id}">${cols.map((c) => `<td>${cell(d, c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
@@ -267,12 +269,15 @@ async function routers() {
       ${isTech() ? `<select id="fOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
       <select id="fState" aria-label="Status"><option value="">Any status</option><option value="online">Online</option><option value="offline">Offline</option>
         <option value="disc">Discontinued model</option><option value="old">${LC_OLD}+ years old</option></select>
-      <input id="fText" placeholder="Search name, model, version…" aria-label="Search">
+      ${(() => { const all = [...new Set(devices.flatMap((d) => d.tags || []))].sort((a, b) => a.localeCompare(b));
+        return all.length ? `<select id="fTag" aria-label="Tag"><option value="">Any tag</option>${all.map((t) => `<option>${esc(t)}</option>`).join("")}</select>` : ""; })()}
+      <input id="fText" placeholder="Search name, model, version, notes…" aria-label="Search">
     </div><div id="list"></div></div>`;
   const draw = () => {
-    const o = $("fOrg")?.value, st = $("fState").value, t = $("fText").value.toLowerCase();
+    const o = $("fOrg")?.value, st = $("fState").value, t = $("fText").value.toLowerCase(), tag = $("fTag")?.value;
     const rows = devices.filter((d) => d.state === "adopted" && (!o || String(d.org_id) === o) && (!st || (st === "disc" ? d.lc_status === "discontinued" : st === "old" ? (lcYears(d) ?? 0) >= LC_OLD : !!d.online === (st === "online")))
-      && (!t || `${d.name} ${d.identity} ${d.model} ${d.version} ${d.site} ${d.org}`.toLowerCase().includes(t)));
+      && (!tag || (d.tags || []).includes(tag))
+      && (!t || `${d.name} ${d.identity} ${d.model} ${d.version} ${d.site} ${d.org} ${(d.tags || []).join(" ")} ${d.notes || ""}`.toLowerCase().includes(t)));
     $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), isTech() ? ["thumb", "state", "org", "name", "site", "model", "age", "version", "uptime", "cpu", "last_seen"] : ["thumb", "state", "name", "site", "model", "age", "version", "uptime", "cpu", "last_seen"], routerSort)
       : `<p class="muted">No routers match.</p>`;
     bindRows();
@@ -283,7 +288,7 @@ async function routers() {
       draw();
     }));
   };
-  ["fOrg", "fState", "fText"].forEach((id) => $(id)?.addEventListener("input", draw));
+  ["fOrg", "fState", "fText", "fTag"].forEach((id) => $(id)?.addEventListener("input", draw));
   draw();
   bindPending();
   $("adoptBtn")?.addEventListener("click", showAdoption);
@@ -340,6 +345,8 @@ async function router(id) {
       <div class="dev-head">${thumbImg(d, "thumb-lg")}</div>
       <div class="dev-name">${esc(d.name)}</div>
       <div class="dev-sub">${stateDot(d)}${d.state === "adopted" ? ` <span class="muted small">· seen ${ago(d.last_seen)}</span>` : ""}</div>
+      ${(d.tags || []).length ? `<div class="tag-row dev-tags">${tagPills(d.tags)}</div>` : ""}
+      ${isTech() && d.notes ? `<div class="dev-notes small"><b>Notes</b><div>${esc(d.notes)}</div></div>` : ""}
       ${d.state !== "adopted" ? `<p class="small">Registered ${ago(d.first_seen)} from <span class="mono">${esc(d.public_ip || "")}</span>. Approve it to pick its client and start monitoring.</p>
         ${canWrite() ? `<button class="btn primary wide" type="button" data-approve="${d.id}">Approve</button>` : ""}` : ""}
       <div class="kvs">
@@ -422,6 +429,11 @@ async function router(id) {
       ${adopted && tab === "firewall" ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
+      ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Tags &amp; notes</h2>
+        <label class="field">Tags (comma-separated - e.g. core, poe-switch, tower-north) <input id="mTags" value="${esc((d.tags || []).join(", "))}" list="mTagList" spellcheck="false"></label>
+        <datalist id="mTagList"></datalist>
+        <label class="field">Notes (technicians only - clients don't see them) <textarea id="mNotes" rows="4" maxlength="4000">${esc(d.notes || "")}</textarea></label>
+        <div class="actions"><button class="btn primary" type="button" id="mSave">Save</button><span class="status" id="mMetaStatus"></span></div></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? ispSettings(d) : ""}
       ${on("events") ? `<div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>` : ""}
       ${canWrite() && on("settings") ? `<div class="card"><h2>Manage</h2>
@@ -483,6 +495,15 @@ async function router(id) {
   if ($("bkCard")) loadBackups(d).then(() => { if (rView.backupNow) { rView.backupNow = false; $("bkNow")?.click(); } });
   if ($("dhcpCard")) loadDhcp(d);
   if ($("wlCard")) loadWireless(d);
+  if ($("mSave")) {
+    api("/api/devices").then((all) => { $("mTagList").innerHTML = [...new Set(all.flatMap((x) => x.tags || []))].map((t) => `<option value="${esc(t)}">`).join(""); }).catch(() => {});
+    $("mSave").addEventListener("click", async () => {
+      try {
+        await post(`/api/devices/${d.id}/meta`, { tags: $("mTags").value.split(",").map((x) => x.trim()).filter(Boolean), notes: $("mNotes").value });
+        router(d.id);
+      } catch (e) { $("mMetaStatus").textContent = e.message; $("mMetaStatus").className = "status err"; }
+    });
+  }
   $("ispSave")?.addEventListener("click", async () => {
     const ifaces = [...document.querySelectorAll("[data-isp]:checked")].map((c) => c.dataset.isp);
     try { await post(`/api/devices/${d.id}/isp`, { ifaces: $("ispAuto").checked ? [] : ifaces }); $("ispStatus").textContent = "Saved - shown after the next poll (about a minute)."; $("ispStatus").className = "status ok"; }
@@ -1547,7 +1568,7 @@ async function upgradesView() {
   const draw = () => {
     const q = upView.q.toLowerCase();
     shown = r.routers.filter((d) => (!upView.org || String(d.org_id) === upView.org) && (!upView.only || hasUpdate(d) || fwUpdate(d)) &&
-      (!q || [d.name, d.org, d.model, d.version].some((v) => (v || "").toLowerCase().includes(q))));
+      (!q || [d.name, d.org, d.model, d.version, ...(d.tags || [])].some((v) => (v || "").toLowerCase().includes(q))));
     $("upRows").innerHTML = shown.map((d) => `<tr>${canWrite() ? `<td><input type="checkbox" data-sel="${d.id}" ${upView.sel.has(d.id) ? "checked" : ""} aria-label="Select ${esc(d.name)}"></td>` : ""}
       <td>${thumbImg(d, "thumb-sm")}</td>
       <td><a href="#router/${d.id}"><b>${esc(d.name)}</b></a><div class="small muted"><span class="dot ${d.online ? "on" : "off"}"></span>${esc(d.org || "Unassigned")}</div></td>
@@ -1598,6 +1619,7 @@ function targetText(tg, ref) {
   const parts = [];
   if (tg.orgs?.length) parts.push(tg.orgs.map((id) => ref.orgs.find((o) => o.id === id)?.name || "?").join(", "));
   if (tg.groups?.length) parts.push(tg.groups.map((id) => `group ${ref.groups.find((g) => g.id === id)?.name || "?"}`).join(", "));
+  if (tg.tags?.length) parts.push(tg.tags.map((t) => `tag ${t}`).join(", "));
   if (tg.devices?.length) parts.push(tg.devices.length <= 3 ? tg.devices.map((id) => ref.routers.find((r) => r.id === id)?.name || "?").join(", ") : `${tg.devices.length} routers`);
   return parts.join(" · ");
 }
@@ -1670,7 +1692,8 @@ function taskEditor(t, ref, scripts, preset = {}) {
     <h3>Runs on</h3>
     <label class="chk"><input type="checkbox" id="tAll" ${tg.all ? "checked" : ""}> All routers</label>
     <div id="tPick"><div class="grid2"><label class="field">Clients <select id="tOrgs" multiple size="4">${ref.orgs.map((x) => `<option value="${x.id}" ${(tg.orgs || []).includes(x.id) ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-      <label class="field">Groups <select id="tGroups" multiple size="4">${ref.groups.map((g) => `<option value="${g.id}" ${(tg.groups || []).includes(g.id) ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label></div>
+      <label class="field">Groups <select id="tGroups" multiple size="4">${ref.groups.map((g) => `<option value="${g.id}" ${(tg.groups || []).includes(g.id) ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label>
+      ${(ref.tags || []).length ? `<label class="field">Tags <select id="tTags" multiple size="4">${ref.tags.map((x) => `<option ${(tg.tags || []).includes(x) ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>` : ""}</div>
       <p class="small muted">Ctrl-click to pick several. Plus individual routers:</p><div id="tRouters" class="rp"></div></div>
     <h3>When</h3>
     <div class="row"><select id="tKind"><option value="once">Once</option><option value="daily">Every day</option><option value="weekly">Every week</option><option value="hourly">Every N hours</option></select>
@@ -1706,7 +1729,7 @@ function taskEditor(t, ref, scripts, preset = {}) {
   $("tSave").addEventListener("click", async () => {
     const k = $("tKind").value, onceAt = document.querySelector("[name=tOnceWhen]:checked").value === "at";
     const body = { id: t?.id, name: $("tName").value, action: $("tAction").value, script_id: $("tScript").value, channel: $("tChan").value, firmware: $("tFw").checked,
-      targets: { all: $("tAll").checked, orgs: [...$("tOrgs").selectedOptions].map((x) => +x.value), groups: [...$("tGroups").selectedOptions].map((x) => +x.value), devices: pick() },
+      targets: { all: $("tAll").checked, orgs: [...$("tOrgs").selectedOptions].map((x) => +x.value), groups: [...$("tGroups").selectedOptions].map((x) => +x.value), tags: $("tTags") ? [...$("tTags").selectedOptions].map((x) => x.value) : [], devices: pick() },
       kind: k, run_at: k === "once" && onceAt ? new Date($("tAt").value).getTime() / 1000 : null, at_time: $("tHHMM").value,
       days: [...document.querySelectorAll("#tDays input:checked")].map((x) => +x.value), every_hours: $("tEvery").value,
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone, backup_first: $("tBackup").checked, offline: $("tOffline").value, enabled: t ? !!t.enabled : true };

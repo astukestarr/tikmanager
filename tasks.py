@@ -73,7 +73,7 @@ class Tasks:
 
     # --- targets ----------------------------------------------------------------------------------------------
     def resolve(self, targets):
-        """Adopted routers matching {all, orgs, groups, devices}."""
+        """Adopted routers matching {all, orgs, groups, tags, devices}."""
         t = targets or {}
         if t.get("all"):
             return self.db.q("SELECT * FROM devices WHERE state='adopted' ORDER BY name")
@@ -82,6 +82,11 @@ class Tasks:
             ids |= {r["id"] for r in self.db.q("SELECT id FROM devices WHERE state='adopted' AND org_id=?", (int(o),))}
         for g in t.get("groups") or []:
             ids |= {r["device_id"] for r in self.db.q("SELECT device_id FROM group_members WHERE group_id=?", (int(g),))}
+        want = {str(x).lower() for x in t.get("tags") or []}
+        if want:
+            for r in self.db.q("SELECT id, tags FROM devices WHERE state='adopted' AND tags IS NOT NULL"):
+                if want & {x.lower() for x in json.loads(r["tags"] or "[]")}:
+                    ids.add(r["id"])
         if not ids:
             return []
         return self.db.q(f"SELECT * FROM devices WHERE state='adopted' AND id IN ({','.join('?' * len(ids))}) ORDER BY name", tuple(ids))

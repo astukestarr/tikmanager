@@ -466,6 +466,9 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .pill.cve-med { border-color: var(--warn); color: var(--warn); }
 .sec-card { border-left: 5px solid var(--warn); }
 .pill.ab-on { border-color: var(--good); color: var(--good); }
+.pill.tag { font-size: 11px; padding: 0 7px; background: var(--accent-soft, var(--bg)); }
+.tag-row { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px; } .dev-tags { justify-content: center; margin: 6px 0; }
+.dev-notes { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 8px; margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .isp-pick { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0; }
 .hw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
 .hw-tile { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; border-top: 3px solid var(--border); min-width: 0; }
