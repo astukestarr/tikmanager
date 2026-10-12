@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.32.0 - 2026-10-12
+
+- **Webhooks** (Alerts page, administrators): every alert - when it opens and when it clears - to any number of
+  endpoints, each optionally limited to some kinds of alert:
+  - **Slack**, **Discord**, **ntfy** (push notifications to your phone), **TikManager JSON**, or **Custom** - your own
+    method, headers and body template with {{placeholders}} (title, detail, status, kind, router, client, link, time,
+    summary), escaped for JSON when the body is JSON, so an SMS gateway or another ticket system can be driven.
+  - Optional **signing**: X-TikManager-Signature: sha256=HMAC(timestamp.body) with X-TikManager-Timestamp.
+  - **Test** button and the last result per webhook. URLs, secrets and header values are stored encrypted and never
+    shown again.
+  - Only https:// to internet addresses - a webhook can't be pointed at this server or anything on a LAN.
+
 ## 1.31.0 - 2026-10-12
 
 - **Tags and notes** for routers (router page > Settings > **Tags & notes**): tags such as *core*, *poe-switch* or

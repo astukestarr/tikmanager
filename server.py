@@ -40,6 +40,7 @@ from mailer import Mailer, MailError
 from lifecycle import Lifecycle
 from rossec import RosSecurity
 from autoblock import AutoBlock
+from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -108,6 +109,7 @@ wgport = WgPort(db, settings, poller.client, sysconf)   # moving the WireGuard p
 reach.wgport = wgport
 mailer = Mailer(integ, settings)   # email: alerts, invitations, tests
 alerts.mailer = mailer
+alerts.webhooks = Webhooks(db, backups.vault)   # alerts to Slack, Discord, ntfy, JSON or custom endpoints
 lifecycle = Lifecycle(db, settings.data_dir, thumbs)   # router age and discontinued models (from mikrotik.com)
 rossec = RosSecurity(db, settings.data_dir)   # known CVEs and missed MikroTik security releases per router
 autoblock = AutoBlock(db, settings, poller.client, secev)   # addresses guessing router passwords: blocked on every router
@@ -388,6 +390,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/lifecycle":   # replacement suggestions per router model
             self.require(tech=True, admin=True)
             return self.json({"models": lifecycle.models()})
+        if path == "/api/admin/webhooks":
+            self.require(tech=True, admin=True)
+            from alerts import KINDS as ALERT_KINDS
+            return self.json({"hooks": alerts.webhooks.public(), "formats": WEBHOOK_FORMATS, "placeholders": WEBHOOK_PLACEHOLDERS,
+                              "kinds": {k: v[0] for k, v in ALERT_KINDS.items()}})
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)
             return self.json({**updates.info(), "observatory": observatory.info(), "reachability": reach.info()})
@@ -1549,6 +1556,20 @@ class Handler(BaseHTTPRequestHandler):
                 changed.append("entra_client_secret")
             db.audit(s["email"], "settings changed", ip=self.client_ip(), detail=", ".join(changed))   # names only, never values
             return self.json({"ok": True, **saved})
+        if path in ("/api/admin/webhooks", "/api/admin/webhooks/delete"):
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            from alerts import KINDS as ALERT_KINDS
+            try:
+                if path.endswith("/delete"):
+                    alerts.webhooks.delete(str(b.get("id") or ""))
+                    db.audit(s["email"], "webhook deleted", str(b.get("id") or ""), self.client_ip())
+                    return self.json({"ok": True})
+                h = alerts.webhooks.save(b, ALERT_KINDS)
+            except WebhookError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "webhook saved", h["name"], self.client_ip(), detail=h["format"])
+            return self.json({"ok": True, "id": h["id"]})
         if path == "/api/security/autoblock/settings":
             s = self.require(tech=True, admin=True)
             try:

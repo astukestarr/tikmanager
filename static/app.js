@@ -2890,7 +2890,8 @@ async function alertsPage() {
       <div class="actions"><button class="btn primary" type="button" id="alSave">Save</button>
         ${a.cw_ready ? `<button class="btn" type="button" data-test="cw">Send a test ticket</button>` : ""}
         <button class="btn" type="button" data-test="teams" ${a.teams_ready ? "" : "disabled"}>Send a test to Teams</button>
-        ${a.mail_ready ? `<button class="btn" type="button" data-test="email">Send a test email</button>` : ""}<span class="status" id="alStatus"></span></div></div>` : ""}`;
+        ${a.mail_ready ? `<button class="btn" type="button" data-test="email">Send a test email</button>` : ""}<span class="status" id="alStatus"></span></div></div>` : ""}
+    ${a.can_edit && me.role === "admin" ? `<div class="card" id="whCard"><h2>Webhooks</h2><p class="muted small">Loading…</p></div>` : ""}`;
   $("main").querySelectorAll("[data-dev]").forEach((x) => x.addEventListener("click", (e) => { e.preventDefault(); go("router", x.dataset.dev); }));
   if (!a.can_edit) return;
   const status = (m, c = "") => { $("alStatus").textContent = m; $("alStatus").className = `status ${c}`; };
@@ -2924,6 +2925,68 @@ async function alertsPage() {
     status("Sending…");
     try { status((await post("/api/admin/alerts/test", { channel: b.dataset.test })).detail, "ok"); } catch (e) { status(e.message, "err"); }
   }));
+  if ($("whCard")) webhooksCard();
+}
+
+// Alerts page: webhooks to Slack, Discord, ntfy, JSON or a custom endpoint (webhooks.py)
+async function webhooksCard() {
+  const x = await api("/api/admin/webhooks");
+  if (!$("whCard")) return;
+  $("whCard").innerHTML = `<div class="row"><h2>Webhooks</h2><span class="spacer"></span><button class="btn" type="button" id="whAdd">Add webhook</button></div>
+    <p class="small muted">Each alert - when it opens and when it clears - to Slack, Discord, ntfy (push to your phone), TikManager JSON or any HTTPS endpoint in your own format
+      (an SMS gateway, a ticket system ...). Only https:// to internet addresses.</p>
+    ${x.hooks.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Format</th><th>Sends to</th><th>Alerts</th><th>Last</th><th></th></tr></thead><tbody>
+      ${x.hooks.map((h) => `<tr><td>${esc(h.name)}${h.on ? "" : ` <span class="pill">off</span>`}</td><td>${esc(x.formats[h.format] || h.format)}</td><td class="mono small">${esc(h.host)}</td>
+        <td class="small">${h.kinds.length ? h.kinds.map((k) => esc((x.kinds[k] || k).split(" (")[0])).join(", ") : "all"}</td>
+        <td class="small">${h.last ? `<span class="status ${h.last.ok ? "ok" : "err"}">${esc(h.last.msg)}</span> <span class="muted">${ago(h.last.at)}</span>` : `<span class="muted">—</span>`}</td>
+        <td class="nowrap"><button class="btn" type="button" data-whtest="${h.id}">Test</button> <button class="btn" type="button" data-whedit="${h.id}">Edit</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted small">No webhooks yet.</p>`}<p class="status small" id="whStatus"></p>`;
+  const say = (m, ok) => { $("whStatus").textContent = m; $("whStatus").className = `status small ${ok ? "ok" : "err"}`; };
+  $("whAdd").addEventListener("click", () => webhookDialog(x, null));
+  $("whCard").querySelectorAll("[data-whedit]").forEach((b) => b.addEventListener("click", () => webhookDialog(x, x.hooks.find((h) => h.id === b.dataset.whedit))));
+  $("whCard").querySelectorAll("[data-whtest]").forEach((b) => b.addEventListener("click", async () => {
+    say("Sending…", true);
+    try { say((await post("/api/admin/alerts/test", { channel: `webhook:${b.dataset.whtest}` })).detail, true); } catch (e) { say(e.message); }
+    webhooksCard();
+  }));
+}
+function webhookDialog(x, h) {
+  const v = h || { name: "", format: "slack", on: true, kinds: [], method: "POST", body: "", content_type: "application/json", header_names: [] };
+  dialog(`<h2>${h ? "Edit" : "Add"} webhook</h2>
+    <div class="grid2"><label class="field">Name <input id="whName" value="${esc(v.name)}" maxlength="60"></label>
+      <label class="field">Format <select id="whFmt">${Object.entries(x.formats).map(([k, l]) => `<option value="${k}" ${v.format === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label></div>
+    <label class="field">URL ${h ? `<span class="small muted">(saved for ${esc(h.host)} - leave blank to keep)</span>` : ""}<input id="whUrl" type="password" autocomplete="off" placeholder="https://..."></label>
+    <p class="small muted wh-help" id="whHelp"></p>
+    <div id="whCustom"><div class="grid2"><label class="field">Method <select id="whMethod">${["POST", "PUT", "GET"].map((m) => `<option ${v.method === m ? "selected" : ""}>${m}</option>`).join("")}</select></label>
+      <label class="field">Content type <input id="whCtype" value="${esc(v.content_type || "application/json")}"></label></div>
+      <label class="field">Body <textarea id="whBody" rows="4" spellcheck="false" placeholder='{"to": ["+15551234567"], "text": "{{summary}}"}'>${esc(v.body || "")}</textarea></label>
+      <p class="small muted">Placeholders (also in the URL): ${x.placeholders.map((p) => `<span class="mono">{{${p}}}</span>`).join(" ")} - escaped for JSON when the content type is JSON.</p>
+      <label class="field">Headers, one "Name: value" per line ${v.header_names.length ? `<span class="small muted">(saved: ${esc(v.header_names.join(", "))} - "Name:" alone keeps a saved value)</span>` : ""}
+        <textarea id="whHeaders" rows="2" spellcheck="false">${esc(v.header_names.map((n) => `${n}:`).join("\n"))}</textarea></label></div>
+    <label class="field">Signing secret (optional) ${v.has_secret ? `<span class="small muted">(saved - leave blank to keep, or <label class="chk"><input type="checkbox" id="whSecClear"> remove</label>)</span>` : ""}
+      <input id="whSecret" type="password" autocomplete="off" placeholder="adds X-TikManager-Signature: sha256=HMAC(timestamp.body)"></label>
+    <label class="field">Which alerts (none ticked = all)<div class="wh-kinds">${Object.entries(x.kinds).map(([k, l]) => `<label class="chk"><input type="checkbox" data-whk="${k}" ${v.kinds.includes(k) ? "checked" : ""}> ${esc(l.split(" (")[0])}</label>`).join("")}</div></label>
+    <label class="chk"><input type="checkbox" id="whOn" ${v.on ? "checked" : ""}> On</label>
+    <div class="actions">${h ? `<button class="btn danger" type="button" id="whDel">Delete</button>` : ""}<span class="spacer"></span><span class="status" id="whDlgStatus"></span>
+      <button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="whSave">Save</button></div>`);
+  $("dlg").classList.add("wide");
+  const help = { slack: "Slack: an app's Incoming Webhook URL (api.slack.com > Your apps > Incoming Webhooks).", discord: "Discord: channel settings > Integrations > Webhooks > Copy Webhook URL.",
+    ntfy: "ntfy: the topic URL, e.g. https://ntfy.sh/your-secret-topic (install the ntfy app and subscribe to the same topic). For a protected topic add an Authorization header.",
+    json: "TikManager JSON: {event (alert.opened / alert.resolved / test), status, kind, title, detail, router, router_id, client, link, time, source}.", custom: "Your own method, headers and body." };
+  const mode = () => { const f = $("whFmt").value; $("whHelp").textContent = help[f]; $("whCustom").classList.toggle("hidden", f !== "custom"); };
+  $("whFmt").addEventListener("change", mode); mode();
+  $("whSave").addEventListener("click", async () => {
+    const b = { id: h ? h.id : "", name: $("whName").value, format: $("whFmt").value, url: $("whUrl").value, on: $("whOn").checked,
+      kinds: [...document.querySelectorAll("[data-whk]:checked")].map((c) => c.dataset.whk), secret: $("whSecret").value, secret_clear: $("whSecClear")?.checked || false };
+    if (b.format === "custom") Object.assign(b, { method: $("whMethod").value, content_type: $("whCtype").value, body: $("whBody").value, headers: $("whHeaders").value });
+    else if (h) b.headers = v.header_names.map((n) => `${n}:`).join("\n");
+    try { await post("/api/admin/webhooks", b); $("dlg").close(); webhooksCard(); }
+    catch (e) { $("whDlgStatus").textContent = e.message; $("whDlgStatus").className = "status err"; }
+  });
+  $("whDel")?.addEventListener("click", async (e) => {
+    if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
+    await post("/api/admin/webhooks/delete", { id: h.id }); $("dlg").close(); webhooksCard();
+  });
 }
 
 // --- Security: sign-in attempts on TikManager, its Ubuntu server and the routers ----------------------------------

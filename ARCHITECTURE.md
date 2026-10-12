@@ -86,6 +86,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `vpn.py` / `vpninv.py` | site-to-site WireGuard VPNs it builds / VPNs already on routers (read-only) |
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
+| `webhooks.py` | alert webhooks: Slack / Discord / ntfy / JSON / custom templates, HMAC signing, public-HTTPS-only URLs (encrypted at rest) |
 | `autoblock.py` | auto-block: router sign-in failures per address across the fleet -> `tikmanager-blocklist` on every router (timeout); `autoblock`, `autoblock_push` tables |
 | `rossec.py` | RouterOS security: MikroTik changelogs (security releases, release notes) and NVD CVEs per router; `sec_*` / `cve_*` device columns |
 | `lifecycle.py` | router age (factory firmware's release date) and discontinued models (mikrotik.com product page); `lc_*` device columns |

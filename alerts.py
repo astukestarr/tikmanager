@@ -1,4 +1,4 @@
-"""Alerts: problems TikManager notices, sent as ConnectWise tickets and / or Teams messages - opened when a problem starts
+"""Alerts: problems TikManager notices, sent as ConnectWise tickets, Teams messages, email and webhooks - opened when a problem starts
 and closed when it clears.
 
 - Every minute the conditions below are checked. A problem gets one row in `alerts` (key e.g. "offline:12") for as long
@@ -259,6 +259,7 @@ class Alerts:
                 self.integ.teams_post(self._card(a["title"], a["detail"] or "", False, link, client))
             except IntegrationError as e:
                 teams_note = f"Teams message not sent: {e}"
+        self._hooks(a, "open", a["detail"])
         mailer = getattr(self, "mailer", None)
         if cfg["email"]["on"] and mailer and mailer.configured():
             try:
@@ -268,6 +269,15 @@ class Alerts:
             except Exception as e:  # noqa: BLE001 - MailError
                 teams_note = ((teams_note + " · ") if teams_note else "") + f"Email not sent: {e}"[:200]
         self.db.run("UPDATE alerts SET cw_note=?, teams_note=? WHERE id=?", (cw_note, teams_note, a["id"]))
+
+    def _hooks(self, a, status, detail):
+        wh = getattr(self, "webhooks", None)
+        if not wh:
+            return
+        dev = self.db.one("SELECT d.name, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.id=?", (a["device_id"],)) if a.get("device_id") else None
+        wh.send_all({"status": status, "kind": a.get("kind") or "", "title": a["title"], "detail": detail or "", "router": (dev or {}).get("name", ""),
+                     "router_id": a.get("device_id"), "client": (dev or {}).get("org") or "", "link": self._link(a.get("device_id")),
+                     "time": time.strftime("%Y-%m-%d %H:%M")})
 
     def notify_resolved(self, cfg, a):
         mins = int((time.time() - a["opened_at"]) // 60)
@@ -288,6 +298,7 @@ class Alerts:
                 mailer.send(cfg["email"]["to"], f"[TikManager] Resolved: {a['title']}"[:200], f"{text}\n\n{self._link(a['device_id'])}")
             except Exception:  # noqa: BLE001
                 pass
+        self._hooks(a, "resolved", text)
 
     def run_once(self):
         with self.lock:
@@ -332,6 +343,12 @@ class Alerts:
                 raise ValueError("Save who alert emails go to first.")
             mailer.send(cfg["email"]["to"], "[TikManager] Test alert", a["detail"])
             return f"Sent to {cfg['email']['to']}."
+        if channel.startswith("webhook:"):
+            from webhooks import WebhookError
+            try:
+                return self.webhooks.test(channel.split(":", 1)[1], self._link(None))
+            except WebhookError as e:
+                raise ValueError(str(e)) from None
         if channel == "cw":
             if not cfg["cw"]["board_id"] or not cfg["cw"]["company_id"]:
                 raise ValueError("Save a board and a default company first.")
