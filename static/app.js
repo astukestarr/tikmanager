@@ -929,6 +929,59 @@ async function loadItg(r, refresh) {
   };
   $("itgRefresh").onclick = () => loadItg(r, true);
 }
+// --- the WireGuard port routers connect to, and moving it without stranding routers (wgport.py) -----------------------
+async function wgPortCard() {
+  const el = $("wgCard");
+  if (!el) return;
+  let w;
+  try { w = await api("/api/admin/wgport"); } catch (e) { el.innerHTML = `<h2>WireGuard port</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  const h = w.helper || {};
+  const left = w.routers.filter((r) => r.port !== w.port);
+  const moving = !!w.old;
+  el.innerHTML = `<div class="row"><h2>WireGuard port</h2><span class="spacer"></span><span class="pill">UDP ${w.port}</span></div>
+    ${moving ? `
+      <p>Moving routers from <b>UDP ${w.old}</b> to <b>UDP ${w.port}</b>: <b>${w.moved} of ${w.total}</b> done.
+        ${w.relay ? "The old port is relayed to the new one meanwhile, so nobody drops off."
+          : w.old < 1024 ? `<span class="small">UDP ${w.old} can't be relayed (ports below 1024 need extra rights), so online routers were moved first. Offline ones need
+              the adoption command re-run - or forward UDP ${w.old} to UDP ${w.port} on your edge firewall until they're back.</span>`
+          : `<span class="status warn">Waiting for the server to switch ports…</span>`}</p>
+      ${h.state === "failed" ? `<p class="status err small">${esc(h.detail)}</p>` : ""}
+      ${left.length ? `<p class="small">Still on UDP ${w.old} (moved automatically once online):</p><ul class="small wg-left">${left.map((r) =>
+        `<li><span class="dot ${r.online ? "on" : "off"}"></span>${esc(r.name)}${r.online ? "" : " <span class=\"muted\">(offline)</span>"}</li>`).join("")}</ul>`
+        : `<p class="status ok small">Every router now uses UDP ${w.port}.</p>`}
+      <div class="actions"><button class="btn primary" type="button" id="wgClose">${left.length ? `Close UDP ${w.old} anyway` : `Close old port UDP ${w.old}`}</button>
+        <span class="status" id="wgStatus"></span></div>
+      <p class="small muted">Closing stops the relay and removes UDP ${w.old} from the server's firewall${left.length ? ` - the ${left.length} router${left.length === 1 ? "" : "s"} above would lose their tunnel until you re-run the adoption command on them` : ""}.
+        Then remove its forward on your edge firewall.</p>`
+    : `
+      <p class="small muted">The UDP port routers build their tunnel to. Change it if your ISP or a client's network blocks it, or something else needs it. Routers already
+        adopted are moved safely: the old port keeps working (relayed) until every router has switched, then you close it.</p>
+      <ol class="small">
+        <li><b>First</b>, forward the new UDP port to this server on your edge firewall - keep UDP ${w.port} forwarded too for now.</li>
+        <li>Press <b>Move</b>. The server switches, and each router is updated through its tunnel (offline ones when they come back).</li>
+        <li>When the list shows every router moved, press <b>Close old port</b> and remove the old forward.</li>
+      </ol>
+      <div class="row"><label class="field">New UDP port <input id="wgNew" inputmode="numeric" placeholder="e.g. 41194" class="wg-port-input"></label>
+        <button class="btn primary" type="button" id="wgMove" ${w.supported ? "" : "disabled"}>Move</button>
+        <button class="btn" type="button" id="wg443" ${w.supported && w.port !== 443 ? "" : "disabled"} title="UDP 443 gets through most restrictive networks (hotels, guest Wi-Fi, some mobile carriers)">Use UDP 443</button>
+        <span class="status" id="wgStatus"></span></div>
+      <p class="small muted">UDP 443 is the port most likely to get through very restrictive networks - they rarely block anything that looks like web traffic.
+        ${w.supported ? "" : "<br>Moving the port needs a Linux server set up with the installer (1.19.0 or later)."}</p>`}`;
+  const say = (m, c = "err") => { $("wgStatus").textContent = m; $("wgStatus").className = `status ${c}`; };
+  const move = async (port) => {
+    if (!port) return say("Type the new port first.");
+    if (!confirm(`Have you forwarded UDP ${port} to this server on your edge firewall? Routers will start using it straight away.`)) return;
+    try { await post("/api/admin/wgport", { port }); wgPortCard(); } catch (e) { say(e.message); }
+  };
+  $("wgMove")?.addEventListener("click", () => move($("wgNew").value.trim()));
+  $("wg443")?.addEventListener("click", () => move("443"));
+  $("wgClose")?.addEventListener("click", async (e) => {
+    if (left.length && e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = `Click again - ${left.length} router(s) will drop off`; return; }
+    try { const r = await post("/api/admin/wgport/close"); wgPortCard(); } catch (err) { say(err.message); }
+  });
+  if (moving) setTimeout(() => { if ($("wgCard")) wgPortCard(); }, 15000);
+}
+
 // --- off-site backup to your own FTPS / FTP / WebDAV storage (offsite.py) ---------------------------------------------
 async function offsiteCard() {
   const el = $("offCard");
@@ -988,6 +1041,7 @@ async function adminSystem() {
   $("adminBody").innerHTML = `
     <div class="card" id="verCard"><h2>Version &amp; updates</h2><p class="muted">Loading…</p></div>
     <div class="card" id="offCard"><h2>Off-site backup</h2><p class="muted">Loading…</p></div>
+    <div class="card" id="wgCard"><h2>WireGuard port</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>Staff sign-in</h2>
       <p class="muted">Your technicians sign in with Microsoft. Anyone from these email domains becomes a technician at first sign-in;
         the listed emails become administrators. Roles can be changed on the Technicians tab.</p>
@@ -1018,6 +1072,7 @@ async function adminSystem() {
       <p class="small muted">The public address is set when TikManager is installed (the HTTPS certificate depends on it).</p></div>`;
   versionCard();
   offsiteCard();
+  wgPortCard();
   const say = (id, m, ok) => { $(id).textContent = m; $(id).className = `status ${ok ? "ok" : "err"}`; };
   $("cfSave").addEventListener("click", async () => {
     try {
@@ -1709,9 +1764,9 @@ Object.assign(SEC_FIXES, {
   net_app: { why: "TikManager's app port must only be reachable through Caddy (HTTPS) - open, it bypasses HTTPS entirely.",
     steps: ["Remove any port forward for it on your internet firewall, and make sure the app only listens locally:"],
     cmds: ["grep TM_HOST /etc/tikmanager/tikmanager.env   # should say TM_HOST=127.0.0.1", "sudo systemctl restart tikmanager"] },
-  net_wg: { why: "Routers build their tunnel to TikManager over UDP 51820 - blocked, they register but never come online.",
-    steps: ["On your internet firewall / router, forward UDP 51820 to this server (it can't be tested from outside: WireGuard only answers routers that have its key). On the server:"],
-    cmds: ["sudo ufw status | grep 51820", "sudo wg show wg0 latest-handshakes"] },
+  net_wg: { why: "Routers build their tunnel to TikManager over its WireGuard UDP port (Admin > Settings > WireGuard port) - blocked, they register but never come online.",
+    steps: ["On your internet firewall / router, forward that UDP port to this server (it can't be tested from outside: WireGuard only answers routers that have its key). On the server:"],
+    cmds: ["sudo wg show wg0 listen-port", "sudo ufw status | grep udp", "sudo wg show wg0 latest-handshakes"] },
   net_ip: { why: "The test couldn't learn this server's public address (Cloudflare didn't answer) - the other results still count.", steps: ["Run the test again in a minute."] },
 });
 

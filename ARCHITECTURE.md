@@ -90,6 +90,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `deploy/` | `get.sh` (download the newest release on the server and install it), installer `install.sh`, read-only server security check `check.sh`, `update.sh` (install copied code), `self-update.sh` + `tikmanager-update.*` (root updater), `tikmanager-authlog.*` + `collect-auth.py` (this server's sign-in attempts, as root, every 5 min), `tikmanager-check.*` (runs `check.sh` as root daily / on request / after upgrades and writes results the app reads), Caddy and systemd files |
 | `scriptlib.py` | community script library on GitHub: listing / import (no account), share as a pull request (token), danger + secret scans |
 | `alerts.py` | alerts: checks every minute, opens / closes ConnectWise tickets and posts Teams cards (via `integrations.py`) |
+| `wgport.py` | moving the WireGuard port: root helper `deploy/wg-port.sh` (via `tikmanager-wgport.*`) switches wg0 + ufw; a UDP relay keeps the old port working; routers switched over their tunnels |
 | `winbox.py` | Winbox relay: on-demand, address-locked, time-limited ports (40000-40049) relayed to routers' Winbox over their tunnels (asyncio, no IP forwarding) |
 | `offsite.py` | off-site backup to FTPS / FTP / WebDAV: full (DB snapshot + master key + settings + branding) or scripts, encrypted with a passphrase (scrypt + AES-GCM); `tools/tmbak.py` opens it |
 | `reachability.py` | connectivity test from the internet: DNS, TCP 443/80 open and 22/app port closed (check-host.net), WireGuard via routers online |

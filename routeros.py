@@ -161,6 +161,14 @@ class RouterOS:
             self._req("PATCH", f"/ip/service/{s['id']}", body, timeout=15)
         return self.winbox_service()
 
+    def set_controller_port(self, port):
+        """Point this router's tunnel at TikManager's new WireGuard port (the peer adoption created)."""
+        peers = [p for p in self.get("/interface/wireguard/peers") or [] if p.get("comment") == "TikManager controller"]
+        if not peers:
+            raise RouterError("TikManager's WireGuard peer isn't on this router (re-run the adoption command)")
+        for p in peers:
+            self._req("PATCH", f"/interface/wireguard/peers/{p['.id']}", {"endpoint-port": str(int(port))}, timeout=15)
+
     SESSION_COMMENT = "TikManager Winbox session"
 
     def session_user_add(self, name, group, password, only_from, note):
@@ -854,6 +862,9 @@ class SimRouter:
     def set_identity(self, name):
         self.name = name   # the poller builds SimRouter with the stored name, so the new identity "sticks" once saved
         return name
+
+    def set_controller_port(self, port):
+        self._sim()["controller_port"] = int(port)
 
     def session_user_add(self, name, group, password, only_from, note):
         users = self._sim().setdefault("users", {})

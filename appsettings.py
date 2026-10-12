@@ -49,7 +49,8 @@ class AppSettings:
             v = saved.get(k)
             setattr(self.s, k, v if v not in (None, "") else self.defaults[k])
         if not self.s.wg_endpoint:   # routers dial the same name the web UI answers on
-            self.s.wg_endpoint = f"{re.sub(r'^https?://', '', self.s.public_url).split('/')[0].split(':')[0]}:51820"
+            port = int(self.db.setting("wg_port", getattr(self.s, "wg_port", 51820)) or 51820)
+            self.s.wg_endpoint = f"{re.sub(r'^https?://', '', self.s.public_url).split('/')[0].split(':')[0]}:{port}"
         if not self.s.ping_target:
             self.s.ping_target = "1.1.1.1"
 

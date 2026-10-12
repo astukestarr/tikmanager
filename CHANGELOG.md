@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.19.0 - 2026-10-11
+
+- **Change the WireGuard port** (Admin > Settings > **WireGuard port**) - e.g. when an ISP or a client's network blocks
+  51820, or something else needs it. **Use UDP 443** is one click: the port most likely to get through restrictive
+  networks (hotels, guest Wi-Fi, some mobile carriers). Routers already adopted are moved **without dropping off**:
+  1. Forward the new UDP port to the server on your edge firewall (keep the old one for now) and press Move.
+  2. A root helper (`tikmanager-wgport.*`) moves wg0 to the new port and opens it in the server firewall; TikManager
+     relays the old port to the new one meanwhile, so routers still on the old port stay connected.
+  3. Every online router's tunnel is switched to the new port through that tunnel; offline routers are switched as
+     soon as they reconnect. The card lists who hasn't moved yet.
+  4. **Close old port** stops the relay and removes the old port from the server firewall.
+  New adoptions use the new port immediately. Moving away from a port below 1024 (e.g. from 443) moves online routers
+  first, because the old port can't be relayed.
+- New installs: `--wg-port <port>` (also via `get.sh`) picks the port from the start.
+- The connectivity test, the server security check and their How to fix steps now use the actual WireGuard port
+  instead of assuming 51820.
+
 ## 1.18.0 - 2026-10-11
 
 - **Router page in tabs**: the right side is split into **Overview** (traffic chart, health, interfaces), **Network**

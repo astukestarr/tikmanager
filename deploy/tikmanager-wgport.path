@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for TikManager WireGuard port changes (Admin > Settings > WireGuard port)
+
+[Path]
+# the web app (user tikmanager) can only write its data folder; it drops "set <port>" or "close <port>" here
+PathExists=/var/lib/tikmanager/wg-port-request
+
+[Install]
+WantedBy=multi-user.target

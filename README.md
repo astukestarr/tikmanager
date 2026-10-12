@@ -23,7 +23,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -222,6 +222,16 @@ phones, printers, servers & VMs, cameras, computers, personal devices, IoT and u
 devices (name, IP, MAC, port). Routes to other networks (VPN, static, dynamic) are listed for technicians; client users
 see their networks but not the routing table. Infrastructure and routes come straight from the router; end devices are
 recognised by their maker and name, so some stay "Unidentified" (unlike a scanner, the router doesn't probe them).
+
+## Changing the WireGuard port
+
+Routers connect to TikManager on **UDP 51820** unless you pick another port at install (`--wg-port`). To change it
+later - e.g. a network that blocks 51820 - use **Admin > Settings > WireGuard port** (or **Use UDP 443**, the port most
+likely to get through restrictive networks):
+1. Forward the new UDP port to the server on your edge firewall, keeping the old one forwarded for now.
+2. Press **Move**. The server switches ports; TikManager relays the old port to the new one so nobody drops off, and
+   switches every router's tunnel to the new port (offline routers when they reconnect).
+3. When the card shows every router moved, press **Close old port**, then remove the old forward on your edge firewall.
 
 ## Winbox through TikManager
 

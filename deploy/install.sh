@@ -20,13 +20,15 @@ LAN=""
 ADMINS=""
 DOMAINS=""
 REPO="astukestarr/tikmanager"
+WGPORT=51820
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host) HOST="$2"; shift 2 ;;
     --lan) LAN="$2"; shift 2 ;;
     --admins) ADMINS="$2"; shift 2 ;;
     --domains) DOMAINS="$2"; shift 2 ;;
-    --repo) REPO="$2"; shift 2 ;;   # where updates come from (e.g. your fork); written to the settings file
+    --repo) REPO="$2"; shift 2 ;;
+    --wg-port) WGPORT="$2"; shift 2 ;;   # the UDP port routers connect to (default 51820; changeable later on Admin > Settings)   # where updates come from (e.g. your fork); written to the settings file
     *) echo "Unknown option $1"; exit 1 ;;
   esac
 done
@@ -34,6 +36,7 @@ done
 [[ -n "$HOST" ]] || { echo "Give the public name TikManager will answer on (with a DNS record pointing at this server), e.g. --host tikmanager.example.com"; exit 1; }
 [[ -n "$LAN" ]] || { echo "Give your LAN subnet for SSH access, e.g. --lan 192.168.1.0/24"; exit 1; }
 [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "--repo must look like owner/repository"; exit 1; }
+[[ "$WGPORT" =~ ^[0-9]{1,5}$ ]] && (( WGPORT >= 1 && WGPORT <= 65535 )) || { echo "--wg-port must be a UDP port number (1-65535)"; exit 1; }
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 [[ -f "$SRC/server.py" ]] || { echo "Run this from the TikManager code folder."; exit 1; }
 
@@ -97,7 +100,7 @@ if [[ ! -f /etc/wireguard/wg0.conf ]]; then
   cat > /etc/wireguard/wg0.conf <<EOF
 [Interface]
 Address = 10.77.0.1/16
-ListenPort = 51820
+ListenPort = $WGPORT
 PrivateKey = $PRIV
 # Router peers are added by TikManager at runtime (they're stored in its database).
 EOF
@@ -128,6 +131,8 @@ WG_SERVER_PUBKEY=$PUB
 TM_SETUP_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)
 # Where new versions come from (GitHub owner/repo). Only change this to a repository you trust: the updater runs as root.
 TM_UPDATE_REPO=$REPO
+# The UDP port routers connect to; change it on Admin > Settings > WireGuard port (moves every router safely)
+WG_PORT=$WGPORT
 # Optional defaults - staff sign-in, Microsoft sign-in and the WireGuard address are normally set on Admin > Settings:
 TM_TECH_ADMINS=$ADMINS
 TM_TECH_DOMAINS=$DOMAINS
@@ -144,10 +149,12 @@ cp /opt/tikmanager/deploy/tikmanager-update.path /opt/tikmanager/deploy/tikmanag
 cp /opt/tikmanager/deploy/tikmanager-check.service /opt/tikmanager/deploy/tikmanager-check.path /opt/tikmanager/deploy/tikmanager-check.timer /etc/systemd/system/
 # this server's sign-in attempts (SSH, sudo, fail2ban) for the Security page, collected every 5 minutes (read-only)
 cp /opt/tikmanager/deploy/tikmanager-authlog.service /opt/tikmanager/deploy/tikmanager-authlog.timer /etc/systemd/system/
+# moving WireGuard to another UDP port from Admin > Settings (the web app drops a request; this root unit applies it)
+cp /opt/tikmanager/deploy/tikmanager-wgport.path /opt/tikmanager/deploy/tikmanager-wgport.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable tikmanager
 systemctl enable --now tikmanager-update.path
-systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer
+systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer tikmanager-wgport.path
 
 echo "== Caddy (HTTPS front door)"
 sed "s|__HOST__|$HOST|g" /opt/tikmanager/deploy/Caddyfile > /etc/caddy/Caddyfile
@@ -159,7 +166,7 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow 80/tcp comment 'Caddy: certificate checks + redirect to HTTPS'
 ufw allow 443/tcp comment 'TikManager web + router adoption'
-ufw allow 51820/udp comment 'WireGuard from routers'
+ufw allow "$WGPORT/udp" comment 'WireGuard from routers'
 ufw allow 40000:40049/tcp comment 'Winbox relay (each port only for the technician who opened it)'
 ufw allow from "$LAN" to any port 22 proto tcp comment 'SSH from LAN only'
 ufw allow in on wg0 to 10.77.0.1 port 5514 proto udp comment 'Router logs over the tunnel'

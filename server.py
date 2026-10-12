@@ -35,6 +35,7 @@ from observatory import Observatory
 from reachability import Reachability
 from offsite import OffsiteBackup, OffsiteError
 from winbox import WinboxRelay
+from wgport import WgPort
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -99,6 +100,8 @@ offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP 
 alerts.offsite = offsite
 winbox = WinboxRelay(db, settings, secev, poller.client, backups)   # Winbox to routers through TikManager (on-demand, address-locked)
 secev.winbox_who = winbox.who   # label router log lines from the relay with the session's technician
+wgport = WgPort(db, settings, poller.client, sysconf)   # moving the WireGuard port without stranding routers
+reach.wgport = wgport
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -549,6 +552,9 @@ class Handler(BaseHTTPRequestHandler):
                                   "priorities": integ.cw_priorities(), "companies": [{"id": c["id"], "name": c["name"]} for c in integ.cw_companies()]})
             except IntegrationError as e:
                 raise HttpError(502, str(e)) from None
+        if path == "/api/admin/wgport":   # the WireGuard port, and how far a move to a new one has got
+            self.require(tech=True, admin=True)
+            return self.json(wgport.info())
         if path == "/api/admin/offsite":   # off-site backup settings + last result
             self.require(tech=True, admin=True)
             return self.json(offsite.public())
@@ -1305,6 +1311,24 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "off-site backup settings changed", offsite.where(), self.client_ip())
             return self.json({"ok": True, **offsite.public()})
+        if path == "/api/admin/wgport":   # move WireGuard to another UDP port
+            s = self.require(tech=True, admin=True)
+            old = wgport.port
+            try:
+                wgport.start(int(str(self.body().get("port") or "0").strip() or 0))
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "WireGuard port move started", f"UDP {old} -> {wgport.port}", self.client_ip())
+            return self.json({"ok": True, **wgport.info()})
+        if path == "/api/admin/wgport/close":   # finish a move: stop relaying the old port and close it
+            s = self.require(tech=True, admin=True)
+            try:
+                old, left = wgport.old, wgport.close_old()
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "old WireGuard port closed", f"UDP {old}", self.client_ip(),
+                     detail=f"{left} router(s) hadn't moved yet" if left else "every router had moved")
+            return self.json({"ok": True, "left": left, **wgport.info()})
         if path == "/api/admin/offsite/test":
             s = self.require(tech=True, admin=True)
             try:
@@ -1713,6 +1737,9 @@ class Handler(BaseHTTPRequestHandler):
         www = str(b.get("www") or "")
         d = self.register_router(pubkey, clean("identity", 80), clean("model", 60), clean("serial", 40), clean("version", 40),
                                  int(www) if www.isdigit() and 0 < int(www) < 65536 else None)
+        port = cs.wg_endpoint.rpartition(":")[2]
+        if port.isdigit():   # the port this router will dial (for moving it later: wgport.py)
+            db.run("UPDATE devices SET wg_port=? WHERE id=?", (int(port), d["id"]))
         self.send(200, adoption.stage2(cs, d, derive(KEY, f"router-api:{d['id']}")).encode(), "text/plain; charset=utf-8")
 
 
@@ -1729,6 +1756,7 @@ def main():
     observatory.start()
     reach.start_loop()
     offsite.start()
+    wgport.start_loop()
     alerts.start()
     if settings.dev:
         secev.seed_dev()

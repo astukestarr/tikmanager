@@ -50,6 +50,7 @@ class Settings:
     # WireGuard
     wg_interface: str = field(default_factory=lambda: env("WG_INTERFACE", "wg0"))
     wg_endpoint: str = field(default_factory=lambda: env("WG_ENDPOINT"))   # default: the public address's host, port 51820
+    wg_port: int = field(default_factory=lambda: int(env("WG_PORT", "51820") or 51820))   # the server's WireGuard port (changed on Admin > Settings)
     wg_server_ip: str = field(default_factory=lambda: env("WG_SERVER_IP", "10.77.0.1"))
     wg_network: str = field(default_factory=lambda: env("WG_NETWORK", "10.77.0.0/16"))
     wg_server_pubkey: str = field(default_factory=lambda: env("WG_SERVER_PUBKEY"))

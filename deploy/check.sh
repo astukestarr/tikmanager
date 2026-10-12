@@ -14,6 +14,7 @@ RES=$(mktemp)
 trap 'rm -f "$RES"' EXIT
 
 ENV=/etc/tikmanager/tikmanager.env
+WGP=$(sed -n -E 's/^ListenPort *= *([0-9]+).*/\1/p' /etc/wireguard/wg0.conf 2>/dev/null | head -1); WGP=${WGP:-51820}
 fails=0; warns=0; SECTION=""; CHECK=""
 record() { printf '%s\t%s\t%s\t%s\n' "$1" "$SECTION" "$CHECK" "${2//$'\n'/ / }" >> "$RES"; }   # CHECK = id for "How to fix"
 section() { echo "== $1"; SECTION=$1; }
@@ -26,9 +27,9 @@ section "Firewall (ufw)"
 CHECK=ufw_off; if ufw status 2>/dev/null | grep -q "Status: active"; then
   pass "ufw is on"
   CHECK=ufw_default; ufw status verbose | grep -q "deny (incoming)" && pass "incoming traffic is denied unless allowed" || fail "ufw doesn't deny incoming by default (ufw default deny incoming)"
-  extra=$(ufw status | grep ALLOW | grep -v '(v6)' | grep -vE '^(80/tcp|443/tcp|51820/udp|22/tcp|40000:40049/tcp) |^10\.77\.0\.1 5514/udp' || true)
+  extra=$(ufw status | grep ALLOW | grep -v '(v6)' | grep -vE "^(80/tcp|443/tcp|$WGP/udp|22/tcp|40000:40049/tcp) |^10\.77\.0\.1 5514/udp" || true)
   CHECK=ssh_open; if ufw status | grep -E '^22(/tcp)? ' | grep -q 'Anywhere'; then fail "SSH is open to the whole internet - allow it only from your LAN (ufw allow from <lan> to any port 22 proto tcp)"; else pass "SSH is not open to the internet"; fi
-  CHECK=ufw_extra; [[ -z "$extra" ]] && pass "no ports open beyond 80, 443, 51820, the Winbox relay range and SSH from the LAN" || warn "extra ufw rules - check you still need them:"$'\n'"$extra"
+  CHECK=ufw_extra; [[ -z "$extra" ]] && pass "no ports open beyond 80, 443, $WGP (WireGuard), the Winbox relay range and SSH from the LAN" || warn "extra ufw rules - check you still need them:"$'\n'"$extra"
 else
   fail "ufw is off - re-run install.sh or: ufw --force enable"
 fi
@@ -86,7 +87,7 @@ PY
     || warn "this server can reach devices on your LAN ($lan):$hit - block it on your network firewall so a compromised server can't reach the LAN"
 fi
 listen=$(ss -Htulpn 2>/dev/null | awk '{print $1, $5, $7}')
-bad=$(awk '$2 !~ /^(127\.0\.0\.1|\[::1\]|10\.77\.0\.1):/ && $2 !~ /:(22|80|443|51820|400[0-4][0-9])$/' <<<"$listen" | grep -v 'systemd-resolve\|chronyd\|dhclient\|systemd-network' || true)
+bad=$(awk -v wg="$WGP" '$2 !~ /^(127\.0\.0\.1|\[::1\]|10\.77\.0\.1):/ && $2 !~ (":(22|80|443|" wg "|400[0-4][0-9])$")' <<<"$listen" | grep -v 'systemd-resolve\|chronyd\|dhclient\|systemd-network' || true)
 CHECK=listening; [[ -z "$bad" ]] && pass "only the expected services listen on the network" || warn "also listening (check you expect these):"$'\n'"$bad"
 appbind=$(envval TM_HOST)
 CHECK=app_bind; [[ "${appbind:-127.0.0.1}" == "127.0.0.1" ]] && pass "the TikManager app only listens locally (behind Caddy)" || fail "TM_HOST is $appbind - set TM_HOST=127.0.0.1 so the app is only reachable through Caddy (HTTPS)"

@@ -154,18 +154,19 @@ class Reachability:
         app_port = int(getattr(self.s, "port", 8800) or 8800)
         if app_port not in (80, 443):
             port("net_app", app_port, False, "TikManager's own app port, normally only behind Caddy")
-        # WireGuard: routers online over their tunnels from somewhere else prove UDP 51820 gets in
+        # WireGuard: routers online over their tunnels from somewhere else prove the WireGuard port gets in
+        wgp = self.wgport.port if getattr(self, "wgport", None) else 51820
         routers = self.db.q("SELECT name, online, wan_ip, public_ip FROM devices WHERE state='adopted'")
         outside = [r for r in routers if r["online"] and (r["public_ip"] or r["wan_ip"]) and (r["public_ip"] or r["wan_ip"]) != mine]
         if outside:
-            add("net_wg", "pass", f"UDP 51820 (WireGuard) gets in: {len(outside)} router{'s' if len(outside) != 1 else ''} online over their tunnels "
+            add("net_wg", "pass", f"UDP {wgp} (WireGuard) gets in: {len(outside)} router{'s' if len(outside) != 1 else ''} online over their tunnels "
                                   f"from other places (e.g. {', '.join(r['name'] for r in outside[:3])})")
         elif any(r["online"] for r in routers):
-            add("net_wg", "warn", "UDP 51820 (WireGuard): the routers online are all on this server's own network, so this doesn't prove "
+            add("net_wg", "warn", f"UDP {wgp} (WireGuard): the routers online are all on this server's own network, so this doesn't prove "
                                   "routers elsewhere can connect - it's confirmed once one at another site comes online")
         elif routers:
-            add("net_wg", "fail", "UDP 51820 (WireGuard): no router is online over its tunnel - check UDP 51820 is forwarded to this server")
+            add("net_wg", "fail", f"UDP {wgp} (WireGuard): no router is online over its tunnel - check UDP {wgp} is forwarded to this server")
         else:
-            add("net_wg", "warn", "UDP 51820 (WireGuard) can't be tested from outside - it's confirmed when the first router comes online. "
+            add("net_wg", "warn", f"UDP {wgp} (WireGuard) can't be tested from outside - it's confirmed when the first router comes online. "
                                   "Make sure it's forwarded to this server")
         return rows

@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --lan) LAN="$2"; shift 2 ;;
     --version) VER="${2#v}"; shift 2 ;;
     --repo) REPO="$2"; PASS+=(--repo "$2"); shift 2 ;;
-    --admins|--domains) PASS+=("$1" "$2"); shift 2 ;;
+    --admins|--domains|--wg-port) PASS+=("$1" "$2"); shift 2 ;;
     -h|--help) sed -n '2,16p' "$0" 2>/dev/null || true; exit 0 ;;
     *) echo "Unknown option $1 (see --help)"; exit 1 ;;
   esac
@@ -54,7 +54,7 @@ ask() {   # prompt, default -> answer
   echo "${a:-$2}"
 }
 if [[ -z "$HOST" ]]; then
-  echo "TikManager needs a public DNS name pointing at this server (ports 443/tcp and 51820/udp forwarded to it)."
+  echo "TikManager needs a public DNS name pointing at this server (ports 443/tcp and 51820/udp - or your --wg-port - forwarded to it)."
   HOST=$(ask "Public name, e.g. tikmanager.example.com" "")
 fi
 [[ "$HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] \

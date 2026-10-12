@@ -508,3 +508,7 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 
 /* router page tabs */
 .rtabs { margin: 0 0 12px; }
+
+/* WireGuard port move */
+.wg-port-input { max-width: 9em; }
+.wg-left { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }

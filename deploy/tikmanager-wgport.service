@@ -1,0 +1,8 @@
+[Unit]
+Description=Move TikManager's WireGuard to another UDP port, or close the old one (requested from the web UI)
+
+[Service]
+Type=oneshot
+# root: it changes /etc/wireguard/wg0.conf, wg0's listening port and the firewall. It reads only "set|close <port>".
+ExecStart=/bin/bash /opt/tikmanager/deploy/wg-port.sh
+TimeoutStartSec=2min
