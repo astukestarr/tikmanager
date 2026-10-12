@@ -37,6 +37,7 @@ from offsite import OffsiteBackup, OffsiteError
 from winbox import WinboxRelay
 from wgport import WgPort
 from mailer import Mailer, MailError
+from lifecycle import Lifecycle
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -105,6 +106,7 @@ wgport = WgPort(db, settings, poller.client, sysconf)   # moving the WireGuard p
 reach.wgport = wgport
 mailer = Mailer(integ, settings)   # email: alerts, invitations, tests
 alerts.mailer = mailer
+lifecycle = Lifecycle(db, settings.data_dir, thumbs)   # router age and discontinued models (from mikrotik.com)
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -403,7 +405,7 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
             return self.json(rows)
         if path == "/api/sites":   # site map: each adopted router with its WAN address and LAN networks
@@ -661,7 +663,7 @@ class Handler(BaseHTTPRequestHandler):
             d["events"] = db.q("SELECT ts, kind, detail FROM events WHERE device_id=? ORDER BY ts DESC LIMIT 50", (d["id"],))
             if s["kind"] != "tech":   # clients see their router, not TikManager's internal bookkeeping about it
                 for k in ("wg_pubkey", "token_expires", "notes", "api_port", "created_by", "thumb_tried", "itg_config_id",
-                          "itg_synced_at", "itg_error", "vpn_inv_at", "ros_checked", "name_custom"):
+                          "itg_synced_at", "itg_error", "vpn_inv_at", "ros_checked", "name_custom", "lc_checked"):
                     d.pop(k, None)
             return self.json(d)
         if m := re.fullmatch(r"/api/devices/(\d+)/series", path):   # chart data: traffic for one interface + WAN health
@@ -1800,6 +1802,7 @@ def main():
     offsite.start()
     wgport.start_loop()
     alerts.start()
+    lifecycle.start()
     if settings.dev:
         secev.seed_dev()
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)

@@ -175,9 +175,16 @@ still works).
 ## Routers
 
 **Routers** lists every approved router with its status, client, site, model, RouterOS version, uptime, CPU and when it
-was last seen. Filter by client, status or text; click a column header to sort by it (click again to reverse - Status
+was last seen, and its **age**. Filter by client, status (including **Discontinued model** and **5+ years old**) or text; click a column header to sort by it (click again to reverse - Status
 puts offline routers first). Routers that registered but aren't approved yet are listed above, under **Waiting for
 approval**. Click a router for its page: charts, interfaces, DHCP clients, backups, upgrades, scripts and events.
+
+**Lifecycle - how old, and still sold?** Each router's page shows when it was **made** and whether MikroTik has
+**discontinued** the model; the Dashboard lists discontinued and 5+-year-old routers, oldest first, so replacements can
+be planned (clients see their own). Both come from MikroTik: the age from the router's factory firmware (the RouterOS
+version it shipped with, dated by MikroTik's changelog - accurate to a few months), "discontinued" from the model's
+mikrotik.com product page (checked weekly). MikroTik publishes no end-of-support dates - a discontinued model still gets
+RouterOS updates for now.
 
 **Adding routers:** **Adopt routers** shows the adoption command (the same for every router). Paste it into the
 router's terminal (Winbox > New Terminal, or SSH); the router registers itself, then a technician approves it and picks
@@ -437,7 +444,7 @@ IT Glue.
     the server itself (localhost).
 
 Router thumbnails are matched by model against mikrotik.com's product catalog (refreshed weekly), downloaded once into
-`/var/lib/tikmanager/thumbs/` and served by TikManager itself. Discontinued models and CHR show a generic icon.
+`/var/lib/tikmanager/thumbs/` and served by TikManager itself. Discontinued models are found through mikrotik.com's sitemap; CHR shows a generic icon.
 
 ## Admin
 

@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.22.0 - 2026-10-11
+
+- **Router lifecycle**: how old each router is and whether MikroTik has discontinued the model, so replacements can be
+  planned (and clients can see it too).
+  - **Age** comes from the router's factory firmware - the RouterOS version it left the factory with - dated by
+    MikroTik's own changelog (to within a few months; factory firmware 3.x means before about 2017).
+  - **Discontinued** comes from the model's mikrotik.com product page, re-read weekly. MikroTik publishes no
+    end-of-life or end-of-support dates (sites like eol.network use the same "Discontinued" mark), so discontinued
+    means no longer sold, not unsupported.
+  - Router page: **Made** and **Lifecycle** (with a link to the product page) and a note when it's time to plan a
+    replacement. Routers list: an **Age** column (sortable) and **Discontinued model** / **5+ years old** filters.
+    Dashboard: a **Lifecycle** card listing discontinued and old routers, oldest first.
+- Discontinued models now get their product picture too (found through mikrotik.com's sitemap).
+
 ## 1.21.0 - 2026-10-11
 
 - **Email** (Admin > Integrations > Email): TikManager can send email through **Microsoft 365** (Microsoft Graph,

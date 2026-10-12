@@ -106,6 +106,7 @@ class RouterOS:
                 "model": rb.get("model") or res.get("board-name"), "serial": rb.get("serial-number"),
                 "hdd_free": int(res.get("free-hdd-space") or 0), "hdd_total": int(res.get("total-hdd-space") or 0),
                 "bad_blocks": res.get("bad-blocks") or "0", "fw_current": rb.get("current-firmware") or "", "fw_upgrade": rb.get("upgrade-firmware") or "",
+                "fw_factory": rb.get("factory-firmware") or "",
                 "wan_ip": wan, "networks": nets, "interfaces": out}
 
     def ping(self, target="1.1.1.1", count=3):
@@ -956,7 +957,8 @@ class SimRouter:
                 "serial": f"HG{self.r.randint(10000000, 99999999):X}" if self.board != "chr" else None,
                 "wan_ip": f"203.0.113.{self.id % 250 + 2}", "networks": self.networks(), "hdd_total": 128 * 1024 * 1024, "hdd_free": self.r.randint(30, 100) * 1024 * 1024,
                 "bad_blocks": "0", "fw_current": (fw := self.r.choice(["7.16.2", "7.18.1", "7.19.4"])) if self.board != "chr" else "",
-                "fw_upgrade": (self.r.choice([fw, "7.19.4"]) if self.board != "chr" else ""), "interfaces": ifaces})
+                "fw_upgrade": (self.r.choice([fw, "7.19.4"]) if self.board != "chr" else ""),
+                "fw_factory": {"rb5009": "7.1.5", "hap-ax3": "7.7", "ccr2004": "6.48.6", "hex-s": "3.41"}.get(self.board, ""), "interfaces": ifaces})
 
     def _apply_sim(self, st):
         sim = self._sim()

@@ -2,7 +2,8 @@
 
 The catalog (product name -> page) comes from mikrotik.com's category pages and is refreshed weekly; each product's
 thumbnail (its og:image) is downloaded once into data/thumbs/ and served by TikManager itself, so browsers never load
-anything from another site. Models MikroTik no longer lists (and CHR) simply have no picture.
+anything from another site. Discontinued models are found through mikrotik.com's sitemap (their pages stay up);
+CHR has no picture.
 """
 import json
 import re
@@ -40,7 +41,7 @@ class Thumbs:
         with self.lock:
             try:
                 c = json.loads(self.catalog_file.read_text(encoding="utf-8"))
-                if time.time() - c.get("at", 0) < 7 * 86400 and c.get("products"):
+                if time.time() - c.get("at", 0) < 7 * 86400 and c.get("products") and c.get("v") == 2:
                     return c["products"]
             except (OSError, ValueError):
                 c = {}
@@ -54,8 +55,16 @@ class Thumbs:
                     name = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", inner)).strip()
                     if name and SLUG.match(slug):
                         products.setdefault(norm(name), slug)
+            # every product page, discontinued ones too, by code: 'CCR1009-7G-1C-1Splus' -> 'ccr10097g1c1s'
+            try:
+                xml = self._get(f"{BASE}/sitemap.xml").decode("utf-8", "replace")
+                for slug in re.findall(r"<loc>https://mikrotik\.com/product/([^<#?]+)</loc>", xml):
+                    if SLUG.match(slug):
+                        products.setdefault(norm(slug.replace("plus", "+")), slug)
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass
             if products:
-                self.catalog_file.write_text(json.dumps({"at": time.time(), "products": products}), encoding="utf-8")
+                self.catalog_file.write_text(json.dumps({"at": time.time(), "v": 2, "products": products}), encoding="utf-8")
                 return products
             return c.get("products", {})   # site unreachable: keep using the old list
 

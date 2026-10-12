@@ -52,8 +52,9 @@ class Poller:
         wan = [i for i in st["interfaces"] if "wan" in (i.get("comment") or "").lower()] or [i for i in st["interfaces"] if i.get("name") == "ether1"]
         if wan and all(i.get("rx_bps") is not None and i.get("tx_bps") is not None for i in wan):   # prefer the router's own live rate
             rx_bps, tx_bps = sum(i["rx_bps"] for i in wan), sum(i["tx_bps"] for i in wan)
-        self.db.run("UPDATE devices SET wan_ip=?, networks=?, hdd_free=?, hdd_total=?, bad_blocks=?, fw_current=?, fw_upgrade=? WHERE id=?",
-                    (st.get("wan_ip"), json.dumps(st.get("networks") or []), st.get("hdd_free"), st.get("hdd_total"), st.get("bad_blocks"), st.get("fw_current"), st.get("fw_upgrade"), d["id"]))
+        self.db.run("UPDATE devices SET wan_ip=?, networks=?, hdd_free=?, hdd_total=?, bad_blocks=?, fw_current=?, fw_upgrade=?, fw_factory=? WHERE id=?",
+                    (st.get("wan_ip"), json.dumps(st.get("networks") or []), st.get("hdd_free"), st.get("hdd_total"), st.get("bad_blocks"), st.get("fw_current"), st.get("fw_upgrade"),
+                     st.get("fw_factory") or None, d["id"]))
         # the name follows the router's identity unless someone renamed it in TikManager
         self.db.run("""UPDATE devices SET online=1, last_poll=?, last_seen=?, last_error=NULL, identity=?, model=?, serial=COALESCE(?, serial),
                        version=?, board=?, uptime=?, cpu=?, mem_used=?, mem_total=?, interfaces=?,

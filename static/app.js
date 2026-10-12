@@ -54,6 +54,25 @@ function thumbImg(d, cls) {
   return `<img class="${cls}" src="${d.thumb_slug ? `/thumb/${encodeURIComponent(d.thumb_slug)}` : "/router.svg"}" alt="${esc(d.model || "router")}" loading="lazy">`;
 }
 
+// Lifecycle (lifecycle.py): age from the factory firmware's release date, "discontinued" from MikroTik's product page
+const LC_OLD = 5;   // years
+function lcYears(d) {
+  if (!d.lc_made) return null;
+  const t = Date.parse(d.lc_made === "<2017" ? "2017-01-01" : d.lc_made);
+  return Number.isNaN(t) ? null : (Date.now() - t) / (365.25 * 864e5);
+}
+function lcAge(d) {   // "6 yr" / "9+ yr"
+  const y = lcYears(d);
+  return y == null ? "" : `${Math.max(0, Math.floor(y))}${d.lc_made === "<2017" ? "+" : ""} yr`;
+}
+function lcMade(d) {   // "about Apr 2020"
+  if (d.lc_made === "<2017") return "before about 2017";
+  const t = Date.parse(d.lc_made || "");
+  return Number.isNaN(t) ? "" : `about ${new Date(t).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" })}`;
+}
+const lcFlag = (d) => d.lc_status === "discontinued" ? `<span class="pill lc-disc">Discontinued</span>`
+  : (lcYears(d) ?? 0) >= LC_OLD ? `<span class="pill lc-old">${LC_OLD}+ years</span>` : "";
+
 function stateDot(d) {
   if (d.state !== "adopted") return `<span class="dot pending"></span>Waiting for approval`;
   return d.online ? `<span class="dot on"></span>Online` : `<span class="dot off"></span>Offline`;
@@ -76,12 +95,28 @@ async function dashboard() {
       <div class="tile warn"><div class="v">${devices.length - adopted.length}</div><div class="l">Waiting for approval</div></div>
     </div>
     ${isTech() && devices.length > adopted.length ? `<div class="card"><h2>Waiting for approval</h2>${pendingTable(devices.filter((d) => d.state !== "adopted"))}</div>` : ""}
+    ${lifecycleCard(adopted)}
     <div class="card"><h2>Offline routers</h2>${offline.length ? table(offline, ["state", "org", "name", "last_seen", "last_error"]) : `<p class="muted">Everything is online.</p>`}</div>
     <div class="card"><h2>Recent events</h2>${events.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Event</th><th>Detail</th></tr></thead><tbody>
       ${events.slice(0, 25).map((e) => `<tr class="click" data-dev="${e.device_id}"><td>${when(e.ts)}</td><td>${esc(e.device)}</td><td>${esc(e.org)}</td>
         <td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">No events yet.</p>`}</div>`;
   bindRows();
   bindPending();
+}
+
+// Dashboard: discontinued and old routers, oldest first, so replacements can be planned
+function lifecycleCard(adopted) {
+  const flagged = adopted.filter((d) => d.lc_status === "discontinued" || (lcYears(d) ?? 0) >= LC_OLD)
+    .sort((a, b) => (lcYears(b) ?? -1) - (lcYears(a) ?? -1));
+  if (!flagged.length) return "";
+  const disc = flagged.filter((d) => d.lc_status === "discontinued").length, old = flagged.filter((d) => (lcYears(d) ?? 0) >= LC_OLD).length;
+  return `<div class="card"><h2>Lifecycle</h2>
+    <p class="small muted">${disc} discontinued by MikroTik · ${old} over ${LC_OLD} years old. Age comes from each router's factory firmware;
+      MikroTik publishes no end-of-support dates, so "discontinued" means no longer sold.</p>
+    <div class="table-wrap"><table><thead><tr><th>Router</th>${me.org ? "" : "<th>Client</th>"}<th>Model</th><th>Made</th><th>Age</th><th></th></tr></thead><tbody>
+    ${flagged.slice(0, 25).map((d) => `<tr class="click" data-dev="${d.id}"><td>${esc(d.name)}</td>${me.org ? "" : `<td>${d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`}</td>`}
+      <td>${esc(d.model || "")}</td><td>${esc(lcMade(d))}</td><td class="nowrap">${esc(lcAge(d))}</td><td>${d.lc_status === "discontinued" ? `<span class="pill lc-disc">Discontinued</span>` : ""}</td></tr>`).join("")}
+    </tbody></table></div>${flagged.length > 25 ? `<p class="small muted">${flagged.length - 25} more on the Routers page (Status filter).</p>` : ""}</div>`;
 }
 
 // Routers that ran the adoption command and wait for a tech to pick their client
@@ -128,8 +163,8 @@ async function approve(id) {
 const upSecs = (s) => { let n = 0; for (const [, v, u] of String(s || "").matchAll(/(\d+)([wdhms])/g)) n += Number(v) * { w: 604800, d: 86400, h: 3600, m: 60, s: 1 }[u]; return n || null; };
 function sortRouters(rows, sort) {
   if (!sort || !sort.key) return rows;
-  const val = (d) => ({ state: d.state !== "adopted" ? -1 : d.online ? 1 : 0, uptime: upSecs(d.uptime), cpu: d.cpu, last_seen: d.last_seen })[sort.key]
-    ?? (sort.key in { state: 1, uptime: 1, cpu: 1, last_seen: 1 } ? null : String(d[sort.key] ?? "").trim() || null);
+  const val = (d) => ({ state: d.state !== "adopted" ? -1 : d.online ? 1 : 0, uptime: upSecs(d.uptime), cpu: d.cpu, last_seen: d.last_seen, age: lcYears(d) })[sort.key]
+    ?? (sort.key in { state: 1, uptime: 1, cpu: 1, last_seen: 1, age: 1 } ? null : String(d[sort.key] ?? "").trim() || null);
   const dir = sort.dir === "desc" ? -1 : 1;
   return [...rows].sort((a, b) => {
     const x = val(a), y = val(b);
@@ -142,7 +177,7 @@ function sortRouters(rows, sort) {
 // sort = { key, dir } makes the headers clickable buttons (data-sort); the caller re-sorts and redraws
 function table(rows, cols, sort) {
   const head = { state: "Status", org: "Client", name: "Router", site: "Site", model: "Model", version: "RouterOS", uptime: "Uptime",
-                 cpu: "CPU", last_seen: "Last seen", last_error: "Problem", tunnel_ip: "Tunnel IP" };
+                 cpu: "CPU", last_seen: "Last seen", last_error: "Problem", tunnel_ip: "Tunnel IP", age: "Age" };
   head.thumb = "";
   const th = (c) => {
     if (!sort || c === "thumb") return `<th>${head[c]}</th>`;
@@ -153,6 +188,7 @@ function table(rows, cols, sort) {
     : c === "cpu" ? (d.cpu == null ? "" : `<div class="row"><div class="bar"><i data-pct="${d.cpu}"></i></div>${d.cpu}%</div>`)
     : c === "uptime" ? `<span class="nowrap" title="${esc(uptime(d.uptime))}">${esc(d.uptime ? uptime(d.uptime, true) : "")}</span>`
     : c === "version" ? esc((d.version || "").replace(" (stable)", ""))
+    : c === "age" ? `<span class="nowrap"${d.lc_made ? ` title="Made ${esc(lcMade(d))}"` : ""}>${esc(lcAge(d))}</span> ${lcFlag(d)}`
     : c === "org" ? (d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`) : esc(d[c] ?? "");
   return `<div class="table-wrap"><table><thead><tr>${cols.map(th).join("")}</tr></thead><tbody>
     ${rows.map((d) => `<tr class="click" data-dev="${d.id}">${cols.map((c) => `<td>${cell(d, c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
@@ -172,14 +208,15 @@ async function routers() {
     ${isTech() && pending.length ? `<div class="card"><h2>Waiting for approval (${pending.length})</h2>${pendingTable(pending)}</div>` : ""}
     <div class="card"><div class="row">
       ${isTech() ? `<select id="fOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
-      <select id="fState" aria-label="Status"><option value="">Any status</option><option value="online">Online</option><option value="offline">Offline</option></select>
+      <select id="fState" aria-label="Status"><option value="">Any status</option><option value="online">Online</option><option value="offline">Offline</option>
+        <option value="disc">Discontinued model</option><option value="old">${LC_OLD}+ years old</option></select>
       <input id="fText" placeholder="Search name, model, version…" aria-label="Search">
     </div><div id="list"></div></div>`;
   const draw = () => {
     const o = $("fOrg")?.value, st = $("fState").value, t = $("fText").value.toLowerCase();
-    const rows = devices.filter((d) => d.state === "adopted" && (!o || String(d.org_id) === o) && (!st || !!d.online === (st === "online"))
+    const rows = devices.filter((d) => d.state === "adopted" && (!o || String(d.org_id) === o) && (!st || (st === "disc" ? d.lc_status === "discontinued" : st === "old" ? (lcYears(d) ?? 0) >= LC_OLD : !!d.online === (st === "online")))
       && (!t || `${d.name} ${d.identity} ${d.model} ${d.version} ${d.site} ${d.org}`.toLowerCase().includes(t)));
-    $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), isTech() ? ["thumb", "state", "org", "name", "site", "model", "version", "uptime", "cpu", "last_seen"] : ["thumb", "state", "name", "site", "model", "version", "uptime", "cpu", "last_seen"], routerSort)
+    $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), isTech() ? ["thumb", "state", "org", "name", "site", "model", "age", "version", "uptime", "cpu", "last_seen"] : ["thumb", "state", "name", "site", "model", "age", "version", "uptime", "cpu", "last_seen"], routerSort)
       : `<p class="muted">No routers match.</p>`;
     bindRows();
     // click a header to sort by it; click it again to reverse
@@ -251,7 +288,13 @@ async function router(id) {
         ${kv("WAN IP", d.wan_ip)}${kv("Tunnel IP", d.tunnel_ip)}${kv("Uptime", uptime(d.uptime))}
         ${kv("RouterOS", esc((d.version || "—").replace(" (stable)", "")), true)}${d.fw_current ? kv("Firmware", `${esc(d.fw_current)} ${fwState}`, true) : ""}
         ${kv("Model", d.model)}${kv("Serial", d.serial)}
+        ${d.state === "adopted" ? kv("Made", d.lc_made ? `${esc(lcMade(d))} <span class="muted">(${esc(lcAge(d))})</span>` : d.lc_status === "virtual" ? `<span class="muted">Virtual (CHR)</span>` : `<span class="muted">—</span>`, true) : ""}
+        ${d.state === "adopted" && d.lc_status && d.lc_status !== "virtual" ? kv("Lifecycle", `${d.lc_status === "discontinued" ? `<span class="status warn">Discontinued by MikroTik</span>` : `<span class="status ok">Current model</span>`}
+          ${d.lc_slug ? ` <a href="https://mikrotik.com/product/${encodeURIComponent(d.lc_slug)}" target="_blank" rel="noopener noreferrer">product page</a>` : ""}`, true) : ""}
       </div>
+      ${d.state === "adopted" && (d.lc_status === "discontinued" || (lcYears(d) ?? 0) >= LC_OLD) ? `<p class="small muted lc-note">${d.lc_status === "discontinued"
+        ? "MikroTik no longer sells this model. It still gets RouterOS updates for now (MikroTik publishes no end-of-support date), but plan its replacement."
+        : `This router is over ${LC_OLD} years old - worth planning its replacement.`}</p>` : ""}
       ${d.state === "adopted" && isTech() ? upgradeBox(d) : ""}
       ${d.state === "adopted" && isTech() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
       ${d.vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b><span class="spacer"></span><a href="#vpn/${d.vpn.id}">${esc(d.vpn.name)}</a></div>

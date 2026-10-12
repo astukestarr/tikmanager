@@ -457,6 +457,8 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .sec-fail .sec-tag { background: var(--bad); color: #fff; } .sec-warn .sec-tag { background: var(--warn); color: #fff; }
 .sec-pass .sec-tag { background: var(--good); color: #fff; }
 .pill.sec-pill-fail { border-color: var(--bad); color: var(--bad); } .pill.sec-pill-warn { border-color: var(--warn); color: var(--warn); }
+.pill.lc-disc { border-color: var(--warn); color: var(--warn); } .pill.lc-old { color: var(--muted); }
+.lc-note { margin: 4px 0 8px; }
 .pill.sec-pill-ok { border-color: var(--good); color: var(--good); }
 @media (max-width: 700px) { .sec-list li { grid-template-columns: 52px 1fr; } .sec-list li .muted { display: none; } }
 .sec-best { margin-top: 10px; }
