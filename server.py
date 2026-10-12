@@ -44,6 +44,7 @@ from mailer import Mailer, MailError
 from lifecycle import Lifecycle
 from rossec import RosSecurity
 from autoblock import AutoBlock
+from devkind import kind as device_kind, KINDS as DEVICE_KINDS
 from routerlogs import RouterLogs, SEVERITIES as LOG_SEVERITIES
 from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
 from alerts import Alerts
@@ -429,11 +430,12 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state, d.last_reboot, d.last_reboot_why, d.tags, d.notes
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state, d.last_reboot, d.last_reboot_why, d.tags, d.notes, d.board, d.kind_override
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
             for r in rows:
                 r["isp_state"] = json.loads(r.get("isp_state") or "{}")
                 r["tags"] = json.loads(r.get("tags") or "[]")
+                r["kind"] = device_kind(r.get("model"), r.get("board"), r.get("kind_override"))
                 if s["kind"] != "tech":
                     r.pop("notes", None)   # notes are TikManager-internal
             return self.json(rows)
@@ -763,6 +765,7 @@ class Handler(BaseHTTPRequestHandler):
             d["isp_state"] = json.loads(d.get("isp_state") or "{}")
             d["isp_ifaces"] = json.loads(d.get("isp_ifaces") or "null")
             d["tags"] = json.loads(d.get("tags") or "[]")
+            d["kind"] = device_kind(d.get("model"), d.get("board"), d.get("kind_override"))
             org = db.one("SELECT name FROM orgs WHERE id=?", (d["org_id"],)) if d["org_id"] else None
             d["org"] = org["name"] if org else ""
             d["upgrade"] = db.one("""SELECT id, status, step, scheduled_at, channel, firmware, created_by FROM upgrades
@@ -1038,7 +1041,8 @@ class Handler(BaseHTTPRequestHandler):
                 if x and x.lower() not in {t.lower() for t in tags}:
                     tags.append(x)
             notes = str(b.get("notes") or "")[:4000]
-            db.run("UPDATE devices SET tags=?, notes=? WHERE id=?", (json.dumps(tags[:20]) if tags else None, notes, d["id"]))
+            kind_o = b.get("kind") if b.get("kind") in DEVICE_KINDS else None
+            db.run("UPDATE devices SET tags=?, notes=?, kind_override=? WHERE id=?", (json.dumps(tags[:20]) if tags else None, notes, kind_o, d["id"]))
             db.audit(s["email"], "router tags / notes", d["name"], self.client_ip(), detail=f"tags: {', '.join(tags) or '-'}", org_id=d["org_id"])
             return self.json({"ok": True, "tags": tags[:20]})
         if m := re.fullmatch(r"/api/devices/(\d+)/isp", path):   # which interfaces are the router's internet links ([] = automatic)

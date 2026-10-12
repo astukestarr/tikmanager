@@ -133,7 +133,7 @@ async function dashboard() {
   const offline = adopted.filter((d) => !d.online);
   $("main").innerHTML = `<h1>Dashboard</h1><p class="muted">${me.org ? esc(me.org) : "All clients"}</p>
     <div class="tiles">
-      <div class="tile"><div class="v">${adopted.length}</div><div class="l">Routers</div></div>
+      <div class="tile"><div class="v">${adopted.length}</div><div class="l">Devices</div></div>
       <div class="tile good"><div class="v">${adopted.length - offline.length}</div><div class="l">Online</div></div>
       <div class="tile ${offline.length ? "bad" : ""}"><div class="v">${offline.length}</div><div class="l">Offline</div></div>
       <div class="tile warn"><div class="v">${devices.length - adopted.length}</div><div class="l">Waiting for approval</div></div>
@@ -234,8 +234,8 @@ function sortRouters(rows, sort) {
 
 // sort = { key, dir } makes the headers clickable buttons (data-sort); the caller re-sorts and redraws
 function table(rows, cols, sort) {
-  const head = { state: "Status", org: "Client", name: "Router", site: "Site", model: "Model", version: "RouterOS", uptime: "Uptime",
-                 cpu: "CPU", last_seen: "Last seen", last_error: "Problem", tunnel_ip: "Tunnel IP", age: "Age" };
+  const head = { state: "Status", org: "Client", name: "Device", site: "Site", model: "Model", version: "RouterOS", uptime: "Uptime",
+                 cpu: "CPU", last_seen: "Last seen", last_error: "Problem", tunnel_ip: "Tunnel IP", age: "Age", kind: "Type" };
   head.thumb = "";
   const th = (c) => {
     if (!sort || c === "thumb") return `<th>${head[c]}</th>`;
@@ -246,6 +246,7 @@ function table(rows, cols, sort) {
     : c === "cpu" ? (d.cpu == null ? "" : `<div class="row"><div class="bar"><i data-pct="${d.cpu}"></i></div>${d.cpu}%</div>`)
     : c === "uptime" ? `<span class="nowrap" title="${esc(uptime(d.uptime))}">${esc(d.uptime ? uptime(d.uptime, true) : "")}</span>`
     : c === "version" ? esc((d.version || "").replace(" (stable)", ""))
+    : c === "kind" ? `<span class="small">${esc(KIND_LABEL[d.kind] || "")}</span>`
     : c === "age" ? `<span class="nowrap"${d.lc_made ? ` title="Made ${esc(lcMade(d))}"` : ""}>${esc(lcAge(d))}</span> ${lcFlag(d)}`
     : c === "org" ? (d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`)
     : c === "name" ? `${esc(d.name ?? "")}${d.dm_flagged ? ` <span class="pill dm-flag" title="RouterOS flagged it as possibly compromised">Flagged</span>` : ""}${(d.tags || []).length ? `<div class="tag-row">${tagPills(d.tags)}</div>` : ""}` : esc(d[c] ?? "");
@@ -259,11 +260,16 @@ function bindRows() {
 }
 
 let routerSort = { key: "", dir: "asc" };   // kept while you move around the app
-async function routers() {
-  const [devices, orgs] = await Promise.all([api("/api/devices"), api("/api/orgs")]);
-  const pending = devices.filter((d) => d.state !== "adopted");
-  $("main").innerHTML = `<div class="row"><div><h1>Routers</h1><p class="muted">${devices.length - pending.length} router(s)</p></div><span class="spacer"></span>
-      ${isTech() ? `<button class="btn primary" type="button" id="adoptBtn">Adopt routers</button>` : ""}</div>
+const KIND_LABEL = { ap: "Access point", router: "Router", switch: "Switch" };
+async function routers(kind) {
+  kind = ["ap", "router", "switch"].includes(kind) ? kind : "";
+  const [all, orgs] = await Promise.all([api("/api/devices"), api("/api/orgs")]);
+  const pending = all.filter((d) => d.state !== "adopted");
+  const devices = kind ? all.filter((d) => d.state !== "adopted" || d.kind === kind) : all;
+  const title = { "": "All devices", ap: "Access points", router: "Routers", switch: "Switches" }[kind];
+  const n = devices.length - pending.length;
+  $("main").innerHTML = `<div class="row"><div><h1>${title}</h1><p class="muted">${n} ${kind ? (n === 1 ? KIND_LABEL[kind].toLowerCase() : title.toLowerCase()) : `device${n === 1 ? "" : "s"}`}</p></div><span class="spacer"></span>
+      ${isTech() ? `<button class="btn primary" type="button" id="adoptBtn">Adopt devices</button>` : ""}</div>
     ${isTech() && pending.length ? `<div class="card"><h2>Waiting for approval (${pending.length})</h2>${pendingTable(pending)}</div>` : ""}
     <div class="card"><div class="row">
       ${isTech() ? `<select id="fOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
@@ -278,8 +284,8 @@ async function routers() {
     const rows = devices.filter((d) => d.state === "adopted" && (!o || String(d.org_id) === o) && (!st || (st === "disc" ? d.lc_status === "discontinued" : st === "old" ? (lcYears(d) ?? 0) >= LC_OLD : !!d.online === (st === "online")))
       && (!tag || (d.tags || []).includes(tag))
       && (!t || `${d.name} ${d.identity} ${d.model} ${d.version} ${d.site} ${d.org} ${(d.tags || []).join(" ")} ${d.notes || ""}`.toLowerCase().includes(t)));
-    $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), isTech() ? ["thumb", "state", "org", "name", "site", "model", "age", "version", "uptime", "cpu", "last_seen"] : ["thumb", "state", "name", "site", "model", "age", "version", "uptime", "cpu", "last_seen"], routerSort)
-      : `<p class="muted">No routers match.</p>`;
+    const cols = [...(isTech() ? ["thumb", "state", "org", "name"] : ["thumb", "state", "name"]), ...(kind ? [] : ["kind"]), "site", "model", "age", "version", "uptime", "cpu", "last_seen"];
+    $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), cols, routerSort) : `<p class="muted">No ${kind ? title.toLowerCase() : "devices"} match.</p>`;
     bindRows();
     // click a header to sort by it; click it again to reverse
     $("list").querySelectorAll("[data-sort]").forEach((b) => b.addEventListener("click", () => {
@@ -339,7 +345,7 @@ async function router(id) {
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
   const on = (k) => !adopted || tab === k;
-  $("main").innerHTML = `<p><a href="#" id="back">← Routers</a></p>
+  $("main").innerHTML = `<p><a href="#" id="back">← Devices</a></p>
   <div class="dev-layout">
     <aside class="card dev-side">
       <div class="dev-head">${thumbImg(d, "thumb-lg")}</div>
@@ -431,10 +437,12 @@ async function router(id) {
       ${adopted && tab === "ports" ? `<div id="ptRoot"><div class="card"><h2>Ports</h2><p class="muted small">Reading the ports…</p></div></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
-      ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Tags &amp; notes</h2>
+      ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Tags, notes &amp; type</h2>
         <label class="field">Tags (comma-separated - e.g. core, poe-switch, tower-north) <input id="mTags" value="${esc((d.tags || []).join(", "))}" list="mTagList" spellcheck="false"></label>
         <datalist id="mTagList"></datalist>
         <label class="field">Notes (technicians only - clients don't see them) <textarea id="mNotes" rows="4" maxlength="4000">${esc(d.notes || "")}</textarea></label>
+        <label class="field">Device type <select id="mKind"><option value="">Automatic (${esc(KIND_LABEL[d.kind] || "Router")} from its model)</option>
+          ${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}" ${d.kind_override === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <div class="actions"><button class="btn primary" type="button" id="mSave">Save</button><span class="status" id="mMetaStatus"></span></div></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? ispSettings(d) : ""}
       ${on("events") ? `<div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>` : ""}
@@ -503,7 +511,8 @@ async function router(id) {
     api("/api/devices").then((all) => { $("mTagList").innerHTML = [...new Set(all.flatMap((x) => x.tags || []))].map((t) => `<option value="${esc(t)}">`).join(""); }).catch(() => {});
     $("mSave").addEventListener("click", async () => {
       try {
-        await post(`/api/devices/${d.id}/meta`, { tags: $("mTags").value.split(",").map((x) => x.trim()).filter(Boolean), notes: $("mNotes").value });
+        await post(`/api/devices/${d.id}/meta`, { tags: $("mTags").value.split(",").map((x) => x.trim()).filter(Boolean), notes: $("mNotes").value, kind: $("mKind").value });
+        refreshNavCounts();
         router(d.id);
       } catch (e) { $("mMetaStatus").textContent = e.message; $("mMetaStatus").className = "status err"; }
     });
@@ -3877,13 +3886,96 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
 }
+const NAV_ICONS = {
+"dashboard": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"5\" rx=\"1.5\"/><rect x=\"14\" y=\"12\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"3\" y=\"16\" width=\"7\" height=\"5\" rx=\"1.5\"/></svg>",
+"routers": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"13\" width=\"19\" height=\"7\" rx=\"2\"/><path d=\"M6.5 16.5h.01M10 16.5h.01M8 13l-2-6M16 13l2-6M5 7.5a1.5 1.5 0 1 0 0-.01M19 7.5a1.5 1.5 0 1 0 0-.01\"/></svg>",
+"sites": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"5\" r=\"2.5\"/><circle cx=\"5\" cy=\"19\" r=\"2.5\"/><circle cx=\"19\" cy=\"19\" r=\"2.5\"/><path d=\"M12 7.5v4M12 11.5 5 16.5M12 11.5l7 5\"/></svg>",
+"subnets": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"/><path d=\"M3 9h18M3 15h18M9 3v18\"/></svg>",
+"discovered": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"6.5\"/><path d=\"m16 16 4.5 4.5M11 8v6M8 11h6\"/></svg>",
+"alerts": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z\"/><path d=\"M10 20a2 2 0 0 0 4 0\"/></svg>",
+"logs": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M7 3h8l4 4v14H7z\"/><path d=\"M15 3v4h4M10 11h6M10 15h6M10 19h4\"/></svg>",
+"security": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z\"/><path d=\"M12 9v4M12 16h.01\"/></svg>",
+"vpns": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"M8 11V7a4 4 0 0 1 8 0v4\"/></svg>",
+"backups": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><ellipse cx=\"12\" cy=\"5.5\" rx=\"8\" ry=\"3\"/><path d=\"M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6\"/></svg>",
+"upgrades": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 16V8M8.5 11.5 12 8l3.5 3.5\"/></svg>",
+"tasks": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 6h11M9 12h11M9 18h11\"/><path d=\"m3.5 6 1.5 1.5L7.5 5M3.5 12l1.5 1.5 2.5-2.5M3.5 18l1.5 1.5 2.5-2.5\"/></svg>",
+"clients": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 21V7l9-4 9 4v14\"/><path d=\"M9 21v-6h6v6M8 10h.01M12 10h.01M16 10h.01\"/></svg>",
+"users": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"9\" cy=\"8\" r=\"3.5\"/><path d=\"M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5\"/></svg>",
+"audit": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 3h9l4 4v14H6z\"/><path d=\"M14 3v5h5M9 13h6M9 17h4\"/></svg>",
+"admin": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z\"/></svg>"
+};
+const NAV_ICONS_EXTRA = {
+  network: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  monitor: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>',
+  maint: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>',
+};
+const CHEV = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+// who sees what: "tech" = technicians, "admin" = technicians or client admins, "techadmin" = administrators
+const NAV = [
+  { view: "dashboard", label: "Dashboard", icon: "dashboard" },
+  { group: "Devices", icon: "routers", count: "devices", items: [
+    { view: "routers", label: "All devices", count: "devices" }, { view: "routers", arg: "ap", label: "Access points", count: "ap" },
+    { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" }] },
+  { group: "Network", icon: "network", items: [
+    { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
+    { view: "vpns", label: "Site-to-site VPN", who: "tech" }] },
+  { group: "Monitoring", icon: "monitor", count: "alerts", items: [
+    { view: "alerts", label: "Alerts", who: "tech", count: "alerts" }, { view: "logs", label: "Logs", who: "tech" }, { view: "security", label: "Security", who: "tech" }] },
+  { group: "Maintenance", icon: "maint", items: [
+    { view: "backups", label: "Backups", who: "tech" }, { view: "upgrades", label: "Upgrades", who: "tech", count: "updates" }, { view: "tasks", label: "Tasks", who: "tech" }] },
+  { group: "Clients & users", icon: "clients", items: [{ view: "clients", label: "Clients", who: "tech" }, { view: "users", label: "Users", who: "admin" }] },
+  { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
+];
+const navCounts = {};
+const navOk = (who) => !who || (who === "tech" ? isTech() : who === "admin" ? isTech() || me.role === "admin" : isTech() && me.role === "admin");
+const navOpen = () => { try { return new Set(JSON.parse(localStorage.getItem("tmNavOpen") || '["Devices"]')); } catch (e) { return new Set(["Devices"]); } };
+function renderNav() {
+  const open = navOpen();
+  const cnt = (k) => k && navCounts[k] ? `<span class="nav-count">${navCounts[k]}</span>` : "";
+  const icon = (k) => NAV_ICONS[k] || NAV_ICONS_EXTRA[k] || "";
+  $("navItems").innerHTML = NAV.map((n) => {
+    if (n.view) return navOk(n.who) ? `<button type="button" class="nav-top" data-view="${n.view}">${icon(n.icon)}<span class="nav-label">${esc(n.label)}</span></button>` : "";
+    const items = n.items.filter((i) => navOk(i.who));
+    if (!items.length) return "";
+    if (items.length === 1 && n.group !== "Devices") {   // a group with one visible page: show the page itself
+      const i = items[0];
+      return `<button type="button" class="nav-top" data-view="${i.view}"${i.arg ? ` data-arg="${i.arg}"` : ""}>${icon(n.icon)}<span class="nav-label">${esc(i.label)}</span>${cnt(i.count)}</button>`;
+    }
+    return `<div class="nav-group ${open.has(n.group) ? "open" : ""}" data-group="${esc(n.group)}">
+      <button type="button" class="nav-cat" data-toggle="${esc(n.group)}" aria-expanded="${open.has(n.group)}">${icon(n.icon)}<span class="nav-label">${esc(n.group)}</span>${cnt(n.count)}${CHEV}</button>
+      <div class="nav-sub">${items.map((i) => `<button type="button" class="nav-item" data-view="${i.view}"${i.arg ? ` data-arg="${i.arg}"` : ""}>
+        <span class="nav-label">${esc(i.label)}</span>${cnt(i.count)}</button>`).join("")}</div></div>`;
+  }).join("");
+  navActive();
+}
+function navActive() {
+  const [h, arg] = location.hash.slice(1).split("/");
+  const v = h === "router" ? "routers" : h === "vpn" ? "vpns" : h || "dashboard";
+  const a = h === "routers" ? arg || "" : "";
+  document.querySelectorAll("#navItems [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === v && (v !== "routers" || (b.dataset.arg || "") === a)));
+  document.querySelectorAll("#navItems .nav-group").forEach((g) => {   // the open page's group stays open
+    if (g.querySelector(".active") && !g.classList.contains("open")) { g.classList.add("open"); g.querySelector(".nav-cat").setAttribute("aria-expanded", "true"); }
+  });
+}
+async function refreshNavCounts() {
+  try {
+    const devs = (await api("/api/devices")).filter((d) => d.state === "adopted");
+    navCounts.devices = devs.length;
+    for (const k of ["ap", "router", "switch"]) navCounts[k] = devs.filter((d) => d.kind === k).length;
+    if (isTech()) {
+      const a = await api("/api/alerts").catch(() => null);
+      navCounts.alerts = a ? a.open.length : 0;
+    }
+  } catch (e) { return; }
+  renderNav();
+}
 const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
   clearInterval(timer);
-  document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === v || (v === "router" && b.dataset.view === "routers") || (v === "vpn" && b.dataset.view === "vpns")));
-  history.replaceState(null, "", arg != null ? `#${v}/${arg}` : `#${v}`);
+  history.replaceState(null, "", arg != null && arg !== "" ? `#${v}/${arg}` : `#${v}`);
+  navActive();
   try {
     await (v === "router" ? router(arg) : VIEWS[v](arg));
     // auto-refresh, skipped while someone is typing in a field on the page
@@ -3926,17 +4018,28 @@ async function init() {
   $("verChip").classList.toggle("hidden", !me.version);
   showUpdate(me.update);
   watchUpdates();
-  document.querySelectorAll("[data-tech]").forEach((b) => b.classList.toggle("hidden", !isTech()));
-  document.querySelectorAll("[data-admin]").forEach((b) => b.classList.toggle("hidden", !(isTech() || me.role === "admin")));
-  document.querySelectorAll("[data-techadmin]").forEach((b) => b.classList.toggle("hidden", !(isTech() && me.role === "admin")));
-  document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click", () => { $("nav").classList.remove("open"); go(b.dataset.view); }));
+  renderNav();
+  $("navItems").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-toggle]");
+    if (t) {   // open / close a group (remembered in this browser)
+      const g = t.closest(".nav-group"), isOpen = !g.classList.contains("open"), open = navOpen();
+      g.classList.toggle("open", isOpen); t.setAttribute("aria-expanded", String(isOpen));
+      isOpen ? open.add(t.dataset.toggle) : open.delete(t.dataset.toggle);
+      try { localStorage.setItem("tmNavOpen", JSON.stringify([...open])); } catch (err) { /* private window */ }
+      return;
+    }
+    const b = e.target.closest("[data-view]");
+    if (b) { $("nav").classList.remove("open"); go(b.dataset.view, b.dataset.arg); }
+  });
+  refreshNavCounts();
+  setInterval(refreshNavCounts, 60000);
   $("logout").addEventListener("click", async () => {
     const r = await post("/api/logout");
     location.href = r.entra_logout || "/login";
   });
   const route = () => {
     const [h, arg] = location.hash.slice(1).split("/");
-    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if (h === "admin" && arg) go("admin", arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
+    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if ((h === "admin" || h === "routers") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
   };
   window.addEventListener("hashchange", route);   // links, typed URLs and Back (go() uses replaceState, which doesn't fire this)
   route();

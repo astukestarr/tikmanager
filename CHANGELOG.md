@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.37.0 - 2026-10-12
+
+- **New sidebar**, laid out like Report Center's: collapsible groups with counts - **Devices**, **Network** (site map,
+  subnets, Discovered, site-to-site VPN), **Monitoring** (Alerts with the open count, Logs, Security), **Maintenance**
+  (Backups, Upgrades, Tasks), **Clients & users** and **Admin**. Open groups are remembered in the browser; the group of
+  the page you're on always opens.
+- **Devices** instead of Routers, with **All devices**, **Access points**, **Routers** and **Switches** (counts beside
+  each). The kind comes from the model (CRS / CSS = switch; cAP, wAP, SXT, LHG, NetMetal, Cube ... = access point;
+  everything else, hAP and Chateau included, = router) and can be set per device on its Settings tab
+  (**Tags, notes & type**). All devices shows a Type column.
+- **Admin > Integrations** redesigned like Report Center's: a category filter and search on the left, one card per
+  integration (ConnectWise, IT Glue, Email, Teams, Webhooks, GitHub, Off-site backup, Microsoft sign-in) with its
+  status - Connected / Error / Set up / Not set up - and **Edit** / **Test**. Edit opens that integration on its own
+  page (with ← All integrations); Teams, Webhooks, Off-site backup and sign-in take you to where they're set up.
+
 ## 1.36.0 - 2026-10-12
 
 - **Ports tab** on the router page (technicians), laid out like UniFi's Ports page:

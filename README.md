@@ -172,7 +172,11 @@ the repository, point `TM_UPDATE_REPO` at your fork (or install with `get.sh --r
 tags (see [CLAUDE.md](CLAUDE.md#releasing-a-new-version)). `TM_UPDATE_CHECK=0` turns off the hourly check (the button
 still works).
 
-## Routers
+## Devices (routers, switches, access points)
+
+The sidebar's **Devices** group lists All devices, Access points, Routers and Switches - the kind comes from the
+model and can be changed per device (Settings tab > Tags, notes & type).
+
 
 **Routers** lists every approved router with its status, client, site, model, RouterOS version, uptime, CPU and when it
 was last seen, and its **age**. Filter by client, status (including **Discontinued model** and **5+ years old**) or text; click a column header to sort by it (click again to reverse - Status
