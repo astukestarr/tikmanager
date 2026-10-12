@@ -462,7 +462,9 @@ function wlMode(r) {
   return m || "—";
 }
 const wlIsLink = (r, peers) => r.mode === "bridge" || (r.mode || "").startsWith("station") || (r.kind === "w60g" && r.mode !== "ap-bridge" && peers.length <= 1);
-const wlRate = (s) => String(s || "").replace(/-\d+MHz.*$/, "").replace(/Mbps$/, " Mbps").replace(/Gbps$/, " Gbps");
+const wlRate = (s) => /^\d{4,}$/.test(String(s || "")) ? bpsShort(+s).replace(/([GMk])$/, " $1bps").replace(/^(\d+(\.\d)?)$/, "$1 bps")   // plain bits/s (60 GHz)
+  : String(s || "").replace(/-\d+MHz.*$/, "").replace(/Mbps$/, " Mbps").replace(/Gbps$/, " Gbps");
+const wlPeer = (p) => p.device_id ? `<a href="#router/${p.device_id}">${esc(p.device_name)}</a>` : p.name ? esc(p.name) : "";
 
 async function loadWireless(d) {
   let token = ++wlView.token;
@@ -495,11 +497,11 @@ async function loadWireless(d) {
           ...(p.ccq != null ? [["CCQ", `${p.ccq}%`, wlRange(p.ccq, 80, 60), ""]] : []),
           ["TX rate", wlRate(p.tx_rate) || "—", "", p.mcs ? `MCS ${esc(p.mcs)}` : ""],
           ...(p.rx_rate ? [["RX rate", wlRate(p.rx_rate), "", ""]] : []),
-          ...(p.distance ? [["Distance", `${esc(p.distance)}${/^\d+$/.test(p.distance) ? (r.kind === "w60g" ? " m" : " km") : ""}`, "", ""]] : []),
-          ["Link up", p.uptime ? uptime(p.uptime, true) : "—", "", ""]];
+          ...(p.distance ? [["Distance", `${esc(p.distance)}${/^[\d.]+$/.test(p.distance) ? (r.kind === "w60g" ? " m" : " km") : ""}`, "", ""]] : []),
+          ...(p.uptime ? [["Link up", uptime(p.uptime, true), "", ""]] : [])];
         return `<div class="card">${head}<div class="health">${cells.map(([k, v, c, sub]) => `<div class="hcell ${c}"><div class="hv">${v}</div>
             <div class="hl">${k}${sub ? ` · ${sub}` : ""}</div></div>`).join("")}</div>
-          <p class="small">Connected to <b>${esc(p.name || "(no name)")}</b>${p.ip ? ` · <span class="mono">${esc(p.ip)}</span>` : ""} · <span class="mono">${esc(p.mac)}</span>
+          <p class="small">Connected to <b>${wlPeer(p) || "(no name)"}</b>${p.device_id ? ` <span class="muted">(in TikManager)</span>` : ""}${p.ip ? ` · <span class="mono">${esc(p.ip)}</span>` : ""} · <span class="mono">${esc(p.mac)}</span>
             ${p.version ? ` · RouterOS ${esc(p.version)}` : ""}${p.tx_bytes != null ? ` · ${bytes(p.tx_bytes)} sent, ${bytes(p.rx_bytes)} received` : ""}</p></div>`;
       }
       // access point: its clients
@@ -516,7 +518,7 @@ async function loadWireless(d) {
         ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Client</th><th>IP</th><th>Signal</th>${col.snr ? "<th>SNR</th>" : ""}${col.ccq ? "<th>CCQ</th>" : ""}
           <th>TX / RX rate</th>${col.band ? "<th>Band</th>" : ""}${col.dist ? "<th>Distance</th>" : ""}<th>Connected</th><th>Traffic (to / from)</th>${col.ver ? "<th>RouterOS</th>" : ""}</tr></thead><tbody>
           ${shown.map((p) => { const [w, t] = wlSig(p.signal); const pct = p.signal == null ? 0 : Math.max(4, Math.min(100, Math.round((p.signal + 95) * 100 / 55)));
-            return `<tr><td>${p.name ? esc(p.name) : `<span class="muted">—</span>`}<div class="small muted mono">${esc(p.mac)}</div></td><td class="mono small">${esc(p.ip || "")}</td>
+            return `<tr><td>${wlPeer(p) || `<span class="muted">—</span>`}<div class="small muted mono">${esc(p.mac)}</div></td><td class="mono small">${esc(p.ip || "")}</td>
               <td class="nowrap"><div class="row wl-sig"><div class="bar"><i data-pct="${pct}" class="${t === "bad" ? "hot" : t === "warn" ? "warm" : ""}"></i></div>
                 <span class="status ${wlTone[t] || ""}">${p.signal ?? "—"}</span></div><div class="small muted">${w}${p.remote_signal != null ? ` · remote ${p.remote_signal}` : ""}</div></td>
               ${col.snr ? `<td class="status ${wlTone[wlRange(p.snr, 30, 20)] || ""}">${p.snr ?? ""}</td>` : ""}${col.ccq ? `<td class="status ${wlTone[wlRange(p.ccq, 80, 60)] || ""}">${p.ccq != null ? `${p.ccq}%` : ""}</td>` : ""}

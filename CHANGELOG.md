@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.24.1 - 2026-10-11
+
+- **Wireless tab names the other end** when it's one of your routers in TikManager (matched by its interface MAC
+  addresses), with a link to its page - 60 GHz radios report only the far end's MAC, and a bridged link has no DHCP
+  lease or ARP entry to take a name from. Clients only see matches among their own routers.
+- 60 GHz rates show as e.g. "2.3 Gbps" (the radio reports plain bits per second), distance in metres, and "Link up" is
+  left out when the radio doesn't report it.
+
 ## 1.24.0 - 2026-10-11
 
 - **Suggested replacement** for discontinued and 5+-year-old routers - on the router page and in the Dashboard's

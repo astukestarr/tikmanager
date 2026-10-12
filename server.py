@@ -642,9 +642,24 @@ class Handler(BaseHTTPRequestHandler):
             if d["state"] != "adopted" or not d["online"]:
                 raise HttpError(400, "The router is offline.")
             try:
-                return self.json({**poller.client(d).wireless(), "read_at": now()})
+                w = poller.client(d).wireless()
             except RouterError as e:
                 raise HttpError(502, str(e)) from None
+            # the other end of a link / a client that is itself one of our routers (matched by its interface MACs -
+            # a bridged radio link has no DHCP lease or ARP entry, and 60 GHz radios report only the MAC)
+            where, args = self.org_scope(s, None, "org_id")
+            known = {}
+            for r in db.q(f"SELECT id, name, interfaces FROM devices WHERE state='adopted' AND id<>? AND {where}", [d["id"], *args]):
+                for i in json.loads(r["interfaces"] or "[]"):
+                    m = str(i.get("mac") or "").upper()
+                    if m and m != "00:00:00:00:00:00":
+                        known.setdefault(m, r)
+            for p in w["peers"]:
+                r = known.get(str(p.get("mac") or "").upper())
+                if r:
+                    p["device_id"], p["device_name"] = r["id"], r["name"]
+                    p["name"] = p["name"] or r["name"]
+            return self.json({**w, "read_at": now()})
         if m := re.fullmatch(r"/api/devices/(\d+)/dhcp", path):   # DHCP leases, read live from the router
             s = self.require()
             d = self.device_for(s, m.group(1))
