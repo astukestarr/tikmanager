@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.20.0 - 2026-10-11
+
+- **Server security grade** (Admin > Version & updates): the server security check now shows a grade, like the website
+  grade. 100 points, minus 20 for each FAIL and 5 for each WARN; any FAIL means C at best, so a real problem can't hide
+  behind lots of passes; **A+** means nothing to fix or look at.
+
 ## 1.19.1 - 2026-10-11
 
 Security review of everything added since 1.8.1 (security events, alerts, off-site backup, script library, Winbox

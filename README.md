@@ -460,7 +460,7 @@ TikManager can change every router it manages, so treat the server like the keys
   `sudo apt upgrade` - it comes from Caddy's own package repository.
 
 **Check the server**: TikManager runs a read-only security check of its own server daily, after every upgrade and
-when you click **Run check** on **Admin > Version & updates**, where the results are shown (set up by the installer, or
+when you click **Run check** on **Admin > Version & updates**, where the results are shown with a grade (A+ = nothing to fix or look at; any FAIL = C at best) (set up by the installer, or
 by upgrading to 1.9.0). You can also run it in a terminal:
 
     sudo bash /opt/tikmanager/deploy/check.sh

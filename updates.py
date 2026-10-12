@@ -31,6 +31,16 @@ def vtuple(v):
     return tuple(int(x) for x in m.groups()) if m else None
 
 
+def security_grade(fails, warns):
+    """The server security check as a grade: 100 points, -20 per FAIL, -5 per WARN; any FAIL caps it at C, so a real
+    problem can't hide behind lots of passes. A+ = nothing to fix or look at."""
+    score = max(0, 100 - 20 * fails - 5 * warns)
+    if fails:
+        score = min(score, 79)
+    grade = "A+" if not fails and not warns else "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D" if score >= 60 else "F"
+    return {"score": score, "grade": grade}
+
+
 class Updates:
     def __init__(self, settings):
         self.s = settings
@@ -108,6 +118,7 @@ class Updates:
                      "text": str(r.get("text"))[:600]}
                     for r in (d.get("results") or [])[:200] if isinstance(r, dict)]
             out.update(at=d.get("at"), fails=int(d.get("fails") or 0), warns=int(d.get("warns") or 0), results=rows)
+            out.update(security_grade(out["fails"], out["warns"]))
             break
         return out
 

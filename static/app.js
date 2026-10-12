@@ -1822,11 +1822,13 @@ function securityBox(s, u = {}) {
         ${s.fails ? `<span class="pill sec-pill-fail">${s.fails} to fix</span>` : ""}${s.warns ? `<span class="pill sec-pill-warn">${s.warns} to look at</span>` : ""}
         ${!s.fails && !s.warns ? `<span class="pill sec-pill-ok">All checks passed</span>` : ""}`
     : `<span class="small muted">Not run yet.</span>`;
-  return `<div class="sec-box"><div class="row"><h3>Server security</h3>${head}<span class="spacer"></span>
+  const g = s.grade && !s.running ? s.grade : "", gtone = g.startsWith("A") ? "good" : g === "B" || g === "C" ? "warn" : "bad";
+  return `<div class="sec-box"><div class="row"><h3>Server security</h3>${g ? `<span class="obs-grade obs-${gtone}" title="${s.score} of 100 points">${esc(g)}</span>` : ""}${head}<span class="spacer"></span>
       ${s.supported ? `<button class="btn" type="button" id="secRun" ${s.running ? "disabled" : ""}>Run check</button>` : ""}</div>
     <p class="small muted">A read-only check of this server: firewall, SSH, automatic updates, open ports, HTTPS certificate, key-file permissions,
       the service's sandbox, and whether the server can reach your LAN. It runs daily, after every upgrade and when you click Run check; it never
-      changes anything - each item says what to do.</p>
+      changes anything - each item says what to do.${g ? ` <b>Grade:</b> 100 points, minus 20 for each FAIL and 5 for each WARN; any FAIL means C at best,
+      A+ means nothing to fix or look at.` : ""}</p>
     ${bad.length ? `<ul class="sec-list">${bad.map(row).join("")}</ul>` : ""}
     ${ok.length ? `<details><summary class="small">${ok.length} passed</summary><ul class="sec-list">${ok.map(row).join("")}</ul></details>` : ""}
     ${obsBox(u.observatory || {})}
