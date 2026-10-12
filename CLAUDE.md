@@ -67,6 +67,8 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Firewall / NAT editing (fields, locked rules, undo timer) | `firewall.py` (`FIELDS`, `ACTIONS`, `protected()`, `restore_script()`), `RouterOS.fw_*` / `undo_*` (+ `SimRouter`), `loadFirewall()` / `fwDialog()` in `app.js` |
 | Community script library (danger / secret patterns, sharing) | `scriptlib.py` (`DANGER`, `SECRETS`, `share()`), `libraryDialog()` / `shareDialog()` in `app.js`; library repo `astukestarr/routeros-scripts` |
 | Wireless tab (radios, links, AP clients) | `RouterOS.wireless()` / `SimRouter.wireless()`, `/api/devices/{id}/wireless`, `loadWireless()` in `app.js` |
+| Internet links (ISP / WAN / LTE state) | `Poller.isp_links/track_isp`, `isp` alert kind, `ispCard/ispSettings` in `app.js` |
+| Hardware health (sensors, SFP) | `RouterOS.health()`, `health_metrics` table, `/api/devices/{id}/health`, `hwCard()` in `app.js` |
 | Auto-block (fleet-wide blocklist) | `autoblock.py` (`candidates`, `block`, `release`, `push`, `add_rule`), `autoBlockCard()` in `app.js` |
 | RouterOS security (CVEs, security releases, What's new) | `rossec.py` (`security_items`, `releases_between`, `cves_for`), `secState/secCard/notesDialog/rosSecCard` in `app.js` |
 | Router lifecycle (age, discontinued, replacements) | `lifecycle.py` (`REPLACEMENTS`, overrides in setting `lifecycle_suggest`), `lcYears/lcMade/lcFlag/lcSuggest/lifecycleCard/lcAdminCard` in `app.js` |

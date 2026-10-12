@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS devices (
   dm_mode TEXT, dm_flagged INTEGER, dm_info TEXT, dm_checked REAL,   -- RouterOS device-mode (hourly); flagged = possibly compromised
   sec_target TEXT, cve_n INTEGER, cve_max REAL, sec_info TEXT, sec_version TEXT, sec_checked REAL,   -- rossec.py: security releases / CVEs
   health TEXT, health_at REAL,             -- latest sensor readings {name: {value, unit}} (health_metrics has the history)
+  isp_ifaces TEXT, isp_state TEXT,         -- internet links: chosen interfaces (JSON, null = automatic) and their state
   lat REAL, lon REAL, location TEXT,       -- where it is (map): typed in, picked on the map, or from the router's GPS
   loc_source TEXT,                          -- manual / gps (manual always wins)
   api_port INTEGER,                         -- the router's www (REST) port, reported when it runs the adoption command                         -- VPNs already configured on the router (raw, whitelisted fields)
@@ -214,7 +215,7 @@ class DB:
                              ("lc_suggest", "TEXT"), ("lc_suggest_name", "TEXT"), ("lc_suggest_why", "TEXT"),
                              ("dm_mode", "TEXT"), ("dm_flagged", "INTEGER"), ("dm_info", "TEXT"), ("dm_checked", "REAL"),
                              ("sec_target", "TEXT"), ("cve_n", "INTEGER"), ("cve_max", "REAL"), ("sec_info", "TEXT"), ("sec_version", "TEXT"),
-                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL")):
+                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")
             if info["org_id"][3] == 1 or "name_custom" not in info:   # org_id NOT NULL (old schema)

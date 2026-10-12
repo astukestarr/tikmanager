@@ -1,6 +1,7 @@
 """Polls every adopted router over its tunnel about once a minute: status, interfaces, traffic rate; records online/offline
 changes as events and keeps a week of metrics for the charts."""
 import json
+import re
 import threading
 import time
 import traceback
@@ -14,6 +15,7 @@ CHART_TYPES = {"ether", "vlan", "bridge", "wlan", "wifi", "lte", "pppoe-out", "w
 KEEP_METRICS = 7 * 86400
 INVENTORY_SECONDS = 15 * 60
 HEALTH_SECONDS = 300
+ISP_RE = re.compile(r"\b(isp|wan|internet|starlink|dsl|lte|5g)\d*\b", re.I)
 KEEP_HEALTH = 30 * 86400
 
 
@@ -30,6 +32,36 @@ class Poller:
         if self.s.dev:
             return SimRouter(d["id"], d["name"])
         return RouterOS(d["tunnel_ip"], "tikmanager", derive(self.key, f"router-api:{d['id']}"), port=d.get("api_port") or 80)
+
+    @staticmethod
+    def isp_links(ifaces, chosen=None):
+        """The router's internet (ISP) links: the interfaces picked on its page, else those whose comment says ISP / WAN /
+        internet / Starlink / DSL / LTE / 5G, PPPoE clients and LTE modems; else the one the default route uses (or ether1)."""
+        if chosen:
+            return [i for i in ifaces if i.get("name") in chosen]
+        auto = [i for i in ifaces if ISP_RE.search(i.get("comment") or "") or i.get("type") in ("pppoe-out", "lte")]
+        return auto or [i for i in ifaces if i.get("default_route")] or [i for i in ifaces if i.get("name") == "ether1"]
+
+    def track_isp(self, d, ifaces, now):
+        """Each internet link's state; events when one goes down, comes back or changes its address."""
+        try:
+            chosen = json.loads(d.get("isp_ifaces") or "null")
+            old = json.loads(d.get("isp_state") or "{}")
+        except ValueError:
+            chosen, old = None, {}
+        new = {}
+        for i in self.isp_links(ifaces, chosen):
+            n, up, addr = i["name"], bool(i.get("running")) and not i.get("disabled"), i.get("ip") or ""
+            o = old.get(n)
+            label = f"{n}" + (f" ({i['comment']})" if i.get("comment") else "")
+            if o and o["up"] != up:
+                self.db.event(d["id"], d["org_id"], "link up" if up else "link down",
+                              f"Internet link {label} is {'back up' if up else 'down'}" + (f" - address {addr}" if up and addr else ""))
+            elif o and up and o.get("addr") and addr and addr != o["addr"]:
+                self.db.event(d["id"], d["org_id"], "link address", f"Internet link {label} changed address: {o['addr']} -> {addr}")
+            new[n] = {"up": up, "addr": addr or (o or {}).get("addr", ""), "since": o["since"] if o and o["up"] == up else now,
+                      "comment": i.get("comment") or "", "type": i.get("type") or "", "active": bool(i.get("default_route"))}
+        self.db.run("UPDATE devices SET isp_state=? WHERE id=?", (json.dumps(new), d["id"]))
 
     @staticmethod
     def wan_counters(ifaces):
@@ -63,6 +95,7 @@ class Poller:
                        name=CASE WHEN name_custom=0 AND COALESCE(?, '') <> '' THEN ? ELSE name END WHERE id=?""",
                     (now, now, st["identity"], st["model"], st["serial"], st["version"], st["board"], st["uptime"], st["cpu"],
                      st["mem_used"], st["mem_total"], json.dumps(st["interfaces"]), st["identity"], st["identity"], d["id"]))
+        self.track_isp(d, st["interfaces"], now)
         cl = self.client(d)
         # location from the router's own GPS (if it has one) - never over a location someone entered by hand
         if d.get("loc_source") != "manual" and hasattr(cl, "gps") and now - self._gps.get(d["id"], 0) > 6 * 3600:

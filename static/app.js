@@ -141,6 +141,14 @@ async function dashboard() {
       <p class="small">RouterOS found signs of unauthorized access in their configuration. Open each one for what to do.</p>
       ${table(adopted.filter((d) => d.dm_flagged), ["state", "org", "name", "model", "version", "last_seen"])}</div>` : ""}
     ${isTech() && devices.length > adopted.length ? `<div class="card"><h2>Waiting for approval</h2>${pendingTable(devices.filter((d) => d.state !== "adopted"))}</div>` : ""}
+    ${(() => {
+      const down = adopted.filter((d) => d.online).flatMap((d) => Object.entries(d.isp_state || {}).filter(([, l]) => !l.up).map(([n, l]) => ({ d, n, l })));
+      return down.length ? `<div class="card"><h2>Internet links down</h2><p class="small muted">The router is reachable (another link or the tunnel still works), but this link isn't.</p>
+        <div class="table-wrap"><table><thead><tr><th>Router</th>${me.org ? "" : "<th>Client</th>"}<th>Link</th><th>Down for</th></tr></thead><tbody>
+        ${down.map(({ d, n, l }) => `<tr class="click" data-dev="${d.id}"><td>${esc(d.name)}</td>${me.org ? "" : `<td>${esc(d.org || "")}</td>`}
+          <td><span class="mono">${esc(n)}</span> <span class="muted small">${esc(l.comment || "")}</span></td><td class="small">${l.since ? durShort(Date.now() / 1000 - l.since) : ""}</td></tr>`).join("")}
+        </tbody></table></div></div>` : "";
+    })()}
     ${lifecycleCard(adopted)}
     <div class="card"><h2>Offline routers</h2>${offline.length ? table(offline, ["state", "org", "name", "last_seen", "last_error"]) : `<p class="muted">Everything is online.</p>`}</div>
     <div class="card"><h2>Recent events</h2>${events.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Event</th><th>Detail</th></tr></thead><tbody>
@@ -387,6 +395,7 @@ async function router(id) {
           <span class="muted" id="cNote"></span></div>
       </div>
       <div class="health" id="health"></div>
+      ${ispCard(d)}
       ${secCard(d)}
       ${Object.keys(d.health || {}).length ? `<div class="card" id="hwCard"><h2>Hardware health</h2><p class="muted small">Loading…</p></div>` : ""}
       ${lteCard(d.interfaces || [])}
@@ -413,6 +422,7 @@ async function router(id) {
       ${adopted && tab === "firewall" ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
+      ${adopted && tab === "settings" && canWrite() ? ispSettings(d) : ""}
       ${on("events") ? `<div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>` : ""}
       ${canWrite() && on("settings") ? `<div class="card"><h2>Manage</h2>
         ${d.state === "adopted" ? `<div class="row"><label class="field">Router identity (on the MikroTik) <input id="rIdent" value="${esc(d.identity || "")}" maxlength="64" spellcheck="false"></label>
@@ -473,6 +483,12 @@ async function router(id) {
   if ($("bkCard")) loadBackups(d).then(() => { if (rView.backupNow) { rView.backupNow = false; $("bkNow")?.click(); } });
   if ($("dhcpCard")) loadDhcp(d);
   if ($("wlCard")) loadWireless(d);
+  $("ispSave")?.addEventListener("click", async () => {
+    const ifaces = [...document.querySelectorAll("[data-isp]:checked")].map((c) => c.dataset.isp);
+    try { await post(`/api/devices/${d.id}/isp`, { ifaces: $("ispAuto").checked ? [] : ifaces }); $("ispStatus").textContent = "Saved - shown after the next poll (about a minute)."; $("ispStatus").className = "status ok"; }
+    catch (e) { $("ispStatus").textContent = e.message; $("ispStatus").className = "status err"; }
+  });
+  $("ispAuto")?.addEventListener("change", (e) => document.querySelectorAll("[data-isp]").forEach((c) => { c.disabled = e.target.checked; }));
   if ($("topoCard")) loadTopology(d);
   if ($("fwCard")) loadFirewall(d);
   if ($("wbBox")) loadWinbox(d);
@@ -727,6 +743,33 @@ function upgradeBox(d) {
   }
   if (last && !j) html += `<p class="small ${last.status === "failed" ? "status err" : "muted"}">Last upgrade ${ago(last.finished_at)}: ${esc(last.detail || last.status)}</p>`;
   return html;
+}
+
+// Internet links (ISP / WAN / LTE): up or down, address, since when, which one carries the traffic now
+const durShort = (s) => s < 3600 ? `${Math.max(1, Math.round(s / 60))} min` : s < 86400 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} d`;
+function ispCard(d) {
+  const links = Object.entries(d.isp_state || {});
+  if (!links.length) return "";
+  const now = Date.now() / 1000;
+  return `<div class="card"><div class="row"><h2>Internet links</h2><span class="spacer"></span>
+      ${links.some(([, l]) => !l.up) ? `<span class="status warn small">${links.filter(([, l]) => !l.up).length} down</span>` : `<span class="status ok small">all up</span>`}</div>
+    <div class="table-wrap"><table><thead><tr><th>Link</th><th>Status</th><th>Address</th><th>For</th><th></th></tr></thead><tbody>
+    ${links.map(([n, l]) => `<tr><td><span class="mono">${esc(n)}</span>${l.comment ? ` <span class="muted small">${esc(l.comment)}</span>` : ""}</td>
+      <td>${l.up ? `<span class="dot on"></span>up` : `<span class="dot off"></span><b class="status err">down</b>`}</td>
+      <td class="mono small">${esc(l.addr || "")}</td><td class="small nowrap">${l.since ? durShort(now - l.since) : ""}</td>
+      <td>${l.active ? `<span class="pill" title="The default route uses this link now">carrying traffic</span>` : ""}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small muted">Events and an alert when a link goes down, comes back or changes address. Which interfaces count is set on the Settings tab.</p></div>`;
+}
+function ispSettings(d) {
+  const ifs = (d.interfaces || []).filter((i) => !["wg", "bridge", "vlan", "loopback"].includes(i.type) && i.name !== "tikmanager");
+  const auto = !d.isp_ifaces || !d.isp_ifaces.length, cur = new Set(auto ? Object.keys(d.isp_state || {}) : d.isp_ifaces);
+  return `<div class="card"><h2>Internet links</h2>
+    <p class="small muted">The interfaces facing your internet providers (including LTE / backup links). Automatic picks interfaces whose comment says
+      ISP, WAN, internet, Starlink, DSL, LTE or 5G (e.g. "ISP1", "ISP2 LTE", "Backup WAN"), PPPoE clients and LTE modems - or the one the default route uses.</p>
+    <label class="chk"><input type="checkbox" id="ispAuto" ${auto ? "checked" : ""}> Automatic</label>
+    <div class="isp-pick">${ifs.map((i) => `<label class="chk"><input type="checkbox" data-isp="${esc(i.name)}" ${cur.has(i.name) ? "checked" : ""} ${auto ? "disabled" : ""}>
+      <span class="mono">${esc(i.name)}</span>${i.comment ? ` <span class="muted small">${esc(i.comment)}</span>` : ""}</label>`).join("")}</div>
+    <div class="actions"><button class="btn primary" type="button" id="ispSave">Save</button><span class="status" id="ispStatus"></span></div></div>`;
 }
 
 // Hardware health: board sensors and fibre modules, current value + a line over the selected range (every 5 minutes)

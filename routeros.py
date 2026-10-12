@@ -106,6 +106,9 @@ class RouterOS:
                            band_lte=m.get("primary-band") or "", access=m.get("access-technology") or "")
             out.append(row)
         wan, nets = self.addressing(out)
+        for row in out:   # for internet-link monitoring: each interface's address, and the one the default route uses now
+            row["ip"] = getattr(self, "_if_addr", {}).get(row["name"], "")
+            row["default_route"] = bool(row["name"]) and row["name"] == getattr(self, "_gw_if", "")
         return {"identity": ident, "version": res.get("version"), "board": res.get("board-name"), "uptime": res.get("uptime"),
                 "cpu": int(res.get("cpu-load") or 0), "mem_total": int(res.get("total-memory") or 0),
                 "mem_used": int(res.get("total-memory") or 0) - int(res.get("free-memory") or 0),
@@ -612,6 +615,8 @@ class RouterOS:
         hit = next((a for a in addrs if gw_if and a.get("interface") == gw_if), None) or next(
             (a for a in addrs if a.get("dynamic") == "true" and not a.get("address", "").startswith(("10.", "192.168.", "172."))), None)
         wan = (hit or {}).get("address", "").split("/")[0]
+        self._if_addr = {a.get("interface", ""): a.get("address", "").split("/")[0] for a in reversed(addrs)}   # (first address wins)
+        self._gw_if = gw_if
         comments = {i["name"]: i.get("comment") or "" for i in ifaces}
         nets = []
         for a in addrs:
@@ -1128,7 +1133,9 @@ class SimRouter:
         up = int(t - boot)
         n = self.r.randint(4, 10)
         mac = lambda k: "48:A9:8A:%02X:%02X:%02X" % (self.id % 256, k, self.r.randint(0, 255))
-        ifaces = [{"name": "ether1", "type": "ether", "running": True, "disabled": False, "comment": "WAN", "speed": "1Gbps"}]
+        main_down = self.id % 4 == 0 and random.Random(int(t // 600) * 13 + self.id).random() < 0.15   # LTE takes over
+        ifaces = [{"name": "ether1", "type": "ether", "running": not main_down, "disabled": False, "comment": "WAN", "speed": "" if main_down else "1Gbps",
+                   "ip": f"203.0.113.{self.id % 250 + 2}", "default_route": not main_down}]
         ifaces += [{"name": f"ether{i}", "type": "ether", "running": (up_ := self.r.random() > 0.3), "disabled": False, "comment": "",
                     "speed": self.r.choice(["1Gbps", "100Mbps"]) if up_ else ""} for i in range(2, n)]
         if self.board in ("rb5009", "ccr2004"):   # a fibre uplink with optical readings
@@ -1148,6 +1155,7 @@ class SimRouter:
                         "mode": "station-bridge" if self.id % 5 == 0 else "ap-bridge"}]
         if self.id % 4 == 0:
             ifaces += [{"name": "lte1", "type": "lte", "running": True, "disabled": False, "comment": "Backup WAN", "operator": "T-Mobile",
+                        "ip": f"100.72.{self.id}.{int(t // 86400) % 200 + 10}", "default_route": main_down,
                         "rsrp": str(-80 - self.r.randint(0, 35)), "rsrq": str(-8 - self.r.randint(0, 9)), "sinr": str(self.r.randint(-2, 22)),
                         "rssi": str(-55 - self.r.randint(0, 30)), "cell": str(self.r.randint(10 ** 6, 10 ** 7)), "band_lte": "B66", "access": "LTE"}]
         ifaces += [{"name": "tikmanager", "type": "wg", "running": True, "disabled": False, "comment": "TikManager"}]

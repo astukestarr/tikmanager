@@ -412,8 +412,10 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
+            for r in rows:
+                r["isp_state"] = json.loads(r.get("isp_state") or "{}")
             return self.json(rows)
         if path == "/api/sites":   # site map: each adopted router with its WAN address and LAN networks
             s = self.require()
@@ -696,6 +698,8 @@ class Handler(BaseHTTPRequestHandler):
             d["dm_info"] = json.loads(d.get("dm_info") or "null")
             d["sec_info"] = json.loads(d.get("sec_info") or "null")
             d["health"] = json.loads(d.get("health") or "{}")
+            d["isp_state"] = json.loads(d.get("isp_state") or "{}")
+            d["isp_ifaces"] = json.loads(d.get("isp_ifaces") or "null")
             org = db.one("SELECT name FROM orgs WHERE id=?", (d["org_id"],)) if d["org_id"] else None
             d["org"] = org["name"] if org else ""
             d["upgrade"] = db.one("""SELECT id, status, step, scheduled_at, channel, firmware, created_by FROM upgrades
@@ -929,6 +933,14 @@ class Handler(BaseHTTPRequestHandler):
             db.run("UPDATE devices SET name=?, name_custom=?, site=? WHERE id=?",
                    (name or d["identity"] or d["name"], 1 if name else 0, str(b.get("site") if "site" in b else d["site"])[:120], d["id"]))
             db.audit(s["email"], "router renamed", f"{d['name']} -> {name or d['identity']}", self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/isp", path):   # which interfaces are the router's internet links ([] = automatic)
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            names = {i.get("name") for i in json.loads(d["interfaces"] or "[]")}
+            chosen = [str(x)[:64] for x in (self.body().get("ifaces") or []) if str(x) in names][:16]
+            db.run("UPDATE devices SET isp_ifaces=?, isp_state=NULL WHERE id=?", (json.dumps(chosen) if chosen else None, d["id"]))
+            db.audit(s["email"], "internet links set", f"{d['name']}: {', '.join(chosen) or 'automatic'}", self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/identity", path):   # change /system identity on the router itself
             s = self.require(tech=True, write=True)

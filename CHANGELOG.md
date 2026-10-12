@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.29.0 - 2026-10-12
+
+- **Internet links**: each router's ISP / WAN / LTE links are watched every minute - up or down, their address, since
+  when, and which one carries the traffic now (the default route), so a failover to LTE is visible.
+  - Which interfaces count: automatic (a comment saying ISP, WAN, internet, Starlink, DSL, LTE or 5G - e.g. "ISP1",
+    "ISP2 LTE", "Backup WAN" - plus PPPoE clients and LTE modems, else the default route's interface), or picked on the
+    router's Settings tab.
+  - Router page: an **Internet links** card. Events when a link goes down, comes back or changes its address.
+    Dashboard: **Internet links down** on routers that are still reachable.
+  - New alert (on by default): **Internet link down** for N minutes (default 3) on a router that's still reachable - the
+    detail says which link it's running on instead. An offline router stays the offline alert's business.
+
 ## 1.28.0 - 2026-10-12
 
 - **Hardware health** (router page, Overview): every sensor the board has - temperatures, voltage, fans, power - and
