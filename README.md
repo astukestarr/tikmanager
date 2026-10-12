@@ -189,7 +189,9 @@ searchable) - handy for an office AP or an ISP sector full of CPEs.
 be planned (clients see their own). Both come from MikroTik: the age from the router's factory firmware (the RouterOS
 version it shipped with, dated by MikroTik's changelog - accurate to a few months), "discontinued" from the model's
 mikrotik.com product page (checked weekly). MikroTik publishes no end-of-support dates - a discontinued model still gets
-RouterOS updates for now.
+RouterOS updates for now. Each discontinued or old router also gets a **suggested replacement** - a current MikroTik
+model of the same kind (from a short list per old family, shown only while MikroTik still sells it). Administrators can
+set their own standard model per router model on Admin > Settings > **Replacement suggestions**.
 
 **Adding routers:** **Adopt routers** shows the adoption command (the same for every router). Paste it into the
 router's terminal (Winbox > New Terminal, or SSH); the router registers itself, then a technician approves it and picks

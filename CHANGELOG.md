@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.24.0 - 2026-10-11
+
+- **Suggested replacement** for discontinued and 5+-year-old routers - on the router page and in the Dashboard's
+  Lifecycle card, with a link to the model's mikrotik.com page and why it fits (e.g. hAP ac² -> hAP ax², CCR1009 ->
+  CCR2004-16G-2S+, RB2011 -> L009UiGS-RM, cAP ac -> cAP ax, SXTsq 5 ac -> SXTsq 5 ax). MikroTik names no successors,
+  so TikManager has a short list per old family; a suggestion is only shown while MikroTik still sells it (checked on
+  its product page).
+- **Your own standard** per model: Admin > Settings > **Replacement suggestions** lists the discontinued / old models
+  in use; paste a mikrotik.com product link to suggest that instead (clear it to go back). Changes are audited.
+
 ## 1.23.1 - 2026-10-11
 
 - **Wireless tab: 60 GHz radios** - the tab now appears for every 60 GHz interface type, and connected 60 GHz stations

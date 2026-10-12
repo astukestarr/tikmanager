@@ -67,7 +67,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Firewall / NAT editing (fields, locked rules, undo timer) | `firewall.py` (`FIELDS`, `ACTIONS`, `protected()`, `restore_script()`), `RouterOS.fw_*` / `undo_*` (+ `SimRouter`), `loadFirewall()` / `fwDialog()` in `app.js` |
 | Community script library (danger / secret patterns, sharing) | `scriptlib.py` (`DANGER`, `SECRETS`, `share()`), `libraryDialog()` / `shareDialog()` in `app.js`; library repo `astukestarr/routeros-scripts` |
 | Wireless tab (radios, links, AP clients) | `RouterOS.wireless()` / `SimRouter.wireless()`, `/api/devices/{id}/wireless`, `loadWireless()` in `app.js` |
-| Router lifecycle (age, discontinued) | `lifecycle.py`, `lcYears/lcMade/lcFlag/lifecycleCard` in `app.js` |
+| Router lifecycle (age, discontinued, replacements) | `lifecycle.py` (`REPLACEMENTS`, overrides in setting `lifecycle_suggest`), `lcYears/lcMade/lcFlag/lcSuggest/lifecycleCard/lcAdminCard` in `app.js` |
 | Send email | `mailer.Mailer.send()` (`server.mailer`, `alerts.mailer`); settings in `integrations.py` FIELDS "mail" |
 | Alerts (kinds, thresholds, tickets, Teams, email) | `alerts.py` (`KINDS`, `conditions()`, `notify_open/resolved()`), `Integrations.cw_ticket/cw_close/teams_post`, `alertsPage()` in `app.js` |
 | WireGuard port (move, relay, helper) | `wgport.py`, `deploy/wg-port.sh` + `tikmanager-wgport.*`, `RouterOS.set_controller_port`, `devices.wg_port`, `wgPortCard()` in `app.js`; installer `--wg-port` |

@@ -381,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
                               "encryption": "AES-256-GCM" if backups.vault.available else "not available (dev)",
                               "routers": db.one("SELECT COUNT(*) AS n FROM devices WHERE state='adopted'")["n"],
                               "backups": db.one("SELECT COUNT(*) AS n FROM backups")["n"]})
+        if path == "/api/admin/lifecycle":   # replacement suggestions per router model
+            self.require(tech=True, admin=True)
+            return self.json({"models": lifecycle.models()})
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)
             return self.json({**updates.info(), "observatory": observatory.info(), "reachability": reach.info()})
@@ -405,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
             return self.json(rows)
         if path == "/api/sites":   # site map: each adopted router with its WAN address and LAN networks
@@ -1462,6 +1465,16 @@ class Handler(BaseHTTPRequestHandler):
                 changed.append("entra_client_secret")
             db.audit(s["email"], "settings changed", ip=self.client_ip(), detail=", ".join(changed))   # names only, never values
             return self.json({"ok": True, **saved})
+        if path == "/api/admin/lifecycle":   # set / clear the standard replacement for a router model
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            try:
+                lifecycle.set_override(str(b.get("model") or "")[:80], str(b.get("product") or "")[:200])
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "replacement suggestion " + ("set" if b.get("product") else "cleared"), str(b.get("model") or "")[:80],
+                     self.client_ip(), str(b.get("product") or "")[:200])
+            return self.json({"ok": True})
         if path == "/api/admin/system":
             s = self.require(tech=True, admin=True)
             b = self.body()

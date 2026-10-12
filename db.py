@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS devices (
   wg_port INTEGER,                         -- the UDP port this router dials TikManager on (wgport.py)
   fw_factory TEXT,                         -- RouterOS version it left the factory with (dates it, lifecycle.py)
   lc_slug TEXT, lc_status TEXT, lc_made TEXT, lc_checked REAL,   -- lifecycle: product page, discontinued/current/virtual, factory firmware date
+  lc_suggest TEXT, lc_suggest_name TEXT, lc_suggest_why TEXT,   -- suggested replacement (product page slug, name, why)
   lat REAL, lon REAL, location TEXT,       -- where it is (map): typed in, picked on the map, or from the router's GPS
   loc_source TEXT,                          -- manual / gps (manual always wins)
   api_port INTEGER,                         -- the router's www (REST) port, reported when it runs the adoption command                         -- VPNs already configured on the router (raw, whitelisted fields)
@@ -196,7 +197,8 @@ class DB:
                              ("vpn_inv", "TEXT"), ("vpn_inv_at", "REAL"), ("api_port", "INTEGER"),
                              ("lat", "REAL"), ("lon", "REAL"), ("location", "TEXT"), ("loc_source", "TEXT"),
                              ("neighbors", "TEXT"), ("neighbors_at", "REAL"), ("wg_port", "INTEGER"),
-                             ("fw_factory", "TEXT"), ("lc_slug", "TEXT"), ("lc_status", "TEXT"), ("lc_made", "TEXT"), ("lc_checked", "REAL")):
+                             ("fw_factory", "TEXT"), ("lc_slug", "TEXT"), ("lc_status", "TEXT"), ("lc_made", "TEXT"), ("lc_checked", "REAL"),
+                             ("lc_suggest", "TEXT"), ("lc_suggest_name", "TEXT"), ("lc_suggest_why", "TEXT")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")
             if info["org_id"][3] == 1 or "name_custom" not in info:   # org_id NOT NULL (old schema)

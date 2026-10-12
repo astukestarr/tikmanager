@@ -70,6 +70,7 @@ function lcMade(d) {   // "about Apr 2020"
   const t = Date.parse(d.lc_made || "");
   return Number.isNaN(t) ? "" : `about ${new Date(t).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" })}`;
 }
+const lcSuggest = (d) => d.lc_suggest ? `<a href="https://mikrotik.com/product/${encodeURIComponent(d.lc_suggest)}" target="_blank" rel="noopener noreferrer">${esc(d.lc_suggest_name || d.lc_suggest)}</a>` : "";
 const lcFlag = (d) => d.lc_status === "discontinued" ? `<span class="pill lc-disc">Discontinued</span>`
   : (lcYears(d) ?? 0) >= LC_OLD ? `<span class="pill lc-old">${LC_OLD}+ years</span>` : "";
 
@@ -112,10 +113,12 @@ function lifecycleCard(adopted) {
   const disc = flagged.filter((d) => d.lc_status === "discontinued").length, old = flagged.filter((d) => (lcYears(d) ?? 0) >= LC_OLD).length;
   return `<div class="card"><h2>Lifecycle</h2>
     <p class="small muted">${disc} discontinued by MikroTik · ${old} over ${LC_OLD} years old. Age comes from each router's factory firmware;
-      MikroTik publishes no end-of-support dates, so "discontinued" means no longer sold.</p>
-    <div class="table-wrap"><table><thead><tr><th>Router</th>${me.org ? "" : "<th>Client</th>"}<th>Model</th><th>Made</th><th>Age</th><th></th></tr></thead><tbody>
+      MikroTik publishes no end-of-support dates, so "discontinued" means no longer sold. Suggested replacements are current
+      MikroTik models of the same kind${me.kind === "tech" && me.role === "admin" ? ` - set your own standard per model on Admin &gt; Settings` : ""}.</p>
+    <div class="table-wrap"><table><thead><tr><th>Router</th>${me.org ? "" : "<th>Client</th>"}<th>Model</th><th>Made</th><th>Age</th><th></th><th>Suggested replacement</th></tr></thead><tbody>
     ${flagged.slice(0, 25).map((d) => `<tr class="click" data-dev="${d.id}"><td>${esc(d.name)}</td>${me.org ? "" : `<td>${d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`}</td>`}
-      <td>${esc(d.model || "")}</td><td>${esc(lcMade(d))}</td><td class="nowrap">${esc(lcAge(d))}</td><td>${d.lc_status === "discontinued" ? `<span class="pill lc-disc">Discontinued</span>` : ""}</td></tr>`).join("")}
+      <td>${esc(d.model || "")}</td><td>${esc(lcMade(d))}</td><td class="nowrap">${esc(lcAge(d))}</td><td>${d.lc_status === "discontinued" ? `<span class="pill lc-disc">Discontinued</span>` : ""}</td>
+      <td class="lc-sug">${lcSuggest(d) || `<span class="muted">—</span>`}</td></tr>`).join("")}
     </tbody></table></div>${flagged.length > 25 ? `<p class="small muted">${flagged.length - 25} more on the Routers page (Status filter).</p>` : ""}</div>`;
 }
 
@@ -195,7 +198,7 @@ function table(rows, cols, sort) {
 }
 
 function bindRows() {
-  document.querySelectorAll("tr[data-dev]").forEach((tr) => tr.addEventListener("click", () => go("router", tr.dataset.dev)));
+  document.querySelectorAll("tr[data-dev]").forEach((tr) => tr.addEventListener("click", (e) => { if (!e.target.closest("a")) go("router", tr.dataset.dev); }));
   setBars($("main"));
 }
 
@@ -296,7 +299,8 @@ async function router(id) {
       </div>
       ${d.state === "adopted" && (d.lc_status === "discontinued" || (lcYears(d) ?? 0) >= LC_OLD) ? `<p class="small muted lc-note">${d.lc_status === "discontinued"
         ? "MikroTik no longer sells this model. It still gets RouterOS updates for now (MikroTik publishes no end-of-support date), but plan its replacement."
-        : `This router is over ${LC_OLD} years old - worth planning its replacement.`}</p>` : ""}
+        : `This router is over ${LC_OLD} years old - worth planning its replacement.`}
+        ${d.lc_suggest ? `<br><b>Suggested replacement:</b> ${lcSuggest(d)} <span class="muted">- ${esc(d.lc_suggest_why || "")}</span>` : ""}</p>` : ""}
       ${d.state === "adopted" && isTech() ? upgradeBox(d) : ""}
       ${d.state === "adopted" && isTech() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
       ${d.vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b><span class="spacer"></span><a href="#vpn/${d.vpn.id}">${esc(d.vpn.name)}</a></div>
@@ -1224,6 +1228,30 @@ async function offsiteCard() {
   });
 }
 
+// Admin > Settings: the suggested replacement for each discontinued / old router model, and your own standard per model
+async function lcAdminCard() {
+  let x;
+  try { x = await api("/api/admin/lifecycle"); } catch (e) { $("lcAdmin").innerHTML = `<h2>Replacement suggestions</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  $("lcAdmin").innerHTML = `<h2>Replacement suggestions</h2>
+    <p class="small muted">For routers that are discontinued or over ${LC_OLD} years old TikManager suggests a current MikroTik model of the same kind
+      (shown on the router page and the Dashboard). To suggest your own standard model instead, paste its mikrotik.com product link; clear it to go back.</p>
+    ${x.models.length ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th>Routers</th><th>Suggested</th><th>Your standard (mikrotik.com product link)</th><th></th></tr></thead><tbody>
+      ${x.models.map((m, k) => `<tr><td>${esc(m.model)}${m.board && m.board !== m.model ? `<div class="small muted">${esc(m.board)}</div>` : ""}${m.status === "discontinued" ? ` <span class="pill lc-disc">Discontinued</span>` : ""}</td>
+        <td>${m.routers}</td><td>${m.suggest ? lcSuggest({ lc_suggest: m.suggest, lc_suggest_name: m.suggest_name }) : `<span class="muted">none yet</span>`}</td>
+        <td><input id="lcO${k}" value="${m.override ? `https://mikrotik.com/product/${esc(m.override)}` : ""}" placeholder="https://mikrotik.com/product/..." spellcheck="false" aria-label="Standard replacement for ${esc(m.model)}"></td>
+        <td class="nowrap"><button class="btn" type="button" data-lcsave="${k}">Save</button></td></tr>`).join("")}</tbody></table></div>
+      <p class="status small" id="lcStatus"></p>` : `<p class="muted">No discontinued or old routers right now.</p>`}`;
+  document.querySelectorAll("[data-lcsave]").forEach((b) => b.addEventListener("click", async () => {
+    const m = x.models[+b.dataset.lcsave];
+    try {
+      await post("/api/admin/lifecycle", { model: m.model, product: $(`lcO${b.dataset.lcsave}`).value.trim() });
+      $("lcStatus").textContent = `Saved - routers with ${m.model} are re-checked within a minute.`;
+      $("lcStatus").className = "status ok small";
+      setTimeout(lcAdminCard, 4000);
+    } catch (e) { $("lcStatus").textContent = e.message; $("lcStatus").className = "status err small"; }
+  }));
+}
+
 async function adminSystem() {
   const s = await api("/api/admin/system");
   const f = (id, label, val, o = {}) => `<label class="field">${label} <input id="${id}" value="${esc(val || "")}" placeholder="${esc(o.ph || "")}" ${o.type ? `type="${o.type}"` : ""} spellcheck="false" ${o.auto ? `autocomplete="${o.auto}"` : ""}></label>`;
@@ -1254,6 +1282,7 @@ async function adminSystem() {
       <label class="field">Versions to keep per router <input id="sKeep" type="number" min="1" max="100" value="${s.backup_keep_versions}"></label>
       <button class="btn primary" type="button" id="sSave">Save</button><span class="status" id="sStatus"></span></div>
       <p class="small muted">A new version is saved only when the configuration changes; when a router has more than this, the oldest is removed. Stored configurations are encrypted with ${esc(s.encryption)}.</p></div>
+    <div class="card" id="lcAdmin"><h2>Replacement suggestions</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>About this installation</h2><div class="grid2">
       ${[["Public address", s.public_url], ["WireGuard address", s.wg_endpoint], ["Controller WireGuard key", s.wg_server_pubkey], ["Tunnel network", s.wg_network],
          ["Data folder", s.data_dir], ["Approved routers", s.routers], ["Stored backup versions", s.backups]]
@@ -1261,6 +1290,7 @@ async function adminSystem() {
       <p class="small muted">The public address is set when TikManager is installed (the HTTPS certificate depends on it).</p></div>`;
   versionCard();
   offsiteCard();
+  lcAdminCard();
   wgPortCard();
   const say = (id, m, ok) => { $(id).textContent = m; $(id).className = `status ${ok ? "ok" : "err"}`; };
   $("cfSave").addEventListener("click", async () => {
