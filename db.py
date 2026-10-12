@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS devices (
   lc_slug TEXT, lc_status TEXT, lc_made TEXT, lc_checked REAL,   -- lifecycle: product page, discontinued/current/virtual, factory firmware date
   lc_suggest TEXT, lc_suggest_name TEXT, lc_suggest_why TEXT,   -- suggested replacement (product page slug, name, why)
   dm_mode TEXT, dm_flagged INTEGER, dm_info TEXT, dm_checked REAL,   -- RouterOS device-mode (hourly); flagged = possibly compromised
+  sec_target TEXT, cve_n INTEGER, cve_max REAL, sec_info TEXT, sec_version TEXT, sec_checked REAL,   -- rossec.py: security releases / CVEs
   lat REAL, lon REAL, location TEXT,       -- where it is (map): typed in, picked on the map, or from the router's GPS
   loc_source TEXT,                          -- manual / gps (manual always wins)
   api_port INTEGER,                         -- the router's www (REST) port, reported when it runs the adoption command                         -- VPNs already configured on the router (raw, whitelisted fields)
@@ -200,7 +201,9 @@ class DB:
                              ("neighbors", "TEXT"), ("neighbors_at", "REAL"), ("wg_port", "INTEGER"),
                              ("fw_factory", "TEXT"), ("lc_slug", "TEXT"), ("lc_status", "TEXT"), ("lc_made", "TEXT"), ("lc_checked", "REAL"),
                              ("lc_suggest", "TEXT"), ("lc_suggest_name", "TEXT"), ("lc_suggest_why", "TEXT"),
-                             ("dm_mode", "TEXT"), ("dm_flagged", "INTEGER"), ("dm_info", "TEXT"), ("dm_checked", "REAL")):
+                             ("dm_mode", "TEXT"), ("dm_flagged", "INTEGER"), ("dm_info", "TEXT"), ("dm_checked", "REAL"),
+                             ("sec_target", "TEXT"), ("cve_n", "INTEGER"), ("cve_max", "REAL"), ("sec_info", "TEXT"), ("sec_version", "TEXT"),
+                             ("sec_checked", "REAL")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")
             if info["org_id"][3] == 1 or "name_custom" not in info:   # org_id NOT NULL (old schema)

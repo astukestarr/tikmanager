@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.26.0 - 2026-10-12
+
+- **RouterOS security**: two separate signals per router, kept apart because they claim different things:
+  - **Security releases** - MikroTik's own changelogs are read (once per release) and a router is marked when a release
+    newer than its RouterOS, on the way to its channel's newest, fixed something security-related (a CVE named, or a
+    "security issue / update / fix", vulnerability, exploit ... line - including notices like 7.24.2's "important
+    security update" that name no CVE). MikroTik's "!)" alone isn't taken as security: it marks any important change.
+  - **Known CVEs** - NIST's National Vulnerability Database (refreshed daily) is matched on the router's RouterOS
+    version, with CVSS score, summary and the version that fixes it. Informational; NVD ranges are sometimes imprecise.
+  - Router page: a **Security** line in the side panel and a **RouterOS security** card listing the security releases
+    (with their notes) and CVEs. Upgrades page: **security** and **CVE** badges. Security page: a **RouterOS
+    vulnerabilities** card for the whole fleet. New alert (on by default): **Router needs a RouterOS security update**
+    (a security release, or a CVE scored 7 or more).
+- **What's new**: MikroTik's release notes for a version, security lines first, one click from the router's upgrade
+  box, the Upgrades table and the security card - read before you upgrade.
+- Fixed: router age (1.22.0) couldn't read MikroTik's newer changelog date format (e.g. "2026-09-03"), so routers
+  that left the factory with recent RouterOS showed no age.
+
 ## 1.25.0 - 2026-10-12
 
 - **Compromised-router detection**: RouterOS (7.13+) checks its own configuration at startup and, on finding signs of

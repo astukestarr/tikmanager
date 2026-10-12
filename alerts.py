@@ -7,7 +7,7 @@ and closed when it clears.
   note and the closed status, and Teams gets a "resolved" card.
 - Kinds (Alerts page > Settings turns each on / off and sets thresholds):
   offline (router offline N minutes - not while it's being upgraded), flagged (RouterOS device-mode says possibly
-  compromised), backup_failed (latest backup attempt failed),
+  compromised), patch (security release / high CVE for its RouterOS), backup_failed (latest backup attempt failed),
   cpu (average over 15 minutes), firmware (new RouterOS on its channel), security (Security page warnings),
   server (server security check FAILs), website (Mozilla Observatory grade below A).
 - No storms: if more than STORM routers go offline in the same minute (TikManager's own internet, most likely), one
@@ -31,6 +31,7 @@ def short(text, n=95):
 KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "offline": ("Router offline", True, "minutes", 5),
     "flagged": ("Router flagged as possibly compromised (RouterOS device-mode)", True, None, None),
+    "patch": ("Router needs a RouterOS security update (MikroTik security release, or a high / critical CVE)", True, None, None),
     "backup_failed": ("Configuration backup failed", True, None, None),
     "security": ("Security warnings (password guessing, a sign-in right after failures ...)", True, None, None),
     "server": ("Server security check finds a FAIL", True, None, None),
@@ -119,6 +120,16 @@ class Alerts:
                     out[f"flagged:{d['id']}"] = ("flagged", d["id"], d["org_id"], f"{label(d)} flagged as possibly compromised",
                                                  "RouterOS checked its configuration at startup, found signs of unauthorized access and flagged "
                                                  "itself (device-mode). MikroTik's guidance is to treat it as compromised - see its page in TikManager.")
+        if k["patch"]["on"]:
+            for d in devs:
+                if d.get("sec_target") or (d.get("cve_max") or 0) >= 7:
+                    info = json.loads(d.get("sec_info") or "null") or {}
+                    lines = [f"RouterOS {f['version']} ({f.get('date') or ''}): " + " ".join(f["items"])[:300] for f in info.get("fixes") or []]
+                    lines += [f"{c['id']} (CVSS {c['score']}): {c['summary'][:200]}" + (f" Fixed in {c['fixed']}." if c.get("fixed") else "")
+                              for c in (info.get("cves") or [])[:5] if (c.get("score") or 0) >= 7]
+                    target = d.get("sec_target") or d.get("ros_latest") or "a newer version"
+                    out[f"patch:{d['id']}:{d['version']}"] = ("patch", d["id"], d["org_id"], f"{label(d)} needs RouterOS {target} (security)",
+                                                               f"Running {d['version']}.\n" + "\n".join(f"- {x}" for x in lines))
         if k["backup_failed"]["on"]:
             for d in devs:
                 if d["last_backup_error"] and (d["last_backup_try"] or 0) > (d["last_backup_at"] or 0):

@@ -179,6 +179,11 @@ was last seen, and its **age**. Filter by client, status (including **Discontinu
 puts offline routers first). Routers that registered but aren't approved yet are listed above, under **Waiting for
 approval**. Click a router for its page: charts, interfaces, DHCP clients, backups, upgrades, scripts and events.
 
+**RouterOS security:** each router's page says whether MikroTik has released a security fix newer than its RouterOS
+on its channel (read from MikroTik's changelogs) and lists known CVEs for its version (NIST's vulnerability database,
+daily); the Upgrades page badges them, the Security page lists the fleet, and an alert can open a ticket. **What's new**
+shows MikroTik's release notes for a version, security lines first, before you upgrade.
+
 **Flagged routers:** RouterOS 7.13+ flags itself when it finds signs of unauthorized access in its configuration
 (device-mode); MikroTik says to treat such a router as compromised. TikManager reads the flag hourly and shows it on the
 router's page (with what to do), in the routers list and on the Dashboard, and raises an alert.

@@ -38,6 +38,7 @@ from winbox import WinboxRelay
 from wgport import WgPort
 from mailer import Mailer, MailError
 from lifecycle import Lifecycle
+from rossec import RosSecurity
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -107,6 +108,7 @@ reach.wgport = wgport
 mailer = Mailer(integ, settings)   # email: alerts, invitations, tests
 alerts.mailer = mailer
 lifecycle = Lifecycle(db, settings.data_dir, thumbs)   # router age and discontinued models (from mikrotik.com)
+rossec = RosSecurity(db, settings.data_dir)   # known CVEs and missed MikroTik security releases per router
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -408,7 +410,7 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
             return self.json(rows)
         if path == "/api/sites":   # site map: each adopted router with its WAN address and LAN networks
@@ -527,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/upgrades":   # routers with their versions, plus scheduled / recent upgrade jobs
             s = self.require(tech=True)
             routers = db.q("""SELECT d.id, d.org_id, o.name AS org, d.name, d.model, d.online, d.version, d.ros_channel, d.ros_latest, d.ros_checked,
-                              d.fw_current, d.fw_upgrade, d.thumb_slug FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
+                              d.fw_current, d.fw_upgrade, d.thumb_slug, d.sec_target, d.cve_n, d.cve_max FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                               WHERE d.state='adopted' ORDER BY o.name, d.name""")
             jobs = db.q("""SELECT u.*, d.name AS device, o.name AS org FROM upgrades u JOIN devices d ON d.id = u.device_id
                            LEFT JOIN orgs o ON o.id = u.org_id
@@ -584,6 +586,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/winbox":   # all open Winbox sessions (Security page)
             s = self.require(tech=True)
             return self.json({"sessions": winbox.view(s)})
+        if path == "/api/routeros/notes":   # MikroTik's release notes for one RouterOS version (the "What's new" dialog)
+            self.require()
+            try:
+                return self.json(rossec.notes(str(q.get("v") or "")[:20]))
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+        if path == "/api/security/routeros":   # routers with missed security releases / known CVEs
+            s = self.require()
+            where, args = self.org_scope(s, None, "d.org_id")
+            rows = db.q(f"""SELECT d.id, d.name, d.version, d.ros_latest, d.sec_target, d.cve_n, d.cve_max, d.sec_info, o.name AS org
+                            FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where}""", args)
+            return self.json(rossec.summary(rows))
         if path == "/api/security":   # sign-in attempts and other security events (TikManager, Ubuntu server, routers)
             self.require(tech=True)
             try:
@@ -675,6 +689,7 @@ class Handler(BaseHTTPRequestHandler):
             d.pop("token_hash", None)
             d["interfaces"] = json.loads(d["interfaces"] or "[]")
             d["dm_info"] = json.loads(d.get("dm_info") or "null")
+            d["sec_info"] = json.loads(d.get("sec_info") or "null")
             org = db.one("SELECT name FROM orgs WHERE id=?", (d["org_id"],)) if d["org_id"] else None
             d["org"] = org["name"] if org else ""
             d["upgrade"] = db.one("""SELECT id, status, step, scheduled_at, channel, firmware, created_by FROM upgrades
@@ -1841,6 +1856,7 @@ def main():
     wgport.start_loop()
     alerts.start()
     lifecycle.start()
+    rossec.start()
     if settings.dev:
         secev.seed_dev()
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)

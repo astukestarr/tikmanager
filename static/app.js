@@ -74,6 +74,47 @@ const lcSuggest = (d) => d.lc_suggest ? `<a href="https://mikrotik.com/product/$
 const lcFlag = (d) => d.lc_status === "discontinued" ? `<span class="pill lc-disc">Discontinued</span>`
   : (lcYears(d) ?? 0) >= LC_OLD ? `<span class="pill lc-old">${LC_OLD}+ years</span>` : "";
 
+// RouterOS security (rossec.py): missed MikroTik security releases and known CVEs
+function secState(d) {
+  if (d.sec_target) return ["warn", `Security update ${d.sec_target}`];
+  if (d.cve_n) return [d.cve_max >= 7 ? "err" : "warn", `${d.cve_n} known CVE${d.cve_n === 1 ? "" : "s"}`];
+  return d.sec_checked ? ["ok", "No known issues"] : null;
+}
+const cveText = (c) => `<span title="${esc(c.summary)}">${esc(c.summary.length > 220 ? `${c.summary.slice(0, 220).replace(/\s+\S*$/, "")}…` : c.summary)}</span>`;
+const cvePill = (c) => `<span class="pill ${c.score >= 9 ? "cve-crit" : c.score >= 7 ? "cve-high" : "cve-med"}">${c.score ?? "?"}</span>`;
+async function notesDialog(v) {
+  dialog(`<h2>What's new in RouterOS ${esc(v)}</h2><p class="muted">Reading MikroTik's release notes…</p>`);
+  try {
+    const n = await api(`/api/routeros/notes?v=${encodeURIComponent(v)}`);
+    dialog(`<h2>What's new in RouterOS ${esc(v)}</h2>${n.date ? `<p class="small muted">Released ${esc(n.date)}</p>` : ""}
+      ${n.security.length ? `<div class="sec-notes"><b>Security</b><ul>${n.security.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div>` : ""}
+      <pre class="ros-notes">${esc(n.text.split("\n").slice(1).join("\n").trim())}</pre>
+      <div class="actions"><a href="https://mikrotik.com/download/changelogs" target="_blank" rel="noopener noreferrer">All MikroTik changelogs</a><span class="spacer"></span>
+        <button class="btn" type="button" data-close>Close</button></div>`);
+    $("dlg").classList.add("wide");
+  } catch (e) { dialog(`<h2>What's new in RouterOS ${esc(v)}</h2><p class="status err">${esc(e.message)}</p><div class="actions"><button class="btn" type="button" data-close>Close</button></div>`); }
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-notes]");
+  if (b) { e.preventDefault(); e.stopPropagation(); notesDialog(b.dataset.notes); }
+});
+function secCard(d) {   // router page, Overview tab
+  const s = d.sec_info;
+  if (!s || (!s.fixes.length && !s.cves.length)) return "";
+  return `<div class="card sec-card"><h2>RouterOS security</h2>
+    ${s.fixes.length ? `<p>MikroTik has released <b>security fixes</b> newer than ${esc(shortVer(d.version))} on this router's channel - upgrade to at least
+      <b>${esc(s.fixes[s.fixes.length - 1].version)}</b>${d.ros_latest ? ` (newest: ${esc(d.ros_latest)})` : ""}.</p>
+      <ul class="sec-fixes">${s.fixes.map((f) => `<li><b>${esc(f.version)}</b>${f.date ? ` <span class="small muted">${esc(f.date)}</span>` : ""}
+        <button class="linkish" type="button" data-notes="${esc(f.version)}">what's new</button><div class="small">${f.items.map(esc).join("<br>")}</div></li>`).join("")}</ul>` : ""}
+    ${s.cves.length ? `<h3>Known vulnerabilities (CVEs) for RouterOS ${esc(shortVer(d.version))}</h3>
+      <div class="table-wrap"><table><thead><tr><th>CVE</th><th>Score</th><th>What</th><th>Fixed in</th></tr></thead><tbody>
+      ${s.cves.map((c) => `<tr><td class="nowrap"><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(c.id)}" target="_blank" rel="noopener noreferrer">${esc(c.id)}</a></td>
+        <td>${cvePill(c)}</td><td class="small">${cveText(c)}</td><td class="nowrap">${c.fixed ? esc(c.fixed) : `<span class="muted">—</span>`}</td></tr>`).join("")}</tbody></table></div>
+      ${d.ros_latest && s.cves.some((c) => c.fixed && newer(c.fixed, d.ros_latest)) ? `<p class="small status warn">Some fixes are newer than anything on this router's
+        ${esc(d.ros_channel || "")} channel (newest ${esc(d.ros_latest)}) - a different channel may have them.</p>` : ""}
+      <p class="small muted">From NIST's National Vulnerability Database, matched on the RouterOS version. Informational - NVD ranges are sometimes imprecise.</p>` : ""}</div>`;
+}
+
 function stateDot(d) {
   if (d.state !== "adopted") return `<span class="dot pending"></span>Waiting for approval`;
   return d.online ? `<span class="dot on"></span>Online` : `<span class="dot off"></span>Offline`;
@@ -298,6 +339,7 @@ async function router(id) {
         ${kv("WAN IP", d.wan_ip)}${kv("Tunnel IP", d.tunnel_ip)}${kv("Uptime", uptime(d.uptime))}
         ${kv("RouterOS", esc((d.version || "—").replace(" (stable)", "")), true)}${d.fw_current ? kv("Firmware", `${esc(d.fw_current)} ${fwState}`, true) : ""}
         ${kv("Model", d.model)}${kv("Serial", d.serial)}${d.dm_mode ? kv("Device mode", `${esc(d.dm_mode)}${d.dm_flagged ? ` <span class="pill dm-flag">flagged</span>` : ""}`, true) : ""}
+        ${d.state === "adopted" && secState(d) ? kv("Security", `<span class="status ${secState(d)[0]}">${esc(secState(d)[1])}</span>`, true) : ""}
         ${d.state === "adopted" ? kv("Made", d.lc_made ? `${esc(lcMade(d))} <span class="muted">(${esc(lcAge(d))})</span>` : d.lc_status === "virtual" ? `<span class="muted">Virtual (CHR)</span>` : `<span class="muted">—</span>`, true) : ""}
         ${d.state === "adopted" && d.lc_status && d.lc_status !== "virtual" ? kv("Lifecycle", `${d.lc_status === "discontinued" ? `<span class="status warn">Discontinued by MikroTik</span>` : `<span class="status ok">Current model</span>`}
           ${d.lc_slug ? ` <a href="https://mikrotik.com/product/${encodeURIComponent(d.lc_slug)}" target="_blank" rel="noopener noreferrer">product page</a>` : ""}`, true) : ""}
@@ -345,6 +387,7 @@ async function router(id) {
           <span class="muted" id="cNote"></span></div>
       </div>
       <div class="health" id="health"></div>
+      ${secCard(d)}
       ${lteCard(d.interfaces || [])}
       <div class="card"><h2>Interfaces</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Details</th><th>In now</th><th>Out now</th><th>Total in / out</th><th>Comment</th></tr></thead><tbody>
         ${(d.interfaces || []).map((i) => `<tr><td class="mono">${esc(i.name)}</td><td>${esc(i.type)}</td>
@@ -675,7 +718,8 @@ function upgradeBox(d) {
   let html = "";
   if (j) html = `<div class="up-box">${upStatus(j)}${j.status === "scheduled" && canWrite() ? `<button class="btn wide" type="button" id="rUpCancel">Cancel scheduled upgrade</button>` : ""}</div>`;
   else {
-    html = `<div class="up-box ${avail || fw ? "avail" : ""}">${avail ? `<b>RouterOS ${esc(d.ros_latest)} is available</b><div class="small muted">${esc(d.ros_channel || "")} channel</div>`
+    html = `<div class="up-box ${avail || fw ? "avail" : ""}">${avail ? `<b>RouterOS ${esc(d.ros_latest)} is available</b><div class="small muted">${esc(d.ros_channel || "")} channel ·
+        <button class="linkish" type="button" data-notes="${esc(d.ros_latest)}">what's new</button></div>${d.sec_target ? `<div class="small status warn">Includes security fixes</div>` : ""}`
       : fw ? `<b>RouterBOARD firmware ${esc(d.fw_upgrade)} is available</b>` : d.ros_latest ? `<span class="small status ok">RouterOS is up to date</span>` : `<span class="small muted">Not checked for updates yet</span>`}
       ${canWrite() ? `<button class="btn wide ${avail || fw ? "primary" : ""}" type="button" id="rUpgrade">${avail || fw ? "Upgrade..." : "Upgrade / change channel..."}</button>` : ""}</div>`;
   }
@@ -1427,7 +1471,8 @@ async function upgradesView() {
       <td>${thumbImg(d, "thumb-sm")}</td>
       <td><a href="#router/${d.id}"><b>${esc(d.name)}</b></a><div class="small muted"><span class="dot ${d.online ? "on" : "off"}"></span>${esc(d.org || "Unassigned")}</div></td>
       <td class="small">${esc(d.model || "")}</td><td class="mono">${esc(shortVer(d.version))}</td>
-      <td>${d.ros_latest ? `${hasUpdate(d) ? `<b class="status warn">${esc(d.ros_latest)}</b>` : `<span class="muted">${esc(d.ros_latest)}</span>`} <span class="small muted">${esc(d.ros_channel || "")}</span>`
+      <td>${d.ros_latest ? `${hasUpdate(d) ? `<button class="linkish status warn" type="button" data-notes="${esc(d.ros_latest)}" title="What's new"><b>${esc(d.ros_latest)}</b></button>` : `<span class="muted">${esc(d.ros_latest)}</span>`} <span class="small muted">${esc(d.ros_channel || "")}</span>
+        ${d.sec_target ? ` <span class="pill cve-high" title="A security release newer than this router's RouterOS">security</span>` : ""}${d.cve_n ? ` <span class="pill ${d.cve_max >= 7 ? "cve-high" : "cve-med"}" title="Known CVEs for its RouterOS version">${d.cve_n} CVE</span>` : ""}`
         : `<span class="small muted">${d.ros_checked ? "unknown" : "not checked yet"}</span>`}</td>
       <td class="small">${d.fw_current ? `${esc(d.fw_current)}${fwUpdate(d) ? ` → <b class="status warn">${esc(d.fw_upgrade)}</b>` : ""}` : `<span class="muted">—</span>`}</td>
       <td>${active.has(d.id) ? upStatus(active.get(d.id)) : hasUpdate(d) || fwUpdate(d) ? `<span class="small status warn">Update available</span>` : d.ros_latest ? `<span class="small status ok">Up to date</span>` : ""}</td></tr>`).join("")
@@ -2784,6 +2829,24 @@ const SEC_KIND = { login_failed: "Failed sign-in", mfa_failed: "Wrong MFA code",
   rate_limited: "Too many attempts", adoption_rejected: "Bad adoption command", login_ok: "Signed in", banned: "Blocked (fail2ban)", config_change: "Config changed", remote_session: "Winbox session opened",
   remote_rejected: "Winbox: wrong address" };
 
+async function rosSecCard() {
+  let x;
+  try { x = await api("/api/security/routeros"); } catch (e) { if ($("rosSec")) $("rosSec").innerHTML = `<h2>RouterOS vulnerabilities</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  if (!$("rosSec")) return;
+  $("rosSec").innerHTML = `<h2>RouterOS vulnerabilities</h2>
+    <p class="small muted">Routers below a MikroTik security release on their channel, and known CVEs for the RouterOS version they run
+      (NIST NVD${x.nvd_at ? `, checked ${ago(x.nvd_at)}` : ""}).</p>
+    ${x.routers.length ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Client</th><th>RouterOS</th><th>Security update</th><th>CVEs</th></tr></thead><tbody>
+      ${x.routers.map((r) => `<tr class="click" data-dev="${r.id}"><td>${esc(r.name)}</td><td>${esc(r.org || "")}</td><td class="mono">${esc(shortVer(r.version))}</td>
+        <td>${r.sec_target ? `<span class="status warn">${esc(r.sec_target)} or newer</span>` : `<span class="muted">—</span>`}</td>
+        <td>${r.cve_n ? `${r.cve_n} ${cvePill({ score: r.cve_max })}` : `<span class="muted">—</span>`}</td></tr>`).join("")}</tbody></table></div>
+      ${x.cves.length ? `<details><summary>${x.cves.length} CVE${x.cves.length === 1 ? "" : "s"} affecting your routers</summary><div class="table-wrap"><table><thead><tr><th>CVE</th><th>Score</th><th>Routers</th><th>What</th><th>Fixed in</th></tr></thead><tbody>
+        ${x.cves.map((c) => `<tr><td class="nowrap"><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(c.id)}" target="_blank" rel="noopener noreferrer">${esc(c.id)}</a></td><td>${cvePill(c)}</td>
+          <td>${c.routers}</td><td class="small">${cveText(c)}</td><td class="nowrap">${esc(c.fixed || "")}</td></tr>`).join("")}</tbody></table></div></details>` : ""}`
+    : `<p class="status ok">No router is missing a security release or running a RouterOS version with a known CVE.</p>`}`;
+  bindRows();
+}
+
 async function securityPage() {
   const s = await api(`/api/security?hours=${secView.hours}&source=${encodeURIComponent(secView.source)}&kind=${encodeURIComponent(secView.kind)}&q=${encodeURIComponent(secView.q)}`);
   const tile = (src, icon) => {
@@ -2797,6 +2860,7 @@ async function securityPage() {
     <div class="row"><div class="seg" role="group" aria-label="Period">${[[24, "24 hours"], [168, "7 days"], [720, "30 days"]].map(([h, l]) =>
       `<button type="button" data-h="${h}" class="${secView.hours === h ? "on" : ""}">${l}</button>`).join("")}</div></div>
     <div class="tiles sec-kpis">${tile("tikmanager")}${tile("server")}${tile("router")}</div>
+    <div class="card" id="rosSec"><h2>RouterOS vulnerabilities</h2><p class="muted small">Loading…</p></div>
     ${s.flags.length ? `<div class="card"><h2>Worth a look</h2><ul class="sec-flags">${s.flags.map((f) =>
       `<li class="flag-${esc(f.level)}">${esc(f.text)}${f.ip ? ` <button class="linkish" type="button" data-ip="${esc(f.ip)}">show</button>` : ""}</li>`).join("")}</ul></div>` : ""}
     <div class="grid2">
@@ -2823,6 +2887,7 @@ async function securityPage() {
   const reload = () => securityPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
   $("main").querySelectorAll("[data-h]").forEach((b) => b.addEventListener("click", () => { secView.hours = +b.dataset.h; reload(); }));
   $("main").querySelectorAll("[data-ip]").forEach((b) => b.addEventListener("click", () => { secView.q = b.dataset.ip; secView.source = ""; secView.kind = ""; reload(); }));
+  rosSecCard();
   $("main").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
   $("secSrc").addEventListener("change", () => { secView.source = $("secSrc").value; reload(); });
   $("secKind").addEventListener("change", () => { secView.kind = $("secKind").value; reload(); });

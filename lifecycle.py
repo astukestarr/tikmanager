@@ -71,15 +71,7 @@ def years(made) -> float | None:
         return None
 
 
-def release_date(text: str) -> str | None:
-    """'What's new in 6.45.9 (2020-Apr-30 10:25):' -> '2020-04-30'."""
-    m = re.search(r"\((\d{4})-([A-Za-z]{3})-(\d{1,2})", text[:200])
-    if not m:
-        return None
-    try:
-        return datetime.strptime(f"{m.group(1)}-{m.group(2)}-{m.group(3)}", "%Y-%b-%d").strftime("%Y-%m-%d")
-    except ValueError:
-        return None
+from rossec import release_date   # 'What's new in 6.45.9 (2020-Apr-30 ...)' / '(2026-09-03)' -> 'YYYY-MM-DD'
 
 
 class Lifecycle:
@@ -110,7 +102,7 @@ class Lifecycle:
         if int(m.group(1)) < 6:
             return "<2017"
         dates = cache.setdefault("releases", {})
-        if factory_fw in dates:
+        if dates.get(factory_fw):   # (an earlier None may be a date format MikroTik changed since: read again)
             return dates[factory_fw]
         try:
             d = release_date(self._get(f"https://upgrade.mikrotik.com/routeros/{factory_fw}/CHANGELOG"))
