@@ -693,14 +693,17 @@ async function users() {
     e.preventDefault();
     try {
       const r = await post("/api/users/invite", { org_id: $("iOrg")?.value, email: $("iEmail").value, name: $("iName").value, role: $("iRole").value });
-      $("iResult").innerHTML = `<p>Send this link to the person (valid ${r.expires_days} days). They'll choose a password and set up their authenticator app.</p><div class="code">${esc(r.link)}</div>`;
+      $("iResult").innerHTML = `${r.emailed === true ? `<p class="status ok">Invitation emailed.</p><p class="small muted">The link, if you'd rather send it yourself (valid ${r.expires_days} days):</p>`
+        : `${typeof r.emailed === "string" ? `<p class="status err">The email couldn't be sent: ${esc(r.emailed)}</p>` : ""}<p>Send this link to the person (valid ${r.expires_days} days). They'll choose a password and set up their authenticator app.</p>`}
+        <div class="code">${esc(r.link)}</div>`;
       setTimeout(users, 15000);
     } catch (err) { $("iResult").innerHTML = `<p class="status err">${esc(err.message)}</p>`; }
   });
   document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
     try {
       const r = await post(`/api/users/${b.dataset.id}/${b.dataset.act}`);
-      if (r.link) { dialog(`<h2>New invitation link</h2><div class="code">${esc(r.link)}</div><div class="actions"><button class="btn" type="button" data-close>Done</button></div>`); }
+      if (r.link) { dialog(`<h2>New invitation link</h2>${r.emailed === true ? `<p class="status ok">Emailed to them.</p>` : typeof r.emailed === "string" ? `<p class="status err">The email couldn't be sent: ${esc(r.emailed)}</p>` : ""}
+        <div class="code">${esc(r.link)}</div><div class="actions"><button class="btn" type="button" data-close>Done</button></div>`); }
       else users();
     } catch (err) { alert(err.message); }
   }));
@@ -795,6 +798,21 @@ async function adminIntegrations() {
         <button class="btn" type="button" id="cwLoad">Refresh from PSA</button></div>
         <div class="cw-types" id="cwTypes"></div><div id="cwBody"><p class="muted small">Loading companies...</p></div>` : ""}
     </div>
+    <div class="card" id="mailCard"><div class="row"><h2>Email</h2>${pill(r.mail.configured)}</div>
+      <p class="small muted">Lets TikManager send email: alerts (Alerts > Settings), client invitations and tests.</p>
+      <label class="field">Send with <select id="i_mail_provider"><option value="graph">Microsoft 365 (recommended for Microsoft 365)</option><option value="smtp">SMTP server</option></select></label>
+      <div class="grid2">${field("mail", "from_address", "From address", { ph: "tikmanager@example.com" })}${field("mail", "from_name", "From name", { ph: "TikManager" })}</div>
+      <div class="mail-graph"><p class="small muted">Microsoft 365: in Entra, register an app (single tenant), add the <b>Microsoft Graph application permission Mail.Send</b> and grant
+          admin consent, then create a client secret. <b>Limit it to the From mailbox</b> (Exchange: application access policy / RBAC for Applications) - otherwise it could
+          send as anyone. Microsoft is retiring password-based SMTP for Microsoft 365, so this is the way that keeps working.</p>
+        <div class="grid2">${field("mail", "tenant_id", "Tenant ID")}${field("mail", "client_id", "Client (app) ID")}${field("mail", "client_secret", "Client secret", { secret: true })}</div></div>
+      <div class="mail-smtp hidden"><p class="small muted">Any SMTP provider (Google Workspace, SendGrid, Mailgun, your own server). The connection is encrypted and the certificate checked;
+          unencrypted is only allowed to a relay on this server (localhost).</p>
+        <div class="grid2">${field("mail", "host", "SMTP server", { ph: "smtp.example.com" })}${field("mail", "port", "Port", { ph: "587" })}
+          <label class="field">Encryption <select id="i_mail_security"><option value="starttls">STARTTLS (port 587)</option><option value="tls">TLS (port 465)</option><option value="none">None (local relay only)</option></select></label>
+          ${field("mail", "username", "User name")}${field("mail", "password", "Password", { secret: true })}</div></div>
+      <div class="actions"><button class="btn primary" type="button" data-isave="mail">Save</button><button class="btn" type="button" data-itest="mail">Send a test to me</button>
+        <span class="status" id="iStatus_mail"></span></div></div>
     <div class="card"><div class="row"><h2>GitHub script library</h2>${r.github.configured ? `<span class="pill up-done">Sharing set up</span>` : `<span class="pill">Browse only</span>`}</div>
       <p class="small muted">The community library of RouterOS scripts (Tasks > Scripts > Community library). Browsing needs no account. To <b>share</b> scripts
         (as pull requests the library's owner reviews), save a GitHub token: a <b>classic</b> token with only the <span class="mono">public_repo</span> scope
@@ -822,6 +840,13 @@ async function adminIntegrations() {
     say(kind, "Testing...", true);
     try { const x = await post(`/api/integrations/${kind}/test`); say(kind, x.detail, x.ok); } catch (e) { say(kind, e.message); }
   }));
+  if ($("i_mail_provider")) {   // Email card: show the fields for the chosen way of sending
+    $("i_mail_provider").value = r.mail.provider || "graph";
+    $("i_mail_security").value = r.mail.security || "starttls";
+    const mailKind = () => { const g = $("i_mail_provider").value === "graph"; document.querySelector(".mail-graph").classList.toggle("hidden", !g); document.querySelector(".mail-smtp").classList.toggle("hidden", g); };
+    $("i_mail_provider").addEventListener("change", mailKind);
+    mailKind();
+  }
   if (r.cw.configured) loadCw(false);
   if (r.itg.configured) loadItg(r, false);
 }
@@ -2481,7 +2506,7 @@ async function alertsPage() {
     r.teams_note ? `<span class="small status warn">${esc(r.teams_note)}</span>` : ""].filter(Boolean).join(" ");
   const row = (r) => `<tr><td class="nowrap small">${when(r.opened_at)}</td><td>${esc(r.title)}<div class="small muted">${esc((r.detail || "").slice(0, 180))}</div></td>
     <td class="small">${where(r)}</td><td class="small">${r.resolved_at ? `resolved after ${Math.max(1, Math.round((r.resolved_at - r.opened_at) / 60))} min` : `<b>open</b> ${ago(r.opened_at)}`}</td><td>${sent(r)}</td></tr>`;
-  const channels = [st.cw.on ? "ConnectWise tickets" : "", st.teams.on ? "Teams" : ""].filter(Boolean);
+  const channels = [st.cw.on ? "ConnectWise tickets" : "", st.teams.on ? "Teams" : "", st.email.on ? "email" : ""].filter(Boolean);
   $("main").innerHTML = `<h1>Alerts</h1>
     <p class="muted">Problems TikManager notices, ${channels.length ? `sent as ${channels.join(" and ")}` : "<b>not sent anywhere yet</b> - set up ConnectWise or Teams below"} -
       opened when a problem starts and closed when it clears.</p>
@@ -2498,6 +2523,10 @@ async function alertsPage() {
         <p class="small muted">Tickets go to the client's linked ConnectWise company (Clients page); the default company is used for clients that aren't linked and for
           TikManager / server problems. The ConnectWise API member needs <b>Service Desk > Service Tickets: Add, Edit and Inquire</b>.</p>`
         : `<p class="small muted">Connect ConnectWise PSA on Admin > Integrations first.</p>`}
+      <h3 class="al-h">Email</h3>
+      ${a.mail_ready ? `<label class="chk"><input type="checkbox" id="alEmailOn" ${st.email.on ? "checked" : ""}> Email each problem (and when it clears) to</label>
+        <label class="field"><input id="alEmailTo" value="${esc(st.email.to || "")}" placeholder="noc@example.com, alan@example.com" spellcheck="false"></label>`
+        : `<p class="small muted">Set up email on Admin > Integrations > Email first.</p>`}
       <h3 class="al-h">Microsoft Teams</h3>
       <label class="chk"><input type="checkbox" id="alTeamsOn" ${st.teams.on ? "checked" : ""}> Post each problem (and when it clears) to a Teams channel</label>
       <label class="field">Workflow webhook URL ${a.teams_ready ? `<span class="small status ok">saved - leave blank to keep it</span>` : ""}
@@ -2505,7 +2534,8 @@ async function alertsPage() {
       <p class="small muted">In Teams: the channel's <b>...</b> > <b>Workflows</b> > <b>Post to a channel when a webhook request is received</b>, then paste the URL it gives you.</p>
       <div class="actions"><button class="btn primary" type="button" id="alSave">Save</button>
         ${a.cw_ready ? `<button class="btn" type="button" data-test="cw">Send a test ticket</button>` : ""}
-        <button class="btn" type="button" data-test="teams" ${a.teams_ready ? "" : "disabled"}>Send a test to Teams</button><span class="status" id="alStatus"></span></div></div>` : ""}`;
+        <button class="btn" type="button" data-test="teams" ${a.teams_ready ? "" : "disabled"}>Send a test to Teams</button>
+        ${a.mail_ready ? `<button class="btn" type="button" data-test="email">Send a test email</button>` : ""}<span class="status" id="alStatus"></span></div></div>` : ""}`;
   $("main").querySelectorAll("[data-dev]").forEach((x) => x.addEventListener("click", (e) => { e.preventDefault(); go("router", x.dataset.dev); }));
   if (!a.can_edit) return;
   const status = (m, c = "") => { $("alStatus").textContent = m; $("alStatus").className = `status ${c}`; };
@@ -2528,6 +2558,7 @@ async function alertsPage() {
     $("main").querySelectorAll("[data-kind]").forEach((c) => { kinds[c.dataset.kind] = { on: c.checked }; });
     $("main").querySelectorAll("[data-th]").forEach((i) => { const k = i.dataset.th; kinds[k][a.kinds[k].threshold] = i.value; });
     const body = { kinds, teams: { on: $("alTeamsOn").checked } };
+    if ($("alEmailOn")) body.email = { on: $("alEmailOn").checked, to: $("alEmailTo").value };
     if ($("alTeamsUrl").value.trim()) body.teams_webhook = $("alTeamsUrl").value.trim();
     if ($("alCwOn")) body.cw = { on: $("alCwOn").checked, board_id: $("alBoard")?.value, company_id: $("alCompany")?.value, status_id: $("alStatusNew")?.value,
       closed_status_id: $("alStatusClosed")?.value, priority_id: $("alPriority")?.value };

@@ -24,6 +24,8 @@ FIELDS = {   # name -> secret?
     "itg": {"region": False, "api_key": True, "config_type_id": False, "config_status_id": False, "sync": False},
     "teams": {"webhook": True},   # a Teams Workflows "post to a channel when a webhook request is received" URL (alerts.py)
     "github": {"library": False, "token": True},   # community script library (scriptlib.py); the token is only for sharing
+    "mail": {"provider": False, "from_address": False, "from_name": False, "tenant_id": False, "client_id": False, "client_secret": True,
+             "host": False, "port": False, "security": False, "username": False, "password": True},   # mailer.py
     "offsite": {"kind": False, "host": False, "port": False, "username": False, "password": True, "folder": False, "url": False,
                 "verify": False, "what": False, "passphrase": True, "schedule": False, "keep": False, "hour": False},   # offsite.py
 }
@@ -71,6 +73,10 @@ class Integrations:
 
     def configured(self, kind):
         c = self.config(kind)
+        if kind == "mail":
+            if c.get("provider", "graph") == "graph":
+                return all(c.get(k) for k in ("tenant_id", "client_id", "client_secret", "from_address"))
+            return bool(c.get("host") and (c.get("from_address") or c.get("username")))
         if kind == "offsite":
             return bool(c.get("url") if c.get("kind") == "webdav" else c.get("host"))
         need = {"cw": ("site", "company", "public_key", "private_key", "client_id"), "teams": ("webhook",), "github": ("token",)}.get(kind, ("api_key",))

@@ -124,8 +124,11 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); }
 .status { font-size: 13px; } .status.ok { color: var(--good); } .status.err { color: var(--bad); } .status.warn { color: var(--warn); }
 .code { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; white-space: pre-wrap; word-break: break-all; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 24px; }
+.grid2 > * { min-width: 0; }   /* a long value wraps instead of stretching its column off the card */
 .kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
-.kv span:first-child { color: var(--muted); }
+.kv span:first-child { color: var(--muted); flex-shrink: 0; }
+/* long values (keys, addresses, paths) wrap inside their column instead of running off the card */
+.kv span:last-child { min-width: 0; overflow-wrap: anywhere; text-align: right; }
 .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; min-width: 60px; }
 .bar > i { display: block; height: 100%; background: var(--info); width: 0; }
 .chart { width: 100%; height: 140px; }

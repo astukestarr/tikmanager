@@ -314,10 +314,10 @@ counts as already in TikManager when one of its MACs, its IP or its identity mat
 waiting to approve) - except the factory identity "MikroTik". Routers only see devices on their own networks that have
 discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on the page gives you the command to run.
 
-## Alerts: ConnectWise tickets and Teams
+## Alerts: ConnectWise tickets, Teams and email
 
 **Alerts** (technicians; administrators change the settings) - when something's wrong, TikManager opens a
-**ConnectWise ticket** and / or posts to **Teams**, and closes the ticket / posts "resolved" when it clears:
+**ConnectWise ticket**, posts to **Teams** and / or sends an **email**, and closes the ticket / posts "resolved" when it clears:
 - **What**: a router offline for N minutes (not during an upgrade), a failed backup, Security-page warnings, a FAIL
   from the server security check, the website grade dropping below A; optionally high CPU and new RouterOS versions.
 - **ConnectWise**: tickets go to the client's linked company (Clients page) or a default company you choose; pick the
@@ -326,7 +326,8 @@ discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on 
 - **Teams**: in the channel, **...** > **Workflows** > **Post to a channel when a webhook request is received**; paste
   the URL it gives you. It's stored encrypted like the other integration keys.
 - When more than 5 routers drop in the same minute you get one grouped alert, not a ticket each.
-- **Send a test ticket** / **Send a test to Teams** check the setup.
+- **Email**: set up email first (Integrations, below), then list the addresses (comma-separated).
+- **Send a test ticket** / **Send a test to Teams** / **Send a test email** check the setup.
 
 ## Security: sign-in attempts everywhere
 
@@ -426,6 +427,14 @@ IT Glue.
   matches are suggested), pick the configuration type for routers, then **Sync now** or leave the nightly update on.
   Each router becomes/updates a configuration (name, hostname, WAN IP, serial, MAC, RouterOS version, link back to
   TikManager); an existing configuration with the same serial is reused instead of duplicated.
+
+- **Email** - how TikManager sends alerts, client invitations and tests:
+  - **Microsoft 365** (recommended there; Microsoft is retiring password SMTP): in Entra, register a single-tenant app,
+    add the Microsoft Graph *application* permission **Mail.Send**, grant admin consent and create a client secret.
+    **Limit it to the From mailbox** (Exchange Online: application access policy, or RBAC for Applications) -
+    otherwise the app could send as anyone in the tenant.
+  - **SMTP** - any provider; STARTTLS (587) or TLS (465), certificate checked. "None" is allowed only to a relay on
+    the server itself (localhost).
 
 Router thumbnails are matched by model against mikrotik.com's product catalog (refreshed weekly), downloaded once into
 `/var/lib/tikmanager/thumbs/` and served by TikManager itself. Discontinued models and CHR show a generic icon.

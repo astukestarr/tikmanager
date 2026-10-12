@@ -40,7 +40,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
 }
 DEFAULTS = {"kinds": {k: {"on": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
             "cw": {"on": False, "board_id": None, "status_id": None, "closed_status_id": None, "priority_id": None, "company_id": None},
-            "teams": {"on": False}}
+            "teams": {"on": False}, "email": {"on": False, "to": ""}}
 
 
 class Alerts:
@@ -55,7 +55,7 @@ class Alerts:
         except ValueError:
             saved = {}
         out = json.loads(json.dumps(DEFAULTS))
-        for k in ("cw", "teams"):
+        for k in ("cw", "teams", "email"):
             out[k].update({x: y for x, y in (saved.get(k) or {}).items() if x in out[k]})
         for k, v in (saved.get("kinds") or {}).items():
             if k in out["kinds"]:
@@ -80,6 +80,16 @@ class Alerts:
         if cur["cw"]["on"] and not cur["cw"]["board_id"]:
             raise ValueError("Pick the ConnectWise board tickets go to.")
         cur["teams"]["on"] = bool((b.get("teams") or {}).get("on"))
+        em = b.get("email") or {}
+        if em:
+            from mailer import MailError, addresses
+            try:
+                to = addresses(em.get("to") or "")
+            except MailError as e:
+                raise ValueError(str(e)) from None
+            cur["email"] = {"on": bool(em.get("on")), "to": ", ".join(to)}
+            if cur["email"]["on"] and not to:
+                raise ValueError("Add who alert emails go to.")
         if "teams_webhook" in b or b.get("teams_clear"):
             self.integ.save("teams", {"webhook": str(b.get("teams_webhook") or "")} if not b.get("teams_clear") else {"clear": ["webhook"]})
         if cur["teams"]["on"] and not self.integ.configured("teams"):
@@ -186,6 +196,14 @@ class Alerts:
                 self.integ.teams_post(self._card(a["title"], a["detail"] or "", False, link, client))
             except IntegrationError as e:
                 teams_note = f"Teams message not sent: {e}"
+        mailer = getattr(self, "mailer", None)
+        if cfg["email"]["on"] and mailer and mailer.configured():
+            try:
+                mailer.send(cfg["email"]["to"], f"[TikManager] {a['title']}"[:200],
+                            f"{a['detail'] or ''}\n\n{'Client: ' + client + chr(10) if client else ''}Started: {time.strftime('%Y-%m-%d %H:%M')}\n{link}\n\n"
+                            "TikManager sends another email when this clears.")
+            except Exception as e:  # noqa: BLE001 - MailError
+                teams_note = ((teams_note + " · ") if teams_note else "") + f"Email not sent: {e}"[:200]
         self.db.run("UPDATE alerts SET cw_note=?, teams_note=? WHERE id=?", (cw_note, teams_note, a["id"]))
 
     def notify_resolved(self, cfg, a):
@@ -200,6 +218,12 @@ class Alerts:
             try:
                 self.integ.teams_post(self._card(a["title"], text, True, self._link(a["device_id"])))
             except IntegrationError:
+                pass
+        mailer = getattr(self, "mailer", None)
+        if cfg["email"]["on"] and mailer and mailer.configured():
+            try:
+                mailer.send(cfg["email"]["to"], f"[TikManager] Resolved: {a['title']}"[:200], f"{text}\n\n{self._link(a['device_id'])}")
+            except Exception:  # noqa: BLE001
                 pass
 
     def run_once(self):
@@ -237,6 +261,14 @@ class Alerts:
         if channel == "teams":
             self.integ.teams_post(self._card(a["title"], a["detail"], False, self._link(None)))
             return "Sent to Teams."
+        if channel == "email":
+            mailer = getattr(self, "mailer", None)
+            if not (mailer and mailer.configured()):
+                raise ValueError("Set up email first (Admin > Integrations > Email).")
+            if not cfg["email"]["to"]:
+                raise ValueError("Save who alert emails go to first.")
+            mailer.send(cfg["email"]["to"], "[TikManager] Test alert", a["detail"])
+            return f"Sent to {cfg['email']['to']}."
         if channel == "cw":
             if not cfg["cw"]["board_id"] or not cfg["cw"]["company_id"]:
                 raise ValueError("Save a board and a default company first.")

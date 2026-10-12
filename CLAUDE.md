@@ -66,7 +66,8 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Add an integration | `integrations.py` + Admin > Integrations in `app.js` |
 | Firewall / NAT editing (fields, locked rules, undo timer) | `firewall.py` (`FIELDS`, `ACTIONS`, `protected()`, `restore_script()`), `RouterOS.fw_*` / `undo_*` (+ `SimRouter`), `loadFirewall()` / `fwDialog()` in `app.js` |
 | Community script library (danger / secret patterns, sharing) | `scriptlib.py` (`DANGER`, `SECRETS`, `share()`), `libraryDialog()` / `shareDialog()` in `app.js`; library repo `astukestarr/routeros-scripts` |
-| Alerts (kinds, thresholds, tickets, Teams) | `alerts.py` (`KINDS`, `conditions()`, `notify_open/resolved()`), `Integrations.cw_ticket/cw_close/teams_post`, `alertsPage()` in `app.js` |
+| Send email | `mailer.Mailer.send()` (`server.mailer`, `alerts.mailer`); settings in `integrations.py` FIELDS "mail" |
+| Alerts (kinds, thresholds, tickets, Teams, email) | `alerts.py` (`KINDS`, `conditions()`, `notify_open/resolved()`), `Integrations.cw_ticket/cw_close/teams_post`, `alertsPage()` in `app.js` |
 | WireGuard port (move, relay, helper) | `wgport.py`, `deploy/wg-port.sh` + `tikmanager-wgport.*`, `RouterOS.set_controller_port`, `devices.wg_port`, `wgPortCard()` in `app.js`; installer `--wg-port` |
 | Winbox relay (sessions, ports, router Winbox fix) | `winbox.py`, `RouterOS.winbox_service/winbox_allow` (+ `SimRouter`), `winbox_allows_tikmanager()` + `/api/devices/<id>/winbox*` in `server.py`, `loadWinbox()` in `app.js`; `TM_WINBOX_PORTS` |
 | Off-site backup / restore | `offsite.py` (`build()`, `encrypt()`, destinations), `tools/tmbak.py`, `offsiteCard()` in `app.js`; README "Off-site backup and restoring" |

@@ -36,6 +36,7 @@ from reachability import Reachability
 from offsite import OffsiteBackup, OffsiteError
 from winbox import WinboxRelay
 from wgport import WgPort
+from mailer import Mailer, MailError
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -102,6 +103,8 @@ winbox = WinboxRelay(db, settings, secev, poller.client, backups)   # Winbox to 
 secev.winbox_who = winbox.who   # label router log lines from the relay with the session's technician
 wgport = WgPort(db, settings, poller.client, sysconf)   # moving the WireGuard port without stranding routers
 reach.wgport = wgport
+mailer = Mailer(integ, settings)   # email: alerts, invitations, tests
+alerts.mailer = mailer
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -416,7 +419,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(rows)
         if path == "/api/integrations":
             self.require(tech=True, admin=True)
-            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"),
+            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"), "mail": integ.public("mail"),
                               "itg_last_sync": json.loads(db.setting("itg_last_sync") or "null"), "itg_sync": integ.sync_state})
         if path == "/api/integrations/cw/companies":   # PSA companies next to the TikManager clients they are linked to
             self.require(tech=True, admin=True)
@@ -543,7 +546,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/alerts":   # open and recent alerts; the settings (admins change them)
             s = self.require(tech=True)
             return self.json({**alerts.view(), "settings": alerts.settings(), "can_edit": s["role"] == "admin",
-                              "cw_ready": integ.configured("cw"), "teams_ready": integ.configured("teams")})
+                              "cw_ready": integ.configured("cw"), "teams_ready": integ.configured("teams"), "mail_ready": mailer.configured()})
         if path == "/api/admin/alerts/cw-options":   # boards / statuses / priorities / companies for ticket settings
             self.require(tech=True, admin=True)
             try:
@@ -914,6 +917,27 @@ class Handler(BaseHTTPRequestHandler):
             r = backups.run(d["id"], "manual", s["email"])
             db.audit(s["email"], "backup now", d["name"], self.client_ip(), org_id=d["org_id"], detail=r.get("detail", ""))
             return self.json(r, 200 if r.get("ok") else 502)
+        if path == "/api/integrations/mail":   # email settings (Microsoft 365 or SMTP)
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            try:
+                Mailer.validate({**mailer.config(), **{k: str(v).strip() for k, v in b.items() if isinstance(v, str)}})
+                integ.save("mail", b)
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            mailer._token = (None, 0)
+            db.audit(s["email"], "integration settings changed", "Email", self.client_ip())
+            return self.json({"ok": True, **integ.public("mail")})
+        if path == "/api/integrations/mail/test":   # send a test message
+            s = self.require(tech=True, admin=True)
+            to = str(self.body().get("to") or s["email"]).strip()
+            try:
+                mailer.send(to, "TikManager test email", f"This is a test from TikManager ({settings.public_url}), sent by {s['email']}.\n\n"
+                                                         "If you can read this, TikManager can send email - alerts and invitations will arrive like this.")
+            except MailError as e:
+                return self.json({"ok": False, "detail": str(e)})
+            db.audit(s["email"], "test email sent", to, self.client_ip())
+            return self.json({"ok": True, "detail": f"Sent to {to} - check the inbox (and spam folder)."})
         if path == "/api/integrations/github":   # community script library + the token used to share
             s = self.require(tech=True, admin=True)
             try:
@@ -1631,7 +1655,24 @@ class Handler(BaseHTTPRequestHandler):
         db.run("INSERT INTO users (email, name, kind, role, org_id, invite_hash, invite_expires, created_at) VALUES (?,?,?,?,?,?,?,?)",
                (email, str(b.get("name") or "")[:120], "client", role, org_id, token_hash(t), now() + INVITE_TTL, now()))
         db.audit(s["email"], "user invited", email, self.client_ip(), org_id=org_id, detail=role)
-        return self.json({"ok": True, "link": f"{settings.public_url}/invite/{t}", "expires_days": INVITE_TTL // 86400})
+        link = f"{settings.public_url}/invite/{t}"
+        return self.json({"ok": True, "link": link, "expires_days": INVITE_TTL // 86400, "emailed": self.email_invite(email, link, s)})
+
+    def email_invite(self, email, link, s):
+        """Email an invitation if email is set up -> None (not set up), True (sent) or the error text."""
+        if not mailer.configured():
+            return None
+        org = db.one("SELECT o.name FROM users u LEFT JOIN orgs o ON o.id = u.org_id WHERE u.email=?", (email,))
+        company = (brand.public().get("company") or "Your IT provider")
+        try:
+            mailer.send(email, f"You're invited to {brand.public().get('product') or 'TikManager'}",
+                        f"Hello,\n\n{s.get('name') or s['email']} invited you to see {(org or {}).get('name') or 'your'} network equipment in "
+                        f"{brand.public().get('product') or 'TikManager'}, run by {company}.\n\nSet up your account (the link works for "
+                        f"{INVITE_TTL // 86400} days and only once):\n{link}\n\nYou'll choose a password and set up an authenticator app.\n\n"
+                        "If you weren't expecting this, you can ignore this email.")
+            return True
+        except MailError as e:
+            return str(e)
 
     def user_action(self, uid, action):
         s = self.require(write=True)
@@ -1656,6 +1697,7 @@ class Handler(BaseHTTPRequestHandler):
             t = token()
             db.run("UPDATE users SET invite_hash=?, invite_expires=? WHERE id=?", (token_hash(t), now() + INVITE_TTL, uid))
             extra["link"] = f"{settings.public_url}/invite/{t}"
+            extra["emailed"] = self.email_invite(u["email"], extra["link"], s)
         db.audit(s["email"], f"user {action}", u["email"], self.client_ip(), org_id=u["org_id"])
         return self.json({"ok": True, **extra})
 

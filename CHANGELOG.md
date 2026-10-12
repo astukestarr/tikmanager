@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.21.0 - 2026-10-11
+
+- **Email** (Admin > Integrations > Email): TikManager can send email through **Microsoft 365** (Microsoft Graph,
+  an app with the Mail.Send application permission - limit it to the sending mailbox) or any **SMTP** server
+  (STARTTLS or TLS with the certificate checked; unencrypted only to a relay on the server itself). Secrets are stored
+  encrypted like the other integration keys. **Send a test to me** checks the setup.
+- **Client invitations are emailed** when email is set up (the link is still shown, in case you'd rather send it).
+- **Email alerts**: Alerts > Settings can email each problem, and when it clears, to one or more addresses.
+- Addresses are validated (no header injection) and at most 200 emails an hour are sent.
+- **Fixed**: long values (addresses, folders) ran off the page in About this installation and other cards.
+
 ## 1.20.0 - 2026-10-11
 
 - **Server security grade** (Admin > Version & updates): the server security check now shows a grade, like the website
