@@ -388,6 +388,7 @@ async function router(id) {
       </div>
       <div class="health" id="health"></div>
       ${secCard(d)}
+      ${Object.keys(d.health || {}).length ? `<div class="card" id="hwCard"><h2>Hardware health</h2><p class="muted small">Loading…</p></div>` : ""}
       ${lteCard(d.interfaces || [])}
       <div class="card"><h2>Interfaces</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Details</th><th>In now</th><th>Out now</th><th>Total in / out</th><th>Comment</th></tr></thead><tbody>
         ${(d.interfaces || []).map((i) => `<tr><td class="mono">${esc(i.name)}</td><td>${esc(i.type)}</td>
@@ -487,6 +488,7 @@ async function router(id) {
     }
     activityChart($("act"), s, rView);
     healthStrip(s, d, memPct, diskPct);
+    if ($("hwCard")) hwCard(d);
   };
   $("cIface").addEventListener("change", (e) => { rView.iface = e.target.value; load(); });
   $("cLat").addEventListener("change", (e) => { rView.latency = e.target.checked; load(); });
@@ -727,6 +729,42 @@ function upgradeBox(d) {
   return html;
 }
 
+// Hardware health: board sensors and fibre modules, current value + a line over the selected range (every 5 minutes)
+function hwLabel(n) {
+  const sfp = n.match(/^sfp:(.+):(rx|tx|temp)$/);
+  if (sfp) return `${sfp[1]} ${{ rx: "light in", tx: "light out", temp: "module temp" }[sfp[2]]}`;
+  return n.replace(/-/g, " ").replace(/^cpu /, "CPU ").replace(/^psu/, "PSU ").replace(/(\D)(\d)$/, "$1 $2");
+}
+function hwTone(n, v, unit) {
+  if (v == null) return "";
+  if (unit === "°C") return v >= 80 ? "bad" : v >= 65 ? "warn" : "good";
+  if (/^sfp:.+:rx$/.test(n)) return v < -25 ? "bad" : v < -20 ? "warn" : "good";
+  return "";
+}
+function miniLine(svg, pts) {
+  if (!svg || pts.length < 2) return;
+  const W = svg.clientWidth || 200, H = 36, vs = pts.map((p) => p[1]);
+  let lo = Math.min(...vs), hi = Math.max(...vs);
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  const x = (t) => (W * (t - t0)) / Math.max(1, t1 - t0), y = (v) => H - 3 - ((H - 6) * (v - lo)) / (hi - lo);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = `<polyline class="l-in" fill="none" points="${pts.map((p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ")}"/>`;
+}
+async function hwCard(d) {
+  let h;
+  try { h = await api(`/api/devices/${d.id}/health?range=${rView.range}`); } catch (e) { return; }
+  if (!$("hwCard")) return;
+  const fmt = (v, u) => v == null ? "—" : `${Math.abs(v) >= 100 ? Math.round(v) : v.toFixed(1)}${u === "°C" ? "°C" : u ? ` ${u}` : ""}`;
+  const range = (pts, u) => pts.length > 1 ? `${fmt(Math.min(...pts.map((p) => p[1])), u)} – ${fmt(Math.max(...pts.map((p) => p[1])), u)}` : "";
+  $("hwCard").innerHTML = `<div class="row"><h2>Hardware health</h2><span class="spacer"></span><span class="small muted">${h.at ? `read ${ago(h.at)}` : ""}</span></div>
+    <div class="hw-grid">${h.sensors.map((x, k) => `<div class="hw-tile ${hwTone(x.name, x.value, x.unit)}"><div class="row small"><span>${esc(hwLabel(x.name))}</span>
+      <span class="spacer"></span><b>${fmt(x.value, x.unit)}</b></div><svg class="hw-line" id="hw${k}" role="img" aria-label="${esc(hwLabel(x.name))} over time"></svg>
+      <div class="small muted">${range(x.points, x.unit)}</div></div>`).join("")}</div>
+    <p class="small muted">Every 5 minutes, kept 30 days. Fibre light levels (dBm) below about -20 dBm are getting weak.</p>`;
+  h.sensors.forEach((x, k) => miniLine($(`hw${k}`), x.points));
+}
+
 // Health strip under the chart: averages over the selected range
 function healthStrip(s, d, memPct, diskPct) {
   const h = s.health.filter((x) => x.latency != null);
@@ -865,7 +903,7 @@ function ifaceDetail(i) {
   if (i.vlan_id) return `VLAN ${i.vlan_id} on ${i.parent || "?"}`;
   if (i.ssid !== undefined) return [i.ssid && `SSID ${i.ssid}`, i.band, i.freq && `${i.freq} MHz`, i.mode].filter(Boolean).join(" · ");
   if (i.operator !== undefined) return [i.operator, i.access, i.band_lte, i.rsrp && `RSRP ${i.rsrp}`].filter(Boolean).join(" · ");
-  return [i.speed, i.mac].filter(Boolean).join(" · ");
+  return [i.speed, i.sfp && i.sfp.rx != null && `light in ${i.sfp.rx} / out ${i.sfp.tx} dBm`, i.mac].filter(Boolean).join(" · ");
 }
 
 // LTE signal at a glance: RSRP/RSRQ/SINR with plain-English quality
@@ -2767,7 +2805,7 @@ async function alertsPage() {
       <tbody>${a.recent.map(row).join("")}</tbody></table></div>` : `<p class="muted">None.</p>`}</div>
     ${a.can_edit ? `<div class="card" id="alSettings"><h2>Settings</h2>
       <h3 class="al-h">What to alert on</h3><div class="al-kinds">${Object.entries(a.kinds).map(([k, m]) => `<label class="chk al-kind"><input type="checkbox" data-kind="${k}" ${st.kinds[k].on ? "checked" : ""}> ${esc(m.label)}
-        ${m.threshold ? `<span class="small muted"> - ${m.threshold === "percent" ? "above" : "after"} <input type="number" class="al-th" data-th="${k}" value="${esc(st.kinds[k][m.threshold])}" min="1" max="${m.threshold === "percent" ? 100 : 1440}"> ${m.threshold === "percent" ? "%" : "minutes"}</span>` : ""}</label>`).join("")}</div>
+        ${m.threshold ? `<span class="small muted"> - ${m.threshold === "minutes" ? "after" : "above"} <input type="number" class="al-th" data-th="${k}" value="${esc(st.kinds[k][m.threshold])}" min="1" max="${{ percent: 100, celsius: 120 }[m.threshold] || 1440}"> ${{ percent: "%", celsius: "°C" }[m.threshold] || "minutes"}</span>` : ""}</label>`).join("")}</div>
       <h3 class="al-h">ConnectWise tickets</h3>
       ${a.cw_ready ? `<label class="chk"><input type="checkbox" id="alCwOn" ${st.cw.on ? "checked" : ""}> Open a ticket for each problem, and close it when it clears</label>
         <div class="grid2" id="alCwFields"><p class="small muted">Loading boards…</p></div>

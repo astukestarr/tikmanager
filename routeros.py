@@ -7,6 +7,7 @@ SimRouter stands in for real routers in dev mode (TM_DEV=1) so the whole app can
 import base64
 import copy
 import json
+import math
 import random
 import time
 import hashlib
@@ -87,6 +88,11 @@ class RouterOS:
                    "rx_bps": _num(live.get(n, {}).get("rx-bits-per-second")), "tx_bps": _num(live.get(n, {}).get("tx-bits-per-second"))}
             if n in eth:
                 row["speed"] = eth_mon.get(n, {}).get("rate") or eth[n].get("speed") or ""
+                em = eth_mon.get(n, {})
+                if em.get("sfp-rx-power") not in (None, ""):   # fibre module: optical levels (dBm), temperature, supply voltage
+                    num = lambda k: _num(str(em.get(k) or "").rstrip("CVdBm% "))
+                    row["sfp"] = {"rx": num("sfp-rx-power"), "tx": num("sfp-tx-power"), "temp": num("sfp-temperature"),
+                                  "volt": num("sfp-supply-voltage")}
             if n in vlans:
                 row.update(vlan_id=vlans[n].get("vlan-id"), parent=vlans[n].get("interface"))
             if n in wifi:
@@ -228,6 +234,25 @@ class RouterOS:
                 p["ip"] = p["ip"] or l.get("active-address") or l.get("address") or arp.get(p["mac"].upper()) or ""
                 p["name"] = p["name"] or l.get("host-name") or l.get("comment") or ""
         return {"radios": radios, "peers": peers, "types": types}   # types: only when no radio was found (to explain why)
+
+    UNITS = {"C": "°C", "V": "V", "A": "A", "W": "W", "RPM": "RPM", "%": "%"}
+
+    def health(self) -> list:
+        """Board sensors from /system/health: [{name, value, unit}] - temperatures, voltage, fans, power ... whatever the
+        model has (RouterOS 7 lists one row per sensor; RouterOS 6 returned one record). Non-numbers (PSU 'ok') are left out."""
+        h = self.get("/system/health") or []
+        rows = h if isinstance(h, list) else [{"name": k, "value": v, "type": ""} for k, v in h.items() if not k.startswith(".")]
+        out = []
+        for r in rows:
+            v = _num(str(r.get("value") or "").rstrip("CVAWRPM% "))
+            if v is None or not r.get("name"):
+                continue
+            unit = self.UNITS.get(r.get("type") or "", r.get("type") or "")
+            if not unit:
+                n = r["name"]
+                unit = "°C" if "temperature" in n else "V" if "voltage" in n else "RPM" if "fan" in n else "W" if "power" in n else "A" if "current" in n else ""
+            out.append({"name": r["name"], "value": v, "unit": unit})
+        return out
 
     DM_FEATURES = ("scheduler", "socks", "fetch", "pptp", "l2tp", "bandwidth-test", "traffic-gen", "sniffer", "ipsec", "romon",
                    "proxy", "hotspot", "smb", "email", "zerotier", "container", "install-any-version", "partitions", "routerboard")
@@ -1025,6 +1050,18 @@ class SimRouter:
     def device_mode(self):
         return {"mode": "advanced", "flagged": self.id % 6 == 3, "attempts": 0, "off": ["container"]}
 
+    def health(self):
+        t = time.time()
+        r = random.Random(int(t // 300) + self.id)
+        day = math.sin((t % 86400) / 86400 * 2 * math.pi)   # warmer in the afternoon
+        out = [{"name": "cpu-temperature", "value": round(48 + 6 * day + r.uniform(-1, 1) + self.id % 5, 1), "unit": "°C"},
+               {"name": "board-temperature1", "value": round(38 + 5 * day + r.uniform(-1, 1), 1), "unit": "°C"},
+               {"name": "voltage", "value": round(24.1 + r.uniform(-0.15, 0.15), 1), "unit": "V"}]
+        if self.board == "ccr2004":
+            out += [{"name": "fan1-speed", "value": 5100 + r.randint(-120, 120), "unit": "RPM"},
+                    {"name": "power-consumption", "value": round(18 + r.uniform(-1, 1), 1), "unit": "W"}]
+        return out
+
     def set_identity(self, name):
         self.name = name   # the poller builds SimRouter with the stored name, so the new identity "sticks" once saved
         return name
@@ -1094,6 +1131,10 @@ class SimRouter:
         ifaces = [{"name": "ether1", "type": "ether", "running": True, "disabled": False, "comment": "WAN", "speed": "1Gbps"}]
         ifaces += [{"name": f"ether{i}", "type": "ether", "running": (up_ := self.r.random() > 0.3), "disabled": False, "comment": "",
                     "speed": self.r.choice(["1Gbps", "100Mbps"]) if up_ else ""} for i in range(2, n)]
+        if self.board in ("rb5009", "ccr2004"):   # a fibre uplink with optical readings
+            ifaces += [{"name": "sfp-sfpplus1", "type": "ether", "running": True, "disabled": False, "comment": "Fibre to core", "speed": "10Gbps",
+                        "sfp": {"rx": round(-6.2 + r.uniform(-0.3, 0.3), 2), "tx": round(-2.1 + r.uniform(-0.1, 0.1), 2),
+                                "temp": round(41 + r.uniform(-1, 1), 1), "volt": 3.29}}]
         ifaces += [{"name": "bridge", "type": "bridge", "running": True, "disabled": False, "comment": "LAN"},
                    {"name": "vlan20-guest", "type": "vlan", "running": True, "disabled": False, "comment": "Guest", "vlan_id": "20", "parent": "bridge"}]
         if self.board in ("hap-ax3",):

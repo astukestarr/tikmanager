@@ -695,6 +695,7 @@ class Handler(BaseHTTPRequestHandler):
             d["interfaces"] = json.loads(d["interfaces"] or "[]")
             d["dm_info"] = json.loads(d.get("dm_info") or "null")
             d["sec_info"] = json.loads(d.get("sec_info") or "null")
+            d["health"] = json.loads(d.get("health") or "{}")
             org = db.one("SELECT name FROM orgs WHERE id=?", (d["org_id"],)) if d["org_id"] else None
             d["org"] = org["name"] if org else ""
             d["upgrade"] = db.one("""SELECT id, status, step, scheduled_at, channel, firmware, created_by FROM upgrades
@@ -734,6 +735,20 @@ class Handler(BaseHTTPRequestHandler):
                               (d["id"], since))
             names = [r["name"] for r in db.q("SELECT DISTINCT name FROM iface_metrics WHERE device_id=? AND ts>? ORDER BY name", (d["id"], now() - 86400))]
             return self.json({"traffic": traffic, "health": health, "interfaces": names, "range": span, "bucket": bucket})
+        if m := re.fullmatch(r"/api/devices/(\d+)/health", path):   # sensor / fibre history for the Hardware health card
+            s = self.require()
+            d = self.device_for(s, m.group(1))
+            span = {"1h": 3600, "1d": 86400, "1w": 7 * 86400, "1m": 30 * 86400}.get(q.get("range", "1d"), 86400)
+            bucket = max(300, span // 200)
+            rows = db.q(f"""SELECT name, CAST(ts / {bucket} AS INTEGER) * {bucket} AS t, AVG(value) AS v FROM health_metrics
+                            WHERE device_id=? AND ts>? GROUP BY name, t ORDER BY name, t""", (d["id"], now() - span))
+            latest = json.loads(d.get("health") or "{}")
+            series = {}
+            for r in rows:
+                series.setdefault(r["name"], []).append([r["t"], r["v"]])
+            return self.json({"sensors": [{"name": n, "unit": (latest.get(n) or {}).get("unit", ""), "value": (latest.get(n) or {}).get("value"),
+                                           "points": series.get(n, [])} for n in sorted(set(latest) | set(series), key=lambda n: (n.startswith("sfp:"), n))],
+                              "at": d.get("health_at"), "range": span})
         if m := re.fullmatch(r"/thumb/([A-Za-z0-9_+.-]{1,80})", path):   # cached MikroTik product picture
             self.require()
             p = thumbs.path_for(m.group(1)) if db.one("SELECT 1 FROM devices WHERE thumb_slug=?", (m.group(1),)) else None

@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.28.0 - 2026-10-12
+
+- **Hardware health** (router page, Overview): every sensor the board has - temperatures, voltage, fans, power - and
+  each fibre module's light in / light out (dBm) and temperature, read every 5 minutes and kept 30 days. Each reading
+  is a tile with its current value, a line over the chart's time range and the low-high; weak fibre light and hot
+  temperatures are coloured. The Interfaces table shows fibre light levels too. Fibre readings come from the port
+  monitor TikManager already reads each minute, so they cost no extra router requests.
+- **New alerts** (off by default, Alerts > Settings): **Router memory high** (10-minute average, default 90%) and
+  **Router too hot** (three readings in a row - 15 minutes - over the limit, default 70°C; fibre modules don't count),
+  so a brief spike stays quiet. Both clear with a little hysteresis rather than flapping.
+
 ## 1.27.0 - 2026-10-12
 
 - **Auto-block** (Security page): an address with N failed sign-ins to your routers within M minutes - counted across

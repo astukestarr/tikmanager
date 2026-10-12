@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS devices (
   lc_suggest TEXT, lc_suggest_name TEXT, lc_suggest_why TEXT,   -- suggested replacement (product page slug, name, why)
   dm_mode TEXT, dm_flagged INTEGER, dm_info TEXT, dm_checked REAL,   -- RouterOS device-mode (hourly); flagged = possibly compromised
   sec_target TEXT, cve_n INTEGER, cve_max REAL, sec_info TEXT, sec_version TEXT, sec_checked REAL,   -- rossec.py: security releases / CVEs
+  health TEXT, health_at REAL,             -- latest sensor readings {name: {value, unit}} (health_metrics has the history)
   lat REAL, lon REAL, location TEXT,       -- where it is (map): typed in, picked on the map, or from the router's GPS
   loc_source TEXT,                          -- manual / gps (manual always wins)
   api_port INTEGER,                         -- the router's www (REST) port, reported when it runs the adoption command                         -- VPNs already configured on the router (raw, whitelisted fields)
@@ -148,6 +149,10 @@ CREATE TABLE IF NOT EXISTS sec_events (
   user TEXT, ip TEXT, device_id INTEGER, via TEXT, detail TEXT, uid TEXT UNIQUE          -- uid: de-duplicates imported events
 );
 CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
+CREATE TABLE IF NOT EXISTS health_metrics (   -- board sensors and fibre (SFP) readings every 5 minutes, kept 30 days
+  device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, ts REAL NOT NULL, name TEXT NOT NULL, value REAL
+);
+CREATE INDEX IF NOT EXISTS health_dev ON health_metrics(device_id, ts);
 CREATE TABLE IF NOT EXISTS autoblock (     -- addresses blocked on every router (autoblock.py)
   ip TEXT PRIMARY KEY, blocked_at REAL, until REAL, failures INTEGER, by TEXT, reason TEXT, released_at REAL
 );
@@ -209,7 +214,7 @@ class DB:
                              ("lc_suggest", "TEXT"), ("lc_suggest_name", "TEXT"), ("lc_suggest_why", "TEXT"),
                              ("dm_mode", "TEXT"), ("dm_flagged", "INTEGER"), ("dm_info", "TEXT"), ("dm_checked", "REAL"),
                              ("sec_target", "TEXT"), ("cve_n", "INTEGER"), ("cve_max", "REAL"), ("sec_info", "TEXT"), ("sec_version", "TEXT"),
-                             ("sec_checked", "REAL")):
+                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")
             if info["org_id"][3] == 1 or "name_custom" not in info:   # org_id NOT NULL (old schema)

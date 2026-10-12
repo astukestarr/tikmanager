@@ -8,7 +8,7 @@ and closed when it clears.
 - Kinds (Alerts page > Settings turns each on / off and sets thresholds):
   offline (router offline N minutes - not while it's being upgraded), flagged (RouterOS device-mode says possibly
   compromised), patch (security release / high CVE for its RouterOS), backup_failed (latest backup attempt failed),
-  cpu (average over 15 minutes), firmware (new RouterOS on its channel), security (Security page warnings),
+  cpu (average over 15 minutes), memory (10 minutes), temperature (3 readings in a row), firmware (new RouterOS on its channel), security (Security page warnings),
   server (server security check FAILs), website (Mozilla Observatory grade below A).
 - No storms: if more than STORM routers go offline in the same minute (TikManager's own internet, most likely), one
   grouped alert is sent instead of one each.
@@ -39,6 +39,8 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "connectivity": ("Connectivity test finds a port problem (e.g. HTTPS not reachable from the internet)", True, None, None),
     "offsite": ("Off-site backup failed", True, None, None),
     "cpu": ("Router CPU high (15-minute average)", False, "percent", 90),
+    "memory": ("Router memory high (10-minute average)", False, "percent", 90),
+    "temperature": ("Router too hot (3 readings in a row, 15 minutes)", False, "celsius", 70),
     "firmware": ("New RouterOS available for a router", False, None, None),
 }
 DEFAULTS = {"kinds": {k: {"on": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
@@ -74,7 +76,7 @@ class Alerts:
             cur["kinds"][k]["on"] = bool(v.get("on"))
             th = KINDS[k][2]
             if th and v.get(th) not in (None, ""):
-                cur["kinds"][k][th] = num(v[th], 1, 1440) if th == "minutes" else num(v[th], 50, 100)
+                cur["kinds"][k][th] = num(v[th], 1, 1440) if th == "minutes" else num(v[th], 30, 120) if th == "celsius" else num(v[th], 50, 100)
         cw = b.get("cw") or {}
         cur["cw"]["on"] = bool(cw.get("on"))
         for f in ("board_id", "status_id", "closed_status_id", "priority_id", "company_id"):
@@ -128,8 +130,9 @@ class Alerts:
                     lines += [f"{c['id']} (CVSS {c['score']}): {c['summary'][:200]}" + (f" Fixed in {c['fixed']}." if c.get("fixed") else "")
                               for c in (info.get("cves") or [])[:5] if (c.get("score") or 0) >= 7]
                     target = d.get("sec_target") or d.get("ros_latest") or "a newer version"
-                    out[f"patch:{d['id']}:{d['version']}"] = ("patch", d["id"], d["org_id"], f"{label(d)} needs RouterOS {target} (security)",
-                                                               f"Running {d['version']}.\n" + "\n".join(f"- {x}" for x in lines))
+                    cur = str(d["version"] or "").split(" ")[0]
+                    out[f"patch:{d['id']}:{cur}"] = ("patch", d["id"], d["org_id"], f"{label(d)} needs RouterOS {target} (security)",
+                                                     f"Running {cur}.\n" + "\n".join(f"- {x}" for x in lines))
         if k["backup_failed"]["on"]:
             for d in devs:
                 if d["last_backup_error"] and (d["last_backup_try"] or 0) > (d["last_backup_at"] or 0):
@@ -141,6 +144,27 @@ class Alerts:
                 open_ = self.db.one("SELECT 1 FROM alerts WHERE key=? AND resolved_at IS NULL", (f"cpu:{r['device_id']}",))
                 if d and r["n"] >= 5 and (r["c"] >= pct or (open_ and r["c"] >= pct - 20)):
                     out[f"cpu:{d['id']}"] = ("cpu", d["id"], d["org_id"], f"{label(d)} CPU at {r['c']:.0f}%", f"15-minute average {r['c']:.0f}% (alert at {pct}%).")
+        if k["memory"]["on"]:
+            pct = k["memory"]["percent"]
+            for r in self.db.q("SELECT device_id, AVG(mem_pct) AS m, COUNT(*) AS n FROM metrics WHERE ts > ? AND mem_pct IS NOT NULL GROUP BY device_id", (now - 600,)):
+                d = next((x for x in devs if x["id"] == r["device_id"]), None)
+                open_ = self.db.one("SELECT 1 FROM alerts WHERE key=? AND resolved_at IS NULL", (f"mem:{r['device_id']}",))
+                if d and r["n"] >= 5 and (r["m"] >= pct or (open_ and r["m"] >= pct - 10)):
+                    out[f"mem:{d['id']}"] = ("memory", d["id"], d["org_id"], f"{label(d)} memory at {r['m']:.0f}%", f"10-minute average {r['m']:.0f}% (alert at {pct}%).")
+        if k["temperature"]["on"]:
+            lim = k["temperature"]["celsius"]
+            rows = self.db.q("""SELECT device_id, ts, MAX(value) AS v FROM health_metrics WHERE ts > ? AND name LIKE '%temperature%' AND name NOT LIKE 'sfp:%'
+                                GROUP BY device_id, ts ORDER BY ts""", (now - 16 * 60,))
+            by = {}
+            for r in rows:
+                by.setdefault(r["device_id"], []).append(r["v"])
+            for did, vals in by.items():
+                d = next((x for x in devs if x["id"] == did), None)
+                last = vals[-3:]
+                open_ = self.db.one("SELECT 1 FROM alerts WHERE key=? AND resolved_at IS NULL", (f"temp:{did}",))
+                if d and len(last) == 3 and (min(last) >= lim or (open_ and min(last) >= lim - 5)):
+                    out[f"temp:{did}"] = ("temperature", did, d["org_id"], f"{label(d)} is running hot: {last[-1]:.0f}°C",
+                                          f"The last three readings were {', '.join(f'{v:.0f}' for v in last)}°C (alert at {lim}°C). Check ventilation and fans.")
         if k["firmware"]["on"]:
             for d in devs:
                 cur = str(d["version"] or "").split(" ")[0]

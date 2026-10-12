@@ -13,6 +13,8 @@ POLL_SECONDS = 60
 CHART_TYPES = {"ether", "vlan", "bridge", "wlan", "wifi", "lte", "pppoe-out", "wg", "sstp-out", "ovpn-out", "l2tp-out", "bond"}
 KEEP_METRICS = 7 * 86400
 INVENTORY_SECONDS = 15 * 60
+HEALTH_SECONDS = 300
+KEEP_HEALTH = 30 * 86400
 
 
 class Poller:
@@ -99,6 +101,19 @@ class Poller:
                 self.db.run("UPDATE devices SET neighbors=?, neighbors_at=? WHERE id=?", (json.dumps(cl.mikrotik_neighbors()), now, d["id"]))
             except RouterError:
                 pass
+        if now - (d.get("health_at") or 0) > HEALTH_SECONDS - 5:   # board sensors + fibre modules, every 5 minutes
+            try:
+                sensors = cl.health() if hasattr(cl, "health") else []
+            except RouterError:
+                sensors = []
+            for i in st["interfaces"]:
+                for k, unit in (("rx", "dBm"), ("tx", "dBm"), ("temp", "°C")):
+                    if (i.get("sfp") or {}).get(k) is not None:
+                        sensors.append({"name": f"sfp:{i['name']}:{k}", "value": i["sfp"][k], "unit": unit})
+            for x in sensors:
+                self.db.run("INSERT INTO health_metrics (device_id, ts, name, value) VALUES (?,?,?,?)", (d["id"], now, x["name"], x["value"]))
+            self.db.run("UPDATE devices SET health=?, health_at=? WHERE id=?",
+                        (json.dumps({x["name"]: {"value": x["value"], "unit": x["unit"]} for x in sensors}), now, d["id"]))
         if now - (d.get("dm_checked") or 0) > 3600 and hasattr(cl, "device_mode"):   # hourly: has RouterOS flagged itself?
             try:
                 dm = cl.device_mode()
@@ -133,6 +148,7 @@ class Poller:
             self.rollup()
             self.db.run("DELETE FROM metrics WHERE ts < ?", (time.time() - KEEP_METRICS,))
             self.db.run("DELETE FROM iface_metrics WHERE ts < ?", (time.time() - KEEP_METRICS,))
+            self.db.run("DELETE FROM health_metrics WHERE ts < ?", (time.time() - KEEP_HEALTH,))
             self.db.run("DELETE FROM metrics_hourly WHERE ts < ?", (time.time() - 90 * 86400,))
             self.db.run("DELETE FROM events WHERE ts < ?", (time.time() - 180 * 86400,))
             self._last_prune = time.time()

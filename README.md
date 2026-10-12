@@ -179,6 +179,9 @@ was last seen, and its **age**. Filter by client, status (including **Discontinu
 puts offline routers first). Routers that registered but aren't approved yet are listed above, under **Waiting for
 approval**. Click a router for its page: charts, interfaces, DHCP clients, backups, upgrades, scripts and events.
 
+**Hardware health:** each router's page graphs its sensors (temperatures, voltage, fans, power) and fibre modules'
+light levels every 5 minutes for 30 days; alerts can fire when a router runs hot or out of memory.
+
 **Auto-block:** addresses that keep failing to sign in to your routers (counted across the fleet) can be listed
 (audit) or blocked on every router automatically, via the `tikmanager-blocklist` address list with a RouterOS timeout.
 Each router needs one rule that drops the list - the Security page shows which routers lack it and can add it.
@@ -347,7 +350,7 @@ discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on 
 **Alerts** (technicians; administrators change the settings) - when something's wrong, TikManager opens a
 **ConnectWise ticket**, posts to **Teams** and / or sends an **email**, and closes the ticket / posts "resolved" when it clears:
 - **What**: a router offline for N minutes (not during an upgrade), a router RouterOS flagged as possibly compromised, a failed backup, Security-page warnings, a FAIL
-  from the server security check, the website grade dropping below A; optionally high CPU and new RouterOS versions.
+  from the server security check, the website grade dropping below A; optionally high CPU, high memory, a router running hot and new RouterOS versions.
 - **ConnectWise**: tickets go to the client's linked company (Clients page) or a default company you choose; pick the
   board, the status for new tickets, the status when it clears (or leave it open with a note) and the priority. The
   API member needs Service Desk > Service Tickets: Add, Edit and Inquire.
