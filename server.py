@@ -3,6 +3,7 @@
     python server.py             (TM_DEV=1 for simulated routers and a local dev sign-in)
 """
 import base64
+import csv
 import dataclasses
 import html
 import io
@@ -42,6 +43,7 @@ from mailer import Mailer, MailError
 from lifecycle import Lifecycle
 from rossec import RosSecurity
 from autoblock import AutoBlock
+from routerlogs import RouterLogs, SEVERITIES as LOG_SEVERITIES
 from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
@@ -100,9 +102,12 @@ firewall = Firewall(db, poller.client, backups)
 observatory = Observatory(db, settings)   # Mozilla Observatory grade of the public URL
 reach = Reachability(db, settings, observatory)   # connectivity test from the internet (on request)
 secev = SecurityEvents(db, settings)   # sign-in attempts: TikManager, its Ubuntu server, routers
+routerlogs = RouterLogs(db)   # every router log line, for the Logs page and log alert rules
+secev.logs = routerlogs
 library = ScriptLibrary(db, integ)   # community RouterOS script library on GitHub
 alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWise tickets / Teams when something's wrong
 alerts.reach = reach
+alerts.logs = routerlogs
 offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP / WebDAV storage
 alerts.offsite = offsite
 winbox = WinboxRelay(db, settings, secev, poller.client, backups)   # Winbox to routers through TikManager (on-demand, address-locked)
@@ -612,6 +617,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(rossec.notes(str(q.get("v") or "")[:20]))
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
+        if path in ("/api/logs", "/api/logs/export"):   # router log lines (technicians), newest first
+            s = self.require(tech=True)
+            f = {k: str(q.get(k) or "")[:120] for k in ("device_id", "org_id", "tag", "sev", "topic", "q", "hours", "before_id", "after_id")}
+            for k in ("device_id", "org_id", "before_id", "after_id"):
+                if f[k] and not f[k].isdigit():
+                    raise HttpError(400, "Bad filter.")
+            try:
+                f["hours"] = str(float(f["hours"])) if f["hours"] else ""
+            except ValueError:
+                f["hours"] = ""
+            if path.endswith("/export"):
+                rows = routerlogs.query("1=1", [], f, limit=100000)
+                out = io.StringIO()
+                w = csv.writer(out)
+                w.writerow(["time", "router", "client", "severity", "topics", "message"])
+                for r in rows:
+                    w.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["device"], r["org"] or "", r["severity"], r["topics"],
+                                ("'" + r["message"]) if r["message"][:1] in "=+-@" else r["message"]])
+                db.audit(s["email"], "router logs exported", f"{len(rows)} lines", self.client_ip())
+                return self.send(200, out.getvalue().encode("utf-8-sig"), "text/csv; charset=utf-8",
+                                 headers=[("Content-Disposition", f'attachment; filename="router-logs-{time.strftime("%Y%m%d-%H%M")}.csv"')])
+            limit = 500 if f["after_id"] else 200
+            return self.json({"lines": routerlogs.query("1=1", [], f, limit=limit), "severities": LOG_SEVERITIES})
+        if path == "/api/logs/rules":
+            self.require(tech=True)
+            return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
         if path == "/api/security/autoblock":   # auto-block settings, candidates, blocked addresses, routers without the drop rule
             self.require(tech=True)
             return self.json(autoblock.info())
@@ -1573,6 +1604,22 @@ class Handler(BaseHTTPRequestHandler):
                 changed.append("entra_client_secret")
             db.audit(s["email"], "settings changed", ip=self.client_ip(), detail=", ".join(changed))   # names only, never values
             return self.json({"ok": True, **saved})
+        if path in ("/api/logs/rules", "/api/logs/rules/delete", "/api/logs/rules/test"):
+            s = self.require(tech=True, admin=not path.endswith("/test"))
+            b = self.body()
+            devs = db.q("SELECT id, name, org_id, tags FROM devices WHERE state='adopted'")
+            try:
+                if path.endswith("/test"):
+                    return self.json(routerlogs.test(b, devs))
+                if path.endswith("/delete"):
+                    routerlogs.delete_rule(str(b.get("id") or ""))
+                    db.audit(s["email"], "log alert rule deleted", str(b.get("id") or ""), self.client_ip())
+                    return self.json({"ok": True})
+                r = routerlogs.save_rule(b)
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "log alert rule saved", r["name"], self.client_ip(), detail=r["pattern"])
+            return self.json({"ok": True, "rule": r})
         if path in ("/api/admin/webhooks", "/api/admin/webhooks/delete"):
             s = self.require(tech=True, admin=True)
             b = self.body()
@@ -1972,6 +2019,7 @@ def main():
     integ.start(settings.public_url)
     vpns.start()
     secev.start()
+    routerlogs.start()
     observatory.start()
     reach.start_loop()
     offsite.start()
@@ -1982,6 +2030,7 @@ def main():
     autoblock.start()
     if settings.dev:
         secev.seed_dev()
+        routerlogs.seed_dev(db.q("SELECT id FROM devices WHERE state='adopted'"))
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)
     srv.daemon_threads = True
     print(f"TikManager on http://{settings.host}:{settings.port} (public URL {settings.public_url})" + ("  [DEV MODE: simulated routers]" if settings.dev else ""))

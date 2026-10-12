@@ -221,6 +221,10 @@ router that's already adopted - for example after a failed attempt. On the route
 `tikmanager` (the private key never leaves the router), a `tikmanager` user that may only log in from TikManager, a
 firewall rule letting TikManager in through the tunnel, web (REST) access for TikManager and log forwarding.
 
+**Logs** (technicians): every router log line (info and up), live, searchable by router / client / tag / severity /
+topic / text, exportable as CSV, kept 14 days; each router also has a Logs tab. **Alert rules** turn a matching line
+(N times in M minutes) into an alert.
+
 **Tags and notes** (router page > Settings): tag routers (*core*, *poe-switch* ...) to filter the Routers page and to
 target Tasks by tag; notes (technicians only) hold rack positions, ISP contracts and the like, and are searchable.
 

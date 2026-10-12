@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.34.0 - 2026-10-12
+
+- **Logs** (new page, technicians; and a **Logs** tab on each router): every line your routers send - info, warning,
+  error, critical, as set up at adoption - not just the security lines. Newest first, live (new lines appear every
+  5 seconds; **Pause**), filters by router, client, tag, severity, topic and text, **Load older**, and **Export CSV** of
+  whatever the filters show. Kept 14 days and at most 20,000 lines per router; a router sending more than 300 lines a
+  minute is capped, so one can't flood the rest.
+- **Log alert rules** (Logs page, administrators): text or /regex/, optional topics and minimum severity, for all
+  routers, a client, a tag or one router, and "N matching lines within M minutes" - e.g. *PPPoE keeps dropping*:
+  topic ppp, errors, 3 in 10 minutes. A match becomes an alert (ticket / Teams / email / webhooks) that clears when the
+  lines stop. **Try it on the last 24 hours** shows what a rule would have caught before you save it.
+- Existing routers need no change: they already send these topics.
+
 ## 1.33.0 - 2026-10-12
 
 - **Backups are checked before they're stored**: an export that looks cut short (empty, no RouterOS header, no

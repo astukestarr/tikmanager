@@ -47,6 +47,8 @@ def parse_router(line: str):
 
 
 class SecurityEvents:
+    logs = None   # routerlogs.RouterLogs, set by the server
+
     def __init__(self, db, settings):
         self.db, self.s = db, settings
         self.auth_files = AUTH_FILES + [Path(settings.data_dir) / "auth-events.json"]   # the second: dev mode
@@ -85,6 +87,8 @@ class SecurityEvents:
         dev = self._device_for(src_ip)
         if dev is None:   # only routers TikManager manages, over their tunnel
             return
+        if self.logs:   # every line, for the Logs page (routerlogs.py)
+            self.logs.add(dev, data[:2048].decode("utf-8", "replace"))
         got = parse_router(data[:2048].decode("utf-8", "replace"))
         if not got:
             return

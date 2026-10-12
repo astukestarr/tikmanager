@@ -156,6 +156,12 @@ CREATE TABLE IF NOT EXISTS health_metrics (   -- board sensors and fibre (SFP) r
   device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, ts REAL NOT NULL, name TEXT NOT NULL, value REAL
 );
 CREATE INDEX IF NOT EXISTS health_dev ON health_metrics(device_id, ts);
+CREATE TABLE IF NOT EXISTS router_logs (   -- every log line routers send (routerlogs.py), kept 14 days
+  id INTEGER PRIMARY KEY, ts REAL NOT NULL, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  topics TEXT, severity TEXT, message TEXT
+);
+CREATE INDEX IF NOT EXISTS router_logs_dev ON router_logs(device_id, id);
+CREATE INDEX IF NOT EXISTS router_logs_ts ON router_logs(ts);
 CREATE TABLE IF NOT EXISTS autoblock (     -- addresses blocked on every router (autoblock.py)
   ip TEXT PRIMARY KEY, blocked_at REAL, until REAL, failures INTEGER, by TEXT, reason TEXT, released_at REAL
 );
@@ -269,6 +275,18 @@ class DB:
     def run(self, sql, args=()):
         with self.lock:
             return self.conn().execute(sql, args).lastrowid
+
+    def many(self, sql, rows):
+        """One statement for many rows, in one transaction (batched inserts)."""
+        with self.lock:
+            c = self.conn()
+            c.execute("BEGIN")
+            try:
+                c.executemany(sql, rows)
+                c.execute("COMMIT")
+            except Exception:
+                c.execute("ROLLBACK")
+                raise
 
     def audit(self, user, action, target="", ip="", detail="", org_id=None):
         self.run("INSERT INTO audit (ts, user, org_id, action, target, ip, detail) VALUES (?,?,?,?,?,?,?)",

@@ -31,6 +31,7 @@ def short(text, n=95):
 KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "offline": ("Router offline", True, "minutes", 5),
     "flagged": ("Router flagged as possibly compromised (RouterOS device-mode)", True, None, None),
+    "log": ("Log alert rules (Logs page) - matching router log lines", True, None, None),
     "reboot": ("Router restarted unexpectedly (not during an upgrade) - clears after 15 minutes", True, None, None),
     "isp": ("Internet link down (an ISP / WAN / LTE link of a router that's still reachable)", True, "minutes", 3),
     "patch": ("Router needs a RouterOS security update (MikroTik security release, or a high / critical CVE)", True, None, None),
@@ -118,6 +119,9 @@ class Alerts:
                     out[f"offline:{d['id']}"] = ("offline", d["id"], d["org_id"], f"{label(d)} is offline",
                                                  f"Not reachable over its tunnel since {time.strftime('%Y-%m-%d %H:%M', time.localtime(d['last_seen'] or now))}. "
                                                  f"Last error: {d['last_error'] or 'none'}")
+        logs = getattr(self, "logs", None)
+        if k["log"]["on"] and logs:
+            out.update(logs.conditions(devs, label))
         if k["reboot"]["on"]:
             for d in devs:
                 if d.get("last_reboot_why") == "unexpected" and (d.get("last_reboot") or 0) > now - 900:

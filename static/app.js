@@ -335,7 +335,7 @@ async function router(id) {
   const radios = (d.interfaces || []).some(isRadio);
   const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(radios ? [["wireless", "Wireless"]] : []),
     ...(d.online && isTech() ? [["firewall", "Firewall"]] : []),
-    ["backups", "Backups"], ["events", "Events"], ["settings", canWrite() ? "Settings" : "Location"]] : [];
+    ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
   const on = (k) => !adopted || tab === k;
@@ -427,6 +427,7 @@ async function router(id) {
           <p class="small muted" id="wlAt">Reading the radios...</p></div><div id="wlBody"></div>`
         : `<div class="card"><h2>Wireless</h2><p class="muted">The router is offline - wireless information is read live from it.</p></div>`) : ""}
       ${adopted && tab === "firewall" ? `<div class="card" id="fwCard"><h2>Firewall &amp; NAT</h2><p class="muted small">Reading the rules...</p></div>` : ""}
+      ${adopted && tab === "logs" ? `<div class="card" id="rLogs"></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Tags &amp; notes</h2>
@@ -495,6 +496,7 @@ async function router(id) {
   if ($("bkCard")) loadBackups(d).then(() => { if (rView.backupNow) { rView.backupNow = false; $("bkNow")?.click(); } });
   if ($("dhcpCard")) loadDhcp(d);
   if ($("wlCard")) loadWireless(d);
+  if ($("rLogs")) logViewer($("rLogs"), { device_id: d.id });
   if ($("mSave")) {
     api("/api/devices").then((all) => { $("mTagList").innerHTML = [...new Set(all.flatMap((x) => x.tags || []))].map((t) => `<option value="${esc(t)}">`).join(""); }).catch(() => {});
     $("mSave").addEventListener("click", async () => {
@@ -3006,6 +3008,132 @@ function webhookDialog(x, h) {
   });
 }
 
+// --- Logs: every line routers send, searchable, live, with alert rules (routerlogs.py) ------------------------------
+const logView = { sev: "", q: "", topic: "", hours: "24", org: "", tag: "", device: "", live: true };
+const SEV_CLASS = { critical: "bad", error: "bad", warning: "warn", info: "", debug: "muted" };
+async function logsPage() {
+  const [devs, orgs] = await Promise.all([api("/api/devices"), api("/api/orgs")]);
+  $("main").innerHTML = `<div class="row"><div><h1>Logs</h1><p class="muted">Every log line your routers send (info, warning, error, critical) - kept 14 days, newest first.</p></div></div>
+    <div class="card" id="logMain"></div><div class="card" id="logRules"><h2>Alert rules</h2><p class="muted small">Loading…</p></div>`;
+  logViewer($("logMain"), {}, { devs: devs.filter((d) => d.state === "adopted"), orgs });
+  logRulesCard(devs.filter((d) => d.state === "adopted"), orgs);
+}
+async function logViewer(el, fixed, ref) {
+  const token = (logViewer.n = (logViewer.n || 0) + 1);
+  const st = fixed.device_id ? { sev: "", q: "", topic: "", hours: "24", live: true } : logView;
+  const tags = ref ? [...new Set(ref.devs.flatMap((d) => d.tags || []))].sort() : [];
+  el.innerHTML = `<div class="row log-filters">
+      ${ref ? `<select id="lgDev" aria-label="Router"><option value="">All routers</option>${ref.devs.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join("")}</select>
+        <select id="lgOrg" aria-label="Client"><option value="">All clients</option>${ref.orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>
+        ${tags.length ? `<select id="lgTag" aria-label="Tag"><option value="">Any tag</option>${tags.map((t) => `<option>${esc(t)}</option>`).join("")}</select>` : ""}` : ""}
+      <select id="lgSev" aria-label="Severity"><option value="">Any severity</option><option value="warning">Warning and worse</option><option value="error">Errors and worse</option><option value="critical">Critical</option></select>
+      <select id="lgHours" aria-label="Period"><option value="1">Last hour</option><option value="6">6 hours</option><option value="24">24 hours</option><option value="168">7 days</option><option value="">All (14 days)</option></select>
+      <input id="lgTopic" placeholder="Topic (e.g. dhcp)" aria-label="Topic" spellcheck="false">
+      <input id="lgQ" type="search" placeholder="Search messages" aria-label="Search messages">
+      <span class="spacer"></span><button class="btn" type="button" id="lgLive" aria-pressed="${st.live}">${st.live ? "Pause" : "Live"}</button>
+      <a class="btn" id="lgCsv" href="#" download>Export CSV</a></div>
+    <div class="table-wrap"><table class="log-table"><thead><tr><th>Time</th>${fixed.device_id ? "" : "<th>Router</th>"}<th>Severity</th><th>Topics</th><th>Message</th></tr></thead><tbody id="lgRows"></tbody></table></div>
+    <div class="row"><button class="btn" type="button" id="lgMore">Load older</button><span class="small muted" id="lgInfo"></span></div>`;
+  const q = el.querySelector.bind(el);
+  const set = (id, v) => { if (q(`#${id}`)) q(`#${id}`).value = v ?? ""; };
+  set("lgSev", st.sev); set("lgHours", st.hours); set("lgTopic", st.topic); set("lgQ", st.q); set("lgDev", st.device); set("lgOrg", st.org); set("lgTag", st.tag);
+  let rows = [];
+  const params = (extra = {}) => new URLSearchParams(Object.entries({ device_id: fixed.device_id || st.device || "", org_id: st.org || "", tag: st.tag || "", sev: st.sev, topic: st.topic,
+    q: st.q, hours: st.hours, ...extra }).filter(([, v]) => v !== "" && v != null)).toString();
+  const line = (r) => `<tr class="sev-${esc(r.severity)}"><td class="nowrap small mono">${new Date(r.ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</td>
+    ${fixed.device_id ? "" : `<td class="small"><a href="#router/${r.device_id}">${esc(r.device)}</a></td>`}<td><span class="pill log-sev ${SEV_CLASS[r.severity] || ""}">${esc(r.severity)}</span></td>
+    <td class="small mono">${esc(r.topics)}</td><td class="log-msg">${esc(r.message)}</td></tr>`;
+  const draw = () => {
+    q("#lgRows").innerHTML = rows.map(line).join("") || `<tr><td colspan="5" class="muted">No log lines match${fixed.device_id ? " - the router may not have sent any yet" : ""}.</td></tr>`;
+    q("#lgInfo").textContent = rows.length ? `${rows.length} line${rows.length === 1 ? "" : "s"} shown` : "";
+    q("#lgMore").disabled = rows.length < 200;
+    q("#lgCsv").href = `/api/logs/export?${params()}`;
+  };
+  const load = async () => { rows = (await api(`/api/logs?${params()}`)).lines; draw(); };
+  const alive = () => logViewer.n === token && document.body.contains(el);
+  const tick = async () => {
+    if (!alive()) return;
+    if (st.live && !document.hidden && rows.length) {
+      try {
+        const fresh = (await api(`/api/logs?${params({ after_id: rows[0].id })}`)).lines;
+        if (fresh.length && alive()) { rows = [...fresh, ...rows].slice(0, 2000); draw(); }
+      } catch (e) { /* next round */ }
+    } else if (st.live && !rows.length) { try { await load(); } catch (e) { /* next round */ } }
+    setTimeout(tick, 5000);
+  };
+  const refilter = () => {
+    st.sev = q("#lgSev").value; st.hours = q("#lgHours").value; st.topic = q("#lgTopic").value.trim(); st.q = q("#lgQ").value.trim();
+    if (q("#lgDev")) { st.device = q("#lgDev").value; st.org = q("#lgOrg").value; st.tag = q("#lgTag")?.value || ""; }
+    load();
+  };
+  let timer;
+  ["lgSev", "lgHours", "lgDev", "lgOrg", "lgTag"].forEach((id) => q(`#${id}`)?.addEventListener("change", refilter));
+  ["lgTopic", "lgQ"].forEach((id) => q(`#${id}`).addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(refilter, 350); }));
+  q("#lgLive").addEventListener("click", () => { st.live = !st.live; q("#lgLive").textContent = st.live ? "Pause" : "Live"; q("#lgLive").setAttribute("aria-pressed", String(st.live)); });
+  q("#lgMore").addEventListener("click", async () => {
+    const older = (await api(`/api/logs?${params({ before_id: rows[rows.length - 1].id })}`)).lines;
+    rows = rows.concat(older); draw();
+  });
+  try { await load(); } catch (e) { q("#lgRows").innerHTML = `<tr><td colspan="5" class="status err">${esc(e.message)}</td></tr>`; }
+  setTimeout(tick, 5000);
+}
+async function logRulesCard(devs, orgs) {
+  const x = await api("/api/logs/rules");
+  if (!$("logRules")) return;
+  const admin = me.role === "admin";
+  const scopeText = (r) => r.scope === "org" ? `client ${orgs.find((o) => String(o.id) === r.target)?.name || "?"}` : r.scope === "tag" ? `tag ${r.target}`
+    : r.scope === "device" ? devs.find((d) => String(d.id) === r.target)?.name || "?" : "all routers";
+  $("logRules").innerHTML = `<div class="row"><h2>Alert rules</h2><span class="spacer"></span>${admin ? `<button class="btn" type="button" id="lrAdd">Add rule</button>` : ""}</div>
+    <p class="small muted">Get an alert (ticket / Teams / email / webhooks - Alerts page) when a log line matches N times within M minutes; it clears when it stops.</p>
+    ${x.rules.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Looks for</th><th>On</th><th>When</th><th></th></tr></thead><tbody>
+      ${x.rules.map((r) => `<tr><td>${esc(r.name)}${r.on ? "" : ` <span class="pill">off</span>`}</td><td class="mono small">${esc(r.pattern)}${r.topics ? ` <span class="muted">topics ${esc(r.topics)}</span>` : ""}${r.sev ? ` <span class="muted">${esc(r.sev)}+</span>` : ""}</td>
+        <td class="small">${esc(scopeText(r))}</td><td class="small">${r.count}× in ${r.minutes} min</td><td>${admin ? `<button class="btn" type="button" data-lredit="${r.id}">Edit</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted small">No rules yet.${admin ? " Examples: <span class=\"mono\">login failure</span> 10× in 5 min; <span class=\"mono\">/link down/</span> on tag core; topic <span class=\"mono\">ppp</span>, errors, 3× in 10 min." : ""}</p>`}`;
+  $("lrAdd")?.addEventListener("click", () => logRuleDialog(null, devs, orgs, x.severities));
+  document.querySelectorAll("[data-lredit]").forEach((b) => b.addEventListener("click", () => logRuleDialog(x.rules.find((r) => r.id === b.dataset.lredit), devs, orgs, x.severities)));
+}
+function logRuleDialog(r, devs, orgs, sevs) {
+  const v = r || { name: "", pattern: "", topics: "", sev: "", scope: "all", target: "", count: 5, minutes: 10, on: true };
+  const tags = [...new Set(devs.flatMap((d) => d.tags || []))].sort();
+  dialog(`<h2>${r ? "Edit" : "Add"} log alert rule</h2>
+    <label class="field">Name <input id="lrName" value="${esc(v.name)}" maxlength="80" placeholder="PPPoE keeps dropping"></label>
+    <label class="field">Text to look for, or /regular expression/ <input id="lrPat" value="${esc(v.pattern)}" maxlength="200" spellcheck="false" placeholder="disconnected  or  /link (down|flapping)/"></label>
+    <div class="grid2"><label class="field">Topics (optional, comma-separated) <input id="lrTopics" value="${esc(v.topics)}" placeholder="ppp, interface" spellcheck="false"></label>
+      <label class="field">Minimum severity <select id="lrSev"><option value="">Any</option>${sevs.slice(1).map((s) => `<option ${v.sev === s ? "selected" : ""}>${s}</option>`).join("")}</select></label></div>
+    <div class="grid2"><label class="field">Routers <select id="lrScope"><option value="all">All routers</option><option value="org">A client</option>${tags.length ? `<option value="tag">A tag</option>` : ""}<option value="device">One router</option></select></label>
+      <label class="field" id="lrTargetWrap">Which <select id="lrTarget"></select></label></div>
+    <div class="grid2"><label class="field">Matching lines <input id="lrCount" type="number" min="1" max="10000" value="${v.count}"></label>
+      <label class="field">within (minutes) <input id="lrMin" type="number" min="1" max="1440" value="${v.minutes}"></label></div>
+    <label class="chk"><input type="checkbox" id="lrOn" ${v.on ? "checked" : ""}> On</label>
+    <div id="lrTest" class="small"></div>
+    <div class="actions">${r ? `<button class="btn danger" type="button" id="lrDel">Delete</button>` : ""}<button class="btn" type="button" id="lrTry">Try it on the last 24 hours</button>
+      <span class="spacer"></span><span class="status" id="lrStatus"></span><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="lrSave">Save</button></div>`);
+  $("dlg").classList.add("wide");
+  const targets = () => {
+    const s = $("lrScope").value;
+    $("lrTargetWrap").classList.toggle("hidden", s === "all");
+    $("lrTarget").innerHTML = s === "org" ? orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")
+      : s === "tag" ? tags.map((t) => `<option>${esc(t)}</option>`).join("") : s === "device" ? devs.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join("") : "";
+  };
+  $("lrScope").value = v.scope; targets(); if (v.target) $("lrTarget").value = v.target;
+  $("lrScope").addEventListener("change", targets);
+  const body = () => ({ id: r ? r.id : "", name: $("lrName").value, pattern: $("lrPat").value, topics: $("lrTopics").value, sev: $("lrSev").value, scope: $("lrScope").value,
+    target: $("lrTarget").value, count: $("lrCount").value, minutes: $("lrMin").value, on: $("lrOn").checked });
+  const err = (e) => { $("lrStatus").textContent = e.message; $("lrStatus").className = "status err"; };
+  $("lrTry").addEventListener("click", async () => {
+    try {
+      const t = await post("/api/logs/rules/test", { ...body(), name: body().name || "test" });
+      $("lrTest").innerHTML = t.total ? `<p><b>${t.total}</b> matching line${t.total === 1 ? "" : "s"} in the last 24 hours:</p><ul>${t.routers.map((x) => `<li>${esc(x.name)}: ${x.lines} - latest <span class="mono">${esc(x.latest)}</span></li>`).join("")}</ul>`
+        : `<p class="muted">Nothing matched in the last 24 hours.</p>`;
+    } catch (e) { err(e); }
+  });
+  $("lrSave").addEventListener("click", async () => { try { await post("/api/logs/rules", body()); $("dlg").close(); logsPage(); } catch (e) { err(e); } });
+  $("lrDel")?.addEventListener("click", async (e) => {
+    if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
+    await post("/api/logs/rules/delete", { id: r.id }); $("dlg").close(); logsPage();
+  });
+}
+
 // --- Security: sign-in attempts on TikManager, its Ubuntu server and the routers ----------------------------------
 const secView = { hours: 24, source: "", kind: "", q: "" };
 const SEC_SOURCE = { tikmanager: "TikManager", server: "Ubuntu server", router: "Router" };
@@ -3431,7 +3559,7 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
 }
-const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
