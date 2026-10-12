@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.27.0 - 2026-10-12
+
+- **Auto-block** (Security page): an address with N failed sign-ins to your routers within M minutes - counted across
+  the whole fleet, from the routers' logs (default 5 in 10 minutes) - is blocked on **every** router: it goes on the
+  `tikmanager-blocklist` address list with a RouterOS timeout (default 72 hours), so routers forget it on their own;
+  routers that were offline get it when they're back.
+  - Modes: **Off** (default), **Audit** (lists them; block by hand) and **Block automatically**.
+  - Never blocked: anything that isn't a public address, TikManager itself, your routers' own addresses and a
+    whitelist. An address unblocked by hand isn't re-blocked for its old failures.
+  - TikManager doesn't change firewall rules on its own: the card lists routers with no rule dropping the list and can
+    add one (`/ip firewall raw add chain=prerouting action=drop src-address-list=tikmanager-blocklist`, which only drops
+    listed addresses) - per router or all at once. Blocks, unblocks and rule changes are audited.
+
 ## 1.26.0 - 2026-10-12
 
 - **RouterOS security**: two separate signals per router, kept apart because they claim different things:

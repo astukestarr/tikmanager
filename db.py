@@ -148,6 +148,12 @@ CREATE TABLE IF NOT EXISTS sec_events (
   user TEXT, ip TEXT, device_id INTEGER, via TEXT, detail TEXT, uid TEXT UNIQUE          -- uid: de-duplicates imported events
 );
 CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
+CREATE TABLE IF NOT EXISTS autoblock (     -- addresses blocked on every router (autoblock.py)
+  ip TEXT PRIMARY KEY, blocked_at REAL, until REAL, failures INTEGER, by TEXT, reason TEXT, released_at REAL
+);
+CREATE TABLE IF NOT EXISTS autoblock_push (   -- which router has which block (error = couldn't add it)
+  ip TEXT NOT NULL, device_id INTEGER NOT NULL, pushed_at REAL, error TEXT, PRIMARY KEY (ip, device_id)
+);
 CREATE INDEX IF NOT EXISTS sec_events_ip ON sec_events(ip, ts);
 -- alerts (alerts.py): one row per problem while it lasts; key identifies the problem (e.g. offline:12)
 CREATE TABLE IF NOT EXISTS alerts (

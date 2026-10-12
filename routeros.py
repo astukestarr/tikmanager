@@ -425,7 +425,7 @@ class RouterOS:
         return out
 
     # --- firewall filter / NAT rules (firewall.py drives these, with an automatic undo) -------------------------------
-    FW_MENUS = {"filter": "/ip/firewall/filter", "nat": "/ip/firewall/nat", "address-list": "/ip/firewall/address-list"}
+    FW_MENUS = {"filter": "/ip/firewall/filter", "nat": "/ip/firewall/nat", "address-list": "/ip/firewall/address-list", "raw": "/ip/firewall/raw"}
 
     def fw_rules(self, section):
         return self.get(self.FW_MENUS[section]) or []
@@ -733,6 +733,7 @@ class SimRouter:
                 st["fw"]["address-list"].append({".id": f"*{st['fw_next']:X}", "disabled": "false", "dynamic": "false", **x})
                 st["fw_next"] += 1
             st["sched"], st["undo"] = {}, {}
+        st["fw"].setdefault("raw", [])
         return st
 
     def fw_rules(self, section):

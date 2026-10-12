@@ -179,6 +179,11 @@ was last seen, and its **age**. Filter by client, status (including **Discontinu
 puts offline routers first). Routers that registered but aren't approved yet are listed above, under **Waiting for
 approval**. Click a router for its page: charts, interfaces, DHCP clients, backups, upgrades, scripts and events.
 
+**Auto-block:** addresses that keep failing to sign in to your routers (counted across the fleet) can be listed
+(audit) or blocked on every router automatically, via the `tikmanager-blocklist` address list with a RouterOS timeout.
+Each router needs one rule that drops the list - the Security page shows which routers lack it and can add it.
+Non-public addresses, TikManager, your routers and a whitelist are never blocked. Off until an administrator turns it on.
+
 **RouterOS security:** each router's page says whether MikroTik has released a security fix newer than its RouterOS
 on its channel (read from MikroTik's changelogs) and lists known CVEs for its version (NIST's vulnerability database,
 daily); the Upgrades page badges them, the Security page lists the fleet, and an alert can open a ticket. **What's new**

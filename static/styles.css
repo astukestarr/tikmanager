@@ -464,7 +464,11 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .flag-card h2 { color: var(--bad); }
 .pill.cve-crit { border-color: var(--bad); color: #fff; background: var(--bad); } .pill.cve-high { border-color: var(--bad); color: var(--bad); }
 .pill.cve-med { border-color: var(--warn); color: var(--warn); }
-.sec-card { border-left: 5px solid var(--warn); } .sec-fixes { padding-left: 18px; } .sec-fixes li { margin: 6px 0; }
+.sec-card { border-left: 5px solid var(--warn); }
+.pill.ab-on { border-color: var(--good); color: var(--good); }
+.ab-warn { border-left: 4px solid var(--warn); padding: 8px 12px; margin: 8px 0; background: var(--bg); font-size: 13px; }
+.ab-rules { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0; } .ab-r { display: inline-flex; align-items: center; gap: 6px; }
+.ab-set { margin-top: 12px; } .ab-set textarea { width: 100%; font-family: var(--mono, monospace); } .sec-fixes { padding-left: 18px; } .sec-fixes li { margin: 6px 0; }
 .sec-notes { border-left: 4px solid var(--bad); padding: 6px 10px; margin: 8px 0; background: var(--bg); }
 .ros-notes { white-space: pre-wrap; max-height: 55vh; overflow: auto; font-size: 12.5px; background: var(--bg); padding: 10px; border-radius: 8px; }
 .wl-facts { margin: 2px 0 8px; }

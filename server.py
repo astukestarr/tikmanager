@@ -39,6 +39,7 @@ from wgport import WgPort
 from mailer import Mailer, MailError
 from lifecycle import Lifecycle
 from rossec import RosSecurity
+from autoblock import AutoBlock
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
@@ -109,6 +110,7 @@ mailer = Mailer(integ, settings)   # email: alerts, invitations, tests
 alerts.mailer = mailer
 lifecycle = Lifecycle(db, settings.data_dir, thumbs)   # router age and discontinued models (from mikrotik.com)
 rossec = RosSecurity(db, settings.data_dir)   # known CVEs and missed MikroTik security releases per router
+autoblock = AutoBlock(db, settings, poller.client, secev)   # addresses guessing router passwords: blocked on every router
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -592,6 +594,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(rossec.notes(str(q.get("v") or "")[:20]))
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
+        if path == "/api/security/autoblock":   # auto-block settings, candidates, blocked addresses, routers without the drop rule
+            self.require(tech=True)
+            return self.json(autoblock.info())
         if path == "/api/security/routeros":   # routers with missed security releases / known CVEs
             s = self.require()
             where, args = self.org_scope(s, None, "d.org_id")
@@ -1496,6 +1501,35 @@ class Handler(BaseHTTPRequestHandler):
                 changed.append("entra_client_secret")
             db.audit(s["email"], "settings changed", ip=self.client_ip(), detail=", ".join(changed))   # names only, never values
             return self.json({"ok": True, **saved})
+        if path == "/api/security/autoblock/settings":
+            s = self.require(tech=True, admin=True)
+            try:
+                cfg = autoblock.save(self.body())
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "auto-block settings", cfg["mode"], self.client_ip(), json.dumps(cfg))
+            return self.json(cfg)
+        if path in ("/api/security/autoblock/block", "/api/security/autoblock/release"):
+            s = self.require(tech=True, write=True)
+            ip = str(self.body().get("ip") or "").strip()[:64]
+            try:
+                if path.endswith("/block"):
+                    autoblock.block(ip, s["email"], reason="blocked by hand")
+                    threading.Thread(target=autoblock.push, daemon=True, name="autoblock-push").start()
+                    return self.json({"ok": True})
+                return self.json({"ok": True, "failed": autoblock.release(ip, s["email"])})
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+        if path == "/api/security/autoblock/rule":   # add the raw drop rule for the block list to one router
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, str(self.body().get("device_id") or "0"))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            try:
+                autoblock.add_rule(d, s["email"])
+            except RouterError as e:
+                raise HttpError(502, str(e)) from None
+            return self.json({"ok": True})
         if path == "/api/admin/lifecycle":   # set / clear the standard replacement for a router model
             s = self.require(tech=True, admin=True)
             b = self.body()
@@ -1857,6 +1891,7 @@ def main():
     alerts.start()
     lifecycle.start()
     rossec.start()
+    autoblock.start()
     if settings.dev:
         secev.seed_dev()
     srv = ThreadingHTTPServer((settings.host, settings.port), Handler)

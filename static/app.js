@@ -2847,6 +2847,65 @@ async function rosSecCard() {
   bindRows();
 }
 
+// Security page: addresses guessing router passwords, blocked on every router (autoblock.py)
+async function autoBlockCard() {
+  let x;
+  try { x = await api("/api/security/autoblock"); } catch (e) { if ($("abCard")) $("abCard").innerHTML = `<h2>Auto-block</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  if (!$("abCard")) return;
+  const c = x.settings, admin = me.role === "admin";
+  const modeText = { off: "Off", audit: "Audit - list them, block by hand", block: "Block automatically" };
+  $("abCard").innerHTML = `<div class="row"><h2>Auto-block</h2><span class="pill ${c.mode === "block" ? "ab-on" : ""}">${esc(modeText[c.mode])}</span></div>
+    <p class="small muted">An address with ${c.threshold} failed sign-ins to your routers within ${c.minutes} minutes - across the whole fleet - is
+      ${c.mode === "block" ? "blocked" : "listed"}; blocking puts it on the <span class="mono">${esc(x.list)}</span> address list of <b>every</b> router for ${c.hours} hours
+      (RouterOS removes it by itself). Private addresses, TikManager, your routers' own addresses and the whitelist are never blocked.</p>
+    ${c.mode !== "off" && x.no_rule.length ? `<div class="ab-warn"><b>${x.no_rule.length} router${x.no_rule.length === 1 ? "" : "s"} don't drop the list yet</b> - an address on the list is
+      only blocked where a firewall rule drops it. TikManager can add one (<span class="mono">/ip firewall raw add chain=prerouting action=drop src-address-list=${esc(x.list)}</span> - it drops only listed addresses):
+      <div class="ab-rules">${x.no_rule.slice(0, 40).map((r) => `<span class="ab-r"><a href="#router/${r.id}">${esc(r.name)}</a>${canWrite() ? ` <button class="btn" type="button" data-abrule="${r.id}">Add rule</button>` : ""}</span>`).join("")}</div>
+      ${canWrite() && x.no_rule.length > 1 ? `<button class="btn primary" type="button" id="abRuleAll">Add the rule to all ${x.no_rule.length}</button>` : ""}</div>` : ""}
+    <h3>Blocked now (${x.blocked.length})</h3>
+    ${x.blocked.length ? `<div class="table-wrap"><table><thead><tr><th>Address</th><th>Why</th><th>Since</th><th>Until</th><th>On routers</th><th></th></tr></thead><tbody>
+      ${x.blocked.map((b) => `<tr><td class="mono">${esc(b.ip)}</td><td class="small">${esc(b.reason || b.by || "")}</td><td class="small nowrap">${ago(b.blocked_at)}</td>
+        <td class="small nowrap">${when(b.until)}</td><td>${b.routers} / ${x.routers_total}</td>
+        <td>${canWrite() ? `<button class="btn" type="button" data-abrel="${esc(b.ip)}">Unblock</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted small">Nothing is blocked.</p>`}
+    <h3>Over the threshold now (${x.candidates.length})</h3>
+    ${x.candidates.length ? `<div class="table-wrap"><table><thead><tr><th>Address</th><th>Failures</th><th>Routers</th><th>Usernames tried</th><th>Last</th><th></th></tr></thead><tbody>
+      ${x.candidates.map((a) => `<tr><td class="mono">${esc(a.ip)}</td><td>${a.failures}</td><td>${a.routers}</td><td class="small mono">${esc(a.users.join(", "))}</td>
+        <td class="small nowrap">${ago(a.last)}</td><td>${a.protected ? `<span class="small muted">never blocked (${esc(a.protected)})</span>`
+          : x.blocked.some((b) => b.ip === a.ip) ? `<span class="small status ok">blocked</span>` : canWrite() ? `<button class="btn" type="button" data-abblock="${esc(a.ip)}">Block</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted small">No address is over the threshold right now.</p>`}
+    ${admin ? `<details class="ab-set"><summary>Settings</summary>
+      <div class="row"><label class="field">Mode <select id="abMode">${Object.entries(modeText).map(([k, l]) => `<option value="${k}" ${c.mode === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">Failed sign-ins <input id="abTh" type="number" min="2" max="1000" value="${c.threshold}"></label>
+        <label class="field">within (minutes) <input id="abMin" type="number" min="1" max="1440" value="${c.minutes}"></label>
+        <label class="field">Block for (hours) <input id="abHours" type="number" min="1" max="720" value="${c.hours}"></label></div>
+      <label class="field">Whitelist - never blocked (addresses or networks, one per line) <textarea id="abWl" rows="3" spellcheck="false">${esc(c.whitelist.join("\n"))}</textarea></label>
+      <div class="actions"><button class="btn primary" type="button" id="abSave">Save</button><span class="status" id="abStatus"></span></div></details>` : ""}
+    <p class="status small" id="abMsg"></p>`;
+  const msg = (m, ok) => { $("abMsg").textContent = m; $("abMsg").className = `status small ${ok ? "ok" : "err"}`; };
+  const act = async (fn) => { try { await fn(); autoBlockCard(); } catch (e) { msg(e.message); } };
+  $("abCard").querySelectorAll("[data-abblock]").forEach((b) => b.addEventListener("click", () => act(() => post("/api/security/autoblock/block", { ip: b.dataset.abblock }))));
+  $("abCard").querySelectorAll("[data-abrel]").forEach((b) => b.addEventListener("click", () => act(async () => {
+    const r = await post("/api/security/autoblock/release", { ip: b.dataset.abrel });
+    if (r.failed.length) throw new Error(`Unblocked, but not removed from: ${r.failed.join("; ")} (it expires there by itself).`);
+  })));
+  $("abCard").querySelectorAll("[data-abrule]").forEach((b) => b.addEventListener("click", () => { b.disabled = true; act(() => post("/api/security/autoblock/rule", { device_id: b.dataset.abrule })); }));
+  $("abRuleAll")?.addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    const bad = [];
+    for (const r of x.no_rule) { try { await post("/api/security/autoblock/rule", { device_id: r.id }); } catch (err) { bad.push(`${r.name}: ${err.message}`); } }
+    await autoBlockCard();
+    if (bad.length) msg(`Couldn't add it on: ${bad.join("; ")}`);
+  });
+  $("abSave")?.addEventListener("click", async () => {
+    try {
+      await post("/api/security/autoblock/settings", { mode: $("abMode").value, threshold: $("abTh").value, minutes: $("abMin").value, hours: $("abHours").value, whitelist: $("abWl").value });
+      await autoBlockCard();
+      msg("Saved.", true);
+    } catch (e) { $("abStatus").textContent = e.message; $("abStatus").className = "status err"; }
+  });
+}
+
 async function securityPage() {
   const s = await api(`/api/security?hours=${secView.hours}&source=${encodeURIComponent(secView.source)}&kind=${encodeURIComponent(secView.kind)}&q=${encodeURIComponent(secView.q)}`);
   const tile = (src, icon) => {
@@ -2861,6 +2920,7 @@ async function securityPage() {
       `<button type="button" data-h="${h}" class="${secView.hours === h ? "on" : ""}">${l}</button>`).join("")}</div></div>
     <div class="tiles sec-kpis">${tile("tikmanager")}${tile("server")}${tile("router")}</div>
     <div class="card" id="rosSec"><h2>RouterOS vulnerabilities</h2><p class="muted small">Loading…</p></div>
+    <div class="card" id="abCard"><h2>Auto-block</h2><p class="muted small">Loading…</p></div>
     ${s.flags.length ? `<div class="card"><h2>Worth a look</h2><ul class="sec-flags">${s.flags.map((f) =>
       `<li class="flag-${esc(f.level)}">${esc(f.text)}${f.ip ? ` <button class="linkish" type="button" data-ip="${esc(f.ip)}">show</button>` : ""}</li>`).join("")}</ul></div>` : ""}
     <div class="grid2">
@@ -2888,6 +2948,7 @@ async function securityPage() {
   $("main").querySelectorAll("[data-h]").forEach((b) => b.addEventListener("click", () => { secView.hours = +b.dataset.h; reload(); }));
   $("main").querySelectorAll("[data-ip]").forEach((b) => b.addEventListener("click", () => { secView.q = b.dataset.ip; secView.source = ""; secView.kind = ""; reload(); }));
   rosSecCard();
+  autoBlockCard();
   $("main").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
   $("secSrc").addEventListener("change", () => { secView.source = $("secSrc").value; reload(); });
   $("secKind").addEventListener("change", () => { secView.kind = $("secKind").value; reload(); });
