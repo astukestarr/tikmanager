@@ -412,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state, d.last_reboot, d.last_reboot_why
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
             for r in rows:
                 r["isp_state"] = json.loads(r.get("isp_state") or "{}")

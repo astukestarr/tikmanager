@@ -344,7 +344,7 @@ async function router(id) {
         ${canWrite() ? `<button class="btn primary wide" type="button" data-approve="${d.id}">Approve</button>` : ""}` : ""}
       <div class="kvs">
         ${kv("Client", d.org || "Unassigned")}${d.site ? kv("Site", d.site) : ""}
-        ${kv("WAN IP", d.wan_ip)}${kv("Tunnel IP", d.tunnel_ip)}${kv("Uptime", uptime(d.uptime))}
+        ${kv("WAN IP", d.wan_ip)}${kv("Tunnel IP", d.tunnel_ip)}${kv("Uptime", uptime(d.uptime))}${d.last_reboot ? kv("Last restart", `${ago(d.last_reboot)}${d.last_reboot_why === "unexpected" ? ` <span class="status warn">unexpected</span>` : d.last_reboot_why === "upgrade" ? ` <span class="muted">(upgrade)</span>` : ""}`, true) : ""}
         ${kv("RouterOS", esc((d.version || "—").replace(" (stable)", "")), true)}${d.fw_current ? kv("Firmware", `${esc(d.fw_current)} ${fwState}`, true) : ""}
         ${kv("Model", d.model)}${kv("Serial", d.serial)}${d.dm_mode ? kv("Device mode", `${esc(d.dm_mode)}${d.dm_flagged ? ` <span class="pill dm-flag">flagged</span>` : ""}`, true) : ""}
         ${d.state === "adopted" && secState(d) ? kv("Security", `<span class="status ${secState(d)[0]}">${esc(secState(d)[1])}</span>`, true) : ""}

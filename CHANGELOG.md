@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.30.0 - 2026-10-12
+
+- **Restart detection**: a router that restarts is noticed from its uptime going back - also when it was back before
+  anyone could see it offline. An event says when it restarted and how long it had been up; the router's page shows
+  **Last restart** (marked *unexpected* unless an upgrade was running). New alert (on by default): **Router restarted
+  unexpectedly** - not during an upgrade; it clears by itself after 15 minutes.
+
 ## 1.29.0 - 2026-10-12
 
 - **Internet links**: each router's ISP / WAN / LTE links are watched every minute - up or down, their address, since

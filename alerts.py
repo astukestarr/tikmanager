@@ -6,7 +6,7 @@ and closed when it clears.
   default company for server-wide problems) and / or a Teams card is posted; when it clears, the ticket gets an internal
   note and the closed status, and Teams gets a "resolved" card.
 - Kinds (Alerts page > Settings turns each on / off and sets thresholds):
-  offline (router offline N minutes - not while it's being upgraded), isp (an internet link down N minutes), flagged (RouterOS device-mode says possibly
+  offline (router offline N minutes - not while it's being upgraded), isp (an internet link down N minutes), reboot (unexpected restart), flagged (RouterOS device-mode says possibly
   compromised), patch (security release / high CVE for its RouterOS), backup_failed (latest backup attempt failed),
   cpu (average over 15 minutes), memory (10 minutes), temperature (3 readings in a row), firmware (new RouterOS on its channel), security (Security page warnings),
   server (server security check FAILs), website (Mozilla Observatory grade below A).
@@ -31,6 +31,7 @@ def short(text, n=95):
 KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "offline": ("Router offline", True, "minutes", 5),
     "flagged": ("Router flagged as possibly compromised (RouterOS device-mode)", True, None, None),
+    "reboot": ("Router restarted unexpectedly (not during an upgrade) - clears after 15 minutes", True, None, None),
     "isp": ("Internet link down (an ISP / WAN / LTE link of a router that's still reachable)", True, "minutes", 3),
     "patch": ("Router needs a RouterOS security update (MikroTik security release, or a high / critical CVE)", True, None, None),
     "backup_failed": ("Configuration backup failed", True, None, None),
@@ -117,6 +118,12 @@ class Alerts:
                     out[f"offline:{d['id']}"] = ("offline", d["id"], d["org_id"], f"{label(d)} is offline",
                                                  f"Not reachable over its tunnel since {time.strftime('%Y-%m-%d %H:%M', time.localtime(d['last_seen'] or now))}. "
                                                  f"Last error: {d['last_error'] or 'none'}")
+        if k["reboot"]["on"]:
+            for d in devs:
+                if d.get("last_reboot_why") == "unexpected" and (d.get("last_reboot") or 0) > now - 900:
+                    out[f"reboot:{d['id']}:{int(d['last_reboot'])}"] = ("reboot", d["id"], d["org_id"], f"{label(d)} restarted unexpectedly",
+                        f"It restarted at {time.strftime('%Y-%m-%d %H:%M', time.localtime(d['last_reboot']))} without an upgrade - power, a crash "
+                        "(the router's log may say) or someone restarting it. Now up again.")
         if k["isp"]["on"]:
             limit = now - k["isp"]["minutes"] * 60
             for d in devs:

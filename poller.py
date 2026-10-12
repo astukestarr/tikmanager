@@ -7,7 +7,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 
-from routeros import RouterError, RouterOS, SimRouter
+from routeros import RouterError, RouterOS, SimRouter, _dur_s
 from security import derive
 
 POLL_SECONDS = 60
@@ -63,6 +63,20 @@ class Poller:
                       "comment": i.get("comment") or "", "type": i.get("type") or "", "active": bool(i.get("default_route"))}
         self.db.run("UPDATE devices SET isp_state=? WHERE id=?", (json.dumps(new), d["id"]))
 
+    def check_reboot(self, d, st, now):
+        """A restart between two polls shows as uptime going back (also when it was too quick to look offline)."""
+        new, old = _dur_s(st.get("uptime")), _dur_s(d.get("uptime"))
+        if new is None or old is None or not d.get("last_seen"):
+            return
+        if new + 90 < old + (now - d["last_seen"]):
+            at = now - new
+            upgrading = self.db.one("SELECT 1 FROM upgrades WHERE device_id=? AND (status='running' OR finished_at > ?)", (d["id"], now - 1800))
+            why = "upgrade" if upgrading else "unexpected"
+            self.db.run("UPDATE devices SET last_reboot=?, last_reboot_why=? WHERE id=?", (at, why, d["id"]))
+            was = f"{old // 86400}d {old % 86400 // 3600}h" if old >= 86400 else f"{old // 3600}h {old % 3600 // 60}m"
+            self.db.event(d["id"], d["org_id"], "rebooted", f"Restarted at {time.strftime('%Y-%m-%d %H:%M', time.localtime(at))}"
+                          + (" (upgrade)" if upgrading else f" - it had been up {was}"))
+
     @staticmethod
     def wan_counters(ifaces):
         wan = [i for i in ifaces if "wan" in (i.get("comment") or "").lower()] or [i for i in ifaces if i.get("name") == "ether1"]
@@ -95,6 +109,7 @@ class Poller:
                        name=CASE WHEN name_custom=0 AND COALESCE(?, '') <> '' THEN ? ELSE name END WHERE id=?""",
                     (now, now, st["identity"], st["model"], st["serial"], st["version"], st["board"], st["uptime"], st["cpu"],
                      st["mem_used"], st["mem_total"], json.dumps(st["interfaces"]), st["identity"], st["identity"], d["id"]))
+        self.check_reboot(d, st, now)
         self.track_isp(d, st["interfaces"], now)
         cl = self.client(d)
         # location from the router's own GPS (if it has one) - never over a location someone entered by hand
