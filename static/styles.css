@@ -469,6 +469,7 @@ dialog.fw-dlg { width: min(680px, 96vw); }
 .pill.tag { font-size: 11px; padding: 0 7px; background: var(--accent-soft, var(--bg)); }
 .tag-row { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px; } .dev-tags { justify-content: center; margin: 6px 0; }
 .dev-notes { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 8px; margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+button.bk-tile { text-align: left; cursor: pointer; font: inherit; color: inherit; } button.bk-tile.on { outline: 2px solid var(--accent); }
 .wh-kinds { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 4px; font-weight: normal; }
 .isp-pick { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0; }
 .hw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }

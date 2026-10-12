@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.33.0 - 2026-10-12
+
+- **Backups are checked before they're stored**: an export that looks cut short (empty, no RouterOS header, no
+  configuration sections, ending mid-command, or a fraction of the last version's size) is not saved - the last good
+  version stays the restore point and the attempt shows as failed. A configuration that really did shrink a lot is
+  accepted when two exports in a row agree.
+- **Backup coverage** at the top of the Backups page: backed up in the last 2 nights / overdue / latest attempt
+  failed / no backup yet - click one to list those routers.
+- **Download all (zip)**: every router's newest configuration in one zip, laid out <client>/<router>_<date>.rsc
+  (technicians; audited).
+- **Plain-text copy** (Admin > Settings > Backups, off by default): each router's latest configuration also written to
+  <data>/exports/<client>/<router>.rsc - make that folder a git repository and every change is committed, for a free
+  history, or point your own backup tool at it. The copies aren't encrypted and contain passwords (readable only by
+  TikManager), hence off by default.
+
 ## 1.32.0 - 2026-10-12
 
 - **Webhooks** (Alerts page, administrators): every alert - when it opens and when it clears - to any number of

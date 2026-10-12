@@ -5,6 +5,8 @@
 import base64
 import dataclasses
 import html
+import io
+import zipfile
 import ipaddress
 import json
 import mimetypes
@@ -383,6 +385,7 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, admin=True)
             return self.json({**sysconf.public(), "wg_server_pubkey": settings.wg_server_pubkey, "data_dir": str(settings.data_dir),
                               "backup_hour": backups.hour, "backup_keep_versions": backups.keep_versions, "public_url": settings.public_url,
+                              "backup_mirror": backups.mirror_on, "backup_mirror_dir": str(backups.mirror_dir()),
                               "wg_endpoint": settings.wg_endpoint, "wg_network": settings.wg_network,
                               "encryption": "AES-256-GCM" if backups.vault.available else "not available (dev)",
                               "routers": db.one("SELECT COUNT(*) AS n FROM devices WHERE state='adopted'")["n"],
@@ -800,10 +803,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/backups":
             s = self.require()
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
-            return self.json(db.q(f"""SELECT d.id, d.name, o.name AS org, d.online, d.last_backup_at, d.last_backup_try, d.last_backup_error,
+            return self.json(db.q(f"""SELECT d.id, d.name, o.name AS org, d.org_id, d.online, d.last_backup_at, d.last_backup_try, d.last_backup_error,
                                        (SELECT COUNT(*) FROM backups b WHERE b.device_id=d.id) AS versions,
                                        (SELECT MAX(ts) FROM backups b WHERE b.device_id=d.id) AS last_change
                                        FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args))
+        if path == "/api/backups/zip":   # every router's newest configuration in one zip: <client>/<router>_<date>.rsc
+            s = self.require(tech=True)
+            org = q.get("org_id")
+            rows = backups.latest_all({int(org)} if org and str(org).isdigit() else None)
+            if not rows:
+                raise HttpError(404, "No backups yet.")
+            buf = io.BytesIO()
+            safe = lambda v: re.sub(r"[^A-Za-z0-9._ -]+", "_", str(v or "")).strip(" .") or "unnamed"
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                for r in rows:
+                    z.writestr(f"{safe(r['org'] or 'Unassigned')}/{safe(r['name'])}_{time.strftime('%Y-%m-%d', time.localtime(r['ts']))}.rsc", backups.text_of(r["id"]))
+            db.audit(s["email"], "backups downloaded (zip)", f"{len(rows)} routers", self.client_ip())
+            return self.send(200, buf.getvalue(), "application/zip",
+                             headers=[("Content-Disposition", f'attachment; filename="tikmanager-backups-{time.strftime("%Y%m%d")}.zip"')])
         if path == "/api/events":
             s = self.require()
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
@@ -1620,6 +1637,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "Backup hour must be 0-23 and versions to keep 1-100.")
             db.set_setting("backup_hour", hour)
             db.set_setting("backup_keep_versions", keep)
+            if "backup_mirror" in b:
+                db.set_setting("backup_mirror", "1" if b.get("backup_mirror") else "0")
             backups.prune()
             db.audit(s["email"], "system settings changed", ip=self.client_ip(), detail=f"backup hour {hour}, keep {keep} versions")
             return self.json({"ok": True})

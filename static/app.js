@@ -947,19 +947,32 @@ async function loadBackups(d) {
   }));
 }
 
+const bkView = { show: "" };
+function bkState(r) {   // coverage: none / failing / overdue / ok
+  if (!r.versions) return "none";
+  if (r.last_backup_error && (r.last_backup_try || 0) > (r.last_backup_at || 0)) return "failing";
+  if (!r.last_backup_at || Date.now() / 1000 - r.last_backup_at > 2 * 86400 + 6 * 3600) return "overdue";
+  return "ok";
+}
 async function backupsView() {
-  const rows = await api("/api/backups");
-  const stale = rows.filter((r) => !r.last_backup_at || Date.now() / 1000 - r.last_backup_at > 36 * 3600);
-  $("main").innerHTML = `<h1>Backups</h1><p class="muted">Every approved router is exported nightly; a new version is saved when its configuration changes.</p>
-    <div class="tiles"><div class="tile"><div class="v">${rows.length}</div><div class="l">Routers</div></div>
-      <div class="tile good"><div class="v">${rows.length - stale.length}</div><div class="l">Backed up in the last 36 hours</div></div>
-      <div class="tile ${stale.length ? "bad" : ""}"><div class="v">${stale.length}</div><div class="l">Missing or failing</div></div></div>
+  const all = await api("/api/backups");
+  const n = (s) => all.filter((r) => bkState(r) === s).length;
+  const rows = bkView.show ? all.filter((r) => bkState(r) === bkView.show) : all;
+  const tile = (s, label, tone) => `<button type="button" class="tile bk-tile ${n(s) ? tone : s === "ok" ? "good" : ""} ${bkView.show === s ? "on" : ""}" data-bkshow="${s}">
+    <div class="v">${n(s)}</div><div class="l">${label}</div></button>`;
+  $("main").innerHTML = `<div class="row"><div><h1>Backups</h1><p class="muted">Every approved router is exported nightly; a new version is saved when its configuration changes,
+      after checking the export is complete.</p></div><span class="spacer"></span>
+      ${isTech() && all.some((r) => r.versions) ? `<a class="btn" href="/api/backups/zip" download>Download all (zip)</a>` : ""}</div>
+    <div class="tiles">${tile("ok", "Backed up (last 2 nights)", "good")}${tile("overdue", "Overdue - no backup for over 2 nights", "warn")}
+      ${tile("failing", "Latest attempt failed", "bad")}${tile("none", "No backup yet", "bad")}</div>
+    ${bkView.show ? `<p class="small">Showing ${rows.length} of ${all.length} - <button class="linkish" type="button" data-bkshow="">show all</button></p>` : ""}
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Router</th><th>Client</th><th>Last checked</th><th>Last change</th><th>Versions</th><th>Problem</th></tr></thead><tbody>
       ${rows.map((r) => `<tr class="click" data-dev="${r.id}"><td>${esc(r.name)}</td><td>${esc(r.org || "")}</td>
         <td>${r.last_backup_at ? ago(r.last_backup_at) : `<span class="status err">never</span>`}</td><td>${r.last_change ? when(r.last_change) : "—"}</td>
         <td>${r.versions}</td><td class="small">${r.last_backup_error ? `<span class="status err">${esc(r.last_backup_error)}</span>` : !r.online ? "offline" : ""}</td></tr>`).join("")
-        || `<tr><td colspan="6" class="muted">No approved routers yet.</td></tr>`}</tbody></table></div></div>`;
+        || `<tr><td colspan="6" class="muted">${all.length ? "None in this group." : "No approved routers yet."}</td></tr>`}</tbody></table></div></div>`;
   bindRows();
+  document.querySelectorAll("[data-bkshow]").forEach((b) => b.addEventListener("click", () => { bkView.show = bkView.show === b.dataset.bkshow ? "" : b.dataset.bkshow; backupsView(); }));
 }
 
 // one line of type-specific detail per interface (what Cloutik's interface report carries)
@@ -1441,7 +1454,11 @@ async function adminSystem() {
       <label class="field">Nightly backup time (server clock) <select id="sHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.backup_hour ? "selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("")}</select></label>
       <label class="field">Versions to keep per router <input id="sKeep" type="number" min="1" max="100" value="${s.backup_keep_versions}"></label>
       <button class="btn primary" type="button" id="sSave">Save</button><span class="status" id="sStatus"></span></div>
-      <p class="small muted">A new version is saved only when the configuration changes; when a router has more than this, the oldest is removed. Stored configurations are encrypted with ${esc(s.encryption)}.</p></div>
+      <p class="small muted">A new version is saved only when the configuration changes; when a router has more than this, the oldest is removed. Stored configurations are encrypted with ${esc(s.encryption)}.</p>
+      <label class="chk"><input type="checkbox" id="sMirror" ${s.backup_mirror ? "checked" : ""}> Also keep a plain-text copy of each router's latest configuration in
+        <span class="mono">${esc(s.backup_mirror_dir)}</span></label>
+      <p class="small muted">Off by default: the copies are <b>not encrypted</b> and contain passwords (files are readable only by TikManager). Make that folder a git repository
+        (<span class="mono">git init</span>) and every change is committed - a free history - or point your own backup tool at it.</p></div>
     <div class="card" id="lcAdmin"><h2>Replacement suggestions</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>About this installation</h2><div class="grid2">
       ${[["Public address", s.public_url], ["WireGuard address", s.wg_endpoint], ["Controller WireGuard key", s.wg_server_pubkey], ["Tunnel network", s.wg_network],
@@ -1461,7 +1478,7 @@ async function adminSystem() {
     } catch (e) { say("cfStatus", e.message); }
   });
   $("sSave").addEventListener("click", async () => {
-    try { await post("/api/admin/system", { backup_hour: $("sHour").value, backup_keep_versions: $("sKeep").value }); say("sStatus", "Saved.", true); }
+    try { await post("/api/admin/system", { backup_hour: $("sHour").value, backup_keep_versions: $("sKeep").value, backup_mirror: $("sMirror").checked }); say("sStatus", "Saved.", true); }
     catch (e) { say("sStatus", e.message); }
   });
 }

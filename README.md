@@ -400,6 +400,11 @@ codes end the sign-in attempt, and every sign-in is in the audit log.
 
 ## Configuration backups
 
+Each export is checked for completeness before it's stored. The Backups page shows coverage (backed up / overdue /
+failed / none), **Download all (zip)** gets every router's newest configuration at once, and Admin > Settings can keep
+a plain-text copy of each latest configuration in `<data>/exports` (off by default; make it a git repository for a
+change history).
+
 Every approved router is exported nightly (Admin > Settings sets the hour; default 02:00 server time) over its tunnel as
 a **script** (`/export show-sensitive`) - import it with `/import` on any RouterOS 7 router, including a different
 model (adjust interface names as needed). A new version is stored only when the configuration changes, and each router
