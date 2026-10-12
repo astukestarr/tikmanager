@@ -939,6 +939,8 @@ async function wgPortCard() {
   const left = w.routers.filter((r) => r.port !== w.port);
   const moving = !!w.old;
   el.innerHTML = `<div class="row"><h2>WireGuard port</h2><span class="spacer"></span><span class="pill">UDP ${w.port}</span></div>
+    ${w.busy ? `<p class="status">Checking the new port and switching the server… routers aren't touched until the server has switched.</p>` : ""}
+    ${w.error && !w.busy ? `<p class="status err">The port wasn't changed: ${esc(w.error)}</p>` : ""}
     ${moving ? `
       <p>Moving routers from <b>UDP ${w.old}</b> to <b>UDP ${w.port}</b>: <b>${w.moved} of ${w.total}</b> done.
         ${w.relay ? "The old port is relayed to the new one meanwhile, so nobody drops off."
@@ -979,7 +981,7 @@ async function wgPortCard() {
     if (left.length && e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = `Click again - ${left.length} router(s) will drop off`; return; }
     try { const r = await post("/api/admin/wgport/close"); wgPortCard(); } catch (err) { say(err.message); }
   });
-  if (moving) setTimeout(() => { if ($("wgCard")) wgPortCard(); }, 15000);
+  if (moving || w.busy) setTimeout(() => { if ($("wgCard")) wgPortCard(); }, w.busy ? 3000 : 15000);
 }
 
 // --- off-site backup to your own FTPS / FTP / WebDAV storage (offsite.py) ---------------------------------------------

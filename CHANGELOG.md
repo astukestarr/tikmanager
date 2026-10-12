@@ -3,6 +3,25 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.19.1 - 2026-10-11
+
+Security review of everything added since 1.8.1 (security events, alerts, off-site backup, script library, Winbox
+relay, WireGuard port, connectivity test, root helpers). All 110 API endpoints require the right sign-in, every POST
+is CSRF-checked, nothing server-supplied reaches the page unescaped, and the strict content security policy still
+holds. Fixed:
+- **Moving the WireGuard port could strand routers** (1.19.0): routers were switched before the server confirmed it had
+  moved - e.g. "Use UDP 443" while Caddy holds UDP 443 for HTTP/3 would point every router at a port WireGuard
+  wasn't listening on. Now the root helper first checks the port is free (and says what's using it and how to free
+  it), nothing on any router changes until the server has really switched, and a failure changes nothing at all.
+  New installs turn off Caddy's HTTP/3 (TikManager doesn't use it), so UDP 443 is free; on existing servers the
+  helper explains the one-line Caddy change if you want UDP 443.
+- **The old-port relay is bounded** (512 senders at once) - UDP sender addresses can be faked, so it could otherwise be
+  made to open sockets without limit.
+- **Router log flood limit**: 120 lines a minute per router are kept, so one misbehaving router can't fill the database
+  (routers can only send over their own tunnel).
+- **Off-site backup to WebDAV requires https://** - plain http would send the storage password unencrypted.
+- The "one event per 5 minutes" throttle no longer grows without limit under attack from many addresses.
+
 ## 1.19.0 - 2026-10-11
 
 - **Change the WireGuard port** (Admin > Settings > **WireGuard port**) - e.g. when an ISP or a client's network blocks

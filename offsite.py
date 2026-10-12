@@ -92,8 +92,9 @@ class OffsiteBackup:
             raise ValueError("Pick FTPS, FTP or WebDAV.")
         if cur["kind"] == "webdav":
             u = urllib.parse.urlparse(cur.get("url") or "")
-            if u.scheme not in ("https", "http") or not u.hostname:
-                raise ValueError("Enter the WebDAV address, e.g. https://cloud.example.com/remote.php/dav/files/backup/")
+            if u.scheme != "https" or not u.hostname:
+                raise ValueError("Enter the WebDAV address starting with https:// (plain http would send the password unencrypted), "
+                                 "e.g. https://cloud.example.com/remote.php/dav/files/backup/")
         elif not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", cur.get("host") or ""):
             raise ValueError("Enter the FTP server's host name or IP address.")
         if cur.get("port") and not (cur["port"].isdigit() and 0 < int(cur["port"]) < 65536):

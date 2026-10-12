@@ -20,6 +20,7 @@ import traceback
 from pathlib import Path
 
 KEEP_DAYS = 90
+ROUTER_LINES_PER_MINUTE = 120   # kept per router; more than any real attack on one router produces, far below a flood
 FAIL_KINDS = ("login_failed", "mfa_failed", "sudo_failed", "locked", "rate_limited", "adoption_rejected", "remote_rejected")
 SOURCES = ("tikmanager", "server", "router")
 AUTH_FILES = [Path("/var/lib/tikmanager-update/auth-events.json")]
@@ -52,6 +53,7 @@ class SecurityEvents:
         self._auth_mtime = 0
         self._limited = {}   # (kind, ip) -> last recorded, so a flood of refused requests is one event per 5 minutes
         self._devmap, self._devmap_at = {}, 0
+        self._rate = {}   # device -> (minute, lines kept) - a misbehaving router can't flood the database
         self.winbox_who = None   # set by server.py: (device_id, router user) -> (technician, exact) for lines from the Winbox relay
         self.lock = threading.Lock()
 
@@ -62,6 +64,8 @@ class SecurityEvents:
             with self.lock:
                 if now - self._limited.get(key, 0) < 300:
                     return
+                if len(self._limited) > 10000:   # many attacking addresses: forget the stale ones
+                    self._limited = {k: v for k, v in self._limited.items() if now - v < 300}
                 self._limited[key] = now
         clip = lambda v, n: re.sub(r"[\x00-\x1f\x7f]", " ", str(v or ""))[:n]
         self.db.run("INSERT OR IGNORE INTO sec_events (ts, source, kind, user, ip, device_id, via, detail, uid) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -84,6 +88,13 @@ class SecurityEvents:
         got = parse_router(data[:2048].decode("utf-8", "replace"))
         if not got:
             return
+        minute = int(time.time() // 60)
+        m, n = self._rate.get(dev, (minute, 0))
+        if m != minute:
+            m, n = minute, 0
+        if n >= ROUTER_LINES_PER_MINUTE:
+            return
+        self._rate[dev] = (m, n + 1)
         kind, user, ip, via, detail = got
         if kind == "login_ok" and user == "tikmanager" and via in ("rest-api", "api", "api-ssl"):
             return   # TikManager's own polling

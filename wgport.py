@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import traceback
@@ -23,6 +24,7 @@ from pathlib import Path
 from routeros import RouterError
 
 RELAY_IDLE = 300
+RELAY_MAX = 512   # senders relayed at once - more than any router count, but bounded (UDP sender addresses can be faked)
 
 
 class UdpRelay:
@@ -47,6 +49,8 @@ class UdpRelay:
 
     async def _forward(self, data, addr):
         back = self.backs.get(addr)
+        if not back and len(self.backs) >= RELAY_MAX:
+            return   # full: drop it (real routers retry; their keepalive keeps an existing entry alive)
         if not back:
             relay = self
 
@@ -86,6 +90,7 @@ class WgPort:
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True, name="wg-relay").start()
         self.relay = None
+        self.busy, self.error = False, None   # a port change being checked / applied, and why the last one failed
         self.lock = threading.Lock()
 
     # --- state ------------------------------------------------------------------------------------------------
@@ -112,7 +117,7 @@ class WgPort:
     def info(self):
         rows = self.db.q("SELECT id, name, online, wg_port, last_seen FROM devices WHERE state='adopted' ORDER BY name")
         cur = self.port
-        return {"port": cur, "old": self.old, "supported": self.supported(), "relay": bool(self.relay),
+        return {"port": cur, "old": self.old, "supported": self.supported(), "relay": bool(self.relay), "busy": self.busy, "error": self.error,
                 "helper": self.helper_status(), "requested": self.request_file.exists(),
                 "routers": [{"id": r["id"], "name": r["name"], "online": bool(r["online"]), "port": r["wg_port"] or (self.old or cur)} for r in rows],
                 "moved": sum(1 for r in rows if (r["wg_port"] or (self.old or cur)) == cur), "total": len(rows)}
@@ -145,18 +150,54 @@ class WgPort:
         if new in (80, 8800) or new in range(40000, 40050):
             raise ValueError("That port is used by TikManager for something else.")
         with self.lock:
-            # every router dials the current port until it's moved
+            if self.busy:
+                raise ValueError("A port change is already being checked - wait a moment.")
+            self.busy, self.error = True, None
+        threading.Thread(target=self._move, args=(new, cur), daemon=True, name="wg-move").start()
+
+    def _ask(self, action, port, timeout=90):
+        """Ask the root helper and wait for its answer to *this* request -> (ok, detail)."""
+        if getattr(self.s, "dev", False):   # dev: nothing to change on this PC
+            return True, "dev mode"
+        rid = secrets.token_hex(8)
+        self._ask_helper(f"{action} {port} {rid}")
+        end = time.time() + timeout
+        while time.time() < end:
+            time.sleep(1)
+            st = self.helper_status()
+            if st.get("id") == rid:
+                return st.get("state") in ("ok", "done"), st.get("detail") or ""
+        return False, "The server's helper didn't answer - is tikmanager-wgport.path running? (sudo systemctl status tikmanager-wgport.path)"
+
+    def _move(self, new, cur):
+        """Nothing on a router changes until the server has really switched: check the port is free, switch wg0, then
+        relay the old port and move the routers. A failure leaves everything as it was."""
+        try:
+            ok, why = self._ask("check", new)
+            if not ok:
+                self.error = why
+                return
             self.db.run("UPDATE devices SET wg_port=? WHERE state='adopted' AND wg_port IS NULL", (cur,))
+            if cur < 1024:
+                # the service can't relay a port below 1024, so move the online routers first - while the server still
+                # listens on the old port (the check above just confirmed the new one is free) - then switch it
+                self.db.set_setting("wg_port", str(new))
+                self.move_routers()
+            ok, why = self._ask("set", new)
+            if not ok:
+                self.error = why
+                self.db.set_setting("wg_port", str(cur))
+                return
             self.db.set_setting("wg_port_old", str(cur))
             self.db.set_setting("wg_port", str(new))
             self._endpoint_port(new)
-            if cur < 1024:
-                # the service can't relay a port below 1024, so move the online routers first - while the server still
-                # listens on the old port - then switch it; they reconnect within seconds
-                self.move_routers()
-            self._ask_helper(f"set {new}")
-        self.ensure_relay()
-        threading.Thread(target=self.move_routers, daemon=True, name="wg-move").start()
+            self.ensure_relay()
+            self.move_routers()
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            self.error = str(e)[:300]
+        finally:
+            self.busy = False
 
     def ensure_relay(self):
         """While a move is under way: relay the old port to the new one (after the helper has moved wg0)."""
@@ -188,7 +229,7 @@ class WgPort:
         if self.relay:
             self.relay.close()
             self.relay = None
-        self._ask_helper(f"close {old}")
+        self._ask_helper(f"close {old} {secrets.token_hex(8)}")
         self.db.set_setting("wg_port_old", "")
         return left
 

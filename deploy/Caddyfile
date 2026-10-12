@@ -1,6 +1,8 @@
 # TikManager - the only thing listening on the internet. Caddy gets and renews the Let's Encrypt certificate itself.
 {
 	servers {
+		# HTTP/1.1 and HTTP/2 only: no HTTP/3, so UDP 443 stays free (WireGuard can move there - Admin > Settings)
+		protocols h1 h2
 		timeouts {
 			read_header 10s
 			read_body 30s
