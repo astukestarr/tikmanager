@@ -188,21 +188,29 @@ class RouterOS:
                               "comment": "", "band": r.get("band") or ""})
             break
         # 60 GHz (Cube, wAP 60G, LHG 60G ...)
-        for w in self.optional(lambda: self.get("/interface/w60g"), []) or []:
+        # The menu lists the radios; in multipoint (ap-bridge) each connected station is also listed - as a dynamic
+        # "w60g-station" interface with a parent - and /interface/w60g/station has them too. Stations become peers.
+        w60 = self.optional(lambda: self.get("/interface/w60g"), []) or []
+        sta = {s.get("name") or s.get(".id"): s for s in (self.optional(lambda: self.get("/interface/w60g/station"), []) or [])}
+        sta.update({w.get("name"): {**sta.get(w.get("name"), {}), **w} for w in w60 if w.get("parent")})
+        for w in [x for x in w60 if not x.get("parent")]:
             n, on = w.get("name"), w.get("disabled") != "true" and w.get("running") == "true"
             mon = one(self.optional(lambda n=n: self.post("/interface/w60g/monitor", {"numbers": n, "once": ""}), {})) if on else {}
             radios.append({"name": n, "kind": "w60g", "mode": w.get("mode") or "", "ssid": w.get("ssid") or "", "band": "60 GHz",
                            "frequency": mon.get("frequency") or w.get("frequency") or "", "channel": "", "width": "", "protocol": "",
                            "radio_name": "", "mac": w.get("mac-address") or "", "running": w.get("running") == "true",
                            "disabled": w.get("disabled") == "true", "status": "connected" if mon.get("connected") == "true" else "",
-                           "noise": None, "ccq": None, "tx_power": "", "count": None})
-            stations = self.optional(lambda: self.get("/interface/w60g/station"), []) or []
-            for st in [x for x in stations if x.get("interface") in (None, n)] or ([mon] if mon.get("connected") == "true" else []):
+                           "noise": None, "ccq": None, "tx_power": str(mon.get("tx-power") or ""), "count": None})
+            mine = [s for s in sta.values() if (s.get("parent") or s.get("interface") or n) == n]
+            if not mine and mon.get("connected") == "true":   # point-to-point: the link itself is in the monitor
+                mine = [mon]
+            for st in mine:
                 peers.append({"interface": n, "mac": st.get("remote-address") or st.get("mac-address") or "", "name": "", "ip": "",
                               "is_ap": False, "signal": _int(st.get("rssi")), "quality": _int(st.get("signal")), "remote_signal": None,
                               "snr": None, "ccq": None, "tx_rate": st.get("tx-phy-rate") or "", "rx_rate": "", "mcs": st.get("tx-mcs") or "",
-                              "uptime": st.get("connected-time") or st.get("uptime") or "", "idle": "", "distance": st.get("distance") or "",
-                              "tx_bytes": None, "rx_bytes": None, "version": "", "comment": ""})
+                              "uptime": st.get("connected-time") or st.get("uptime") or st.get("link-uptime") or "", "idle": "",
+                              "distance": st.get("distance") or "", "tx_bytes": None, "rx_bytes": None, "version": "", "comment": ""})
+        types = sorted({str(i.get("type") or "") for i in (self.optional(lambda: self.get("/interface"), []) or [])}) if not radios else []
         # names and addresses for peers the radio itself doesn't know (wifi / w60g): DHCP leases, then ARP
         if any(not p["ip"] for p in peers):
             leases = {str(l.get("active-mac-address") or l.get("mac-address") or "").upper(): l
@@ -212,7 +220,7 @@ class RouterOS:
                 l = leases.get(p["mac"].upper(), {})
                 p["ip"] = p["ip"] or l.get("active-address") or l.get("address") or arp.get(p["mac"].upper()) or ""
                 p["name"] = p["name"] or l.get("host-name") or l.get("comment") or ""
-        return {"radios": radios, "peers": peers}
+        return {"radios": radios, "peers": peers, "types": types}   # types: only when no radio was found (to explain why)
 
     def winbox_service(self):
         """The router's Winbox service: {disabled, port, address (who may connect; "" = anyone)}."""

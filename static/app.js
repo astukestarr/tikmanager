@@ -270,7 +270,7 @@ async function router(id) {
     <div class="bar"><i data-pct="${pct ?? 0}" class="${pct >= 90 ? "hot" : pct >= 75 ? "warm" : ""}"></i></div></div>`;
   // the right side is split into tabs (only the open one is built and loaded); remembered across routers and refreshes
   const adopted = d.state === "adopted";
-  const radios = (d.interfaces || []).some((i) => WL_TYPES.includes(i.type));
+  const radios = (d.interfaces || []).some(isRadio);
   const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(radios ? [["wireless", "Wireless"]] : []),
     ...(d.online && isTech() ? [["firewall", "Firewall"]] : []),
     ["backups", "Backups"], ["events", "Events"], ["settings", canWrite() ? "Settings" : "Location"]] : [];
@@ -441,7 +441,7 @@ async function router(id) {
 }
 
 // Wireless tab: radios (legacy wireless, wifi, 60 GHz), point-to-point link quality and AP client lists, read live every 10 s
-const WL_TYPES = ["wlan", "wifi", "w60g", "wifiwave2"];
+const isRadio = (i) => /^(wlan|wifi|w60g|wireless|wifiwave2)/i.test(i.type || "") || /60g/i.test(i.type || "") || /^(wlan|wifi|w60g)/i.test(i.name || "");
 const wlView = { q: "", sort: "weak", live: true, token: 0 };
 const wlTone = { good: "ok", warn: "warn", bad: "err" };
 function wlSig(dbm) {   // received signal (dBm) -> [word, tone]
@@ -520,7 +520,7 @@ async function loadWireless(d) {
               ${col.dist ? `<td class="small">${p.distance ? `${esc(p.distance)} km` : ""}</td>` : ""}<td class="small nowrap">${esc(p.uptime ? uptime(p.uptime, true) : "")}</td>
               <td class="small nowrap">${p.tx_bytes != null ? `${bytes(p.tx_bytes)} / ${bytes(p.rx_bytes)}` : ""}</td>${col.ver ? `<td class="small">${esc(p.version || "")}</td>` : ""}</tr>`; }).join("")}
           </tbody></table></div>` : `<p class="muted small">${peers.length ? "No clients match." : "No clients connected."}</p>`}</div>`;
-    }).join("") : `<div class="card"><p class="muted">No radios found on this router.</p></div>`;
+    }).join("") : `<div class="card"><p class="muted">No radios found on this router.${last.types && last.types.length ? ` Its interface types: <span class="mono">${esc(last.types.join(", "))}</span>.` : ""}</p></div>`;
     setBars($("wlBody"));
   };
   const tick = async () => {

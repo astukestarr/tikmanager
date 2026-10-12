@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.23.1 - 2026-10-11
+
+- **Wireless tab: 60 GHz radios** - the tab now appears for every 60 GHz interface type, and connected 60 GHz stations
+  (the dynamic *w60g-station* interfaces of a multipoint AP) are shown as clients of their radio instead of being
+  missed. When a router has no radio TikManager recognises, the tab lists the interface types the router reported, so
+  an unusual model can be added.
+
 ## 1.23.0 - 2026-10-11
 
 - **Wireless tab** on the router page (routers with radios): read live from the router and refreshed every 10 seconds
