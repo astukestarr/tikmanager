@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  csrf TEXT NOT NULL, created_at REAL NOT NULL, expires REAL NOT NULL, last_seen REAL NOT NULL, ip TEXT
+  csrf TEXT NOT NULL, created_at REAL NOT NULL, expires REAL NOT NULL, last_seen REAL NOT NULL, ip TEXT,
+  as_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL   -- "View as": an administrator seeing what this client user sees
 );
 CREATE TABLE IF NOT EXISTS devices (
   id INTEGER PRIMARY KEY, org_id INTEGER REFERENCES orgs(id) ON DELETE CASCADE,   -- NULL until a tech approves it
@@ -211,6 +212,8 @@ class DB:
             c.execute("ALTER TABLE users ADD COLUMN entra_oid TEXT")
         if "users" in tables and "prefs" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
             c.execute("ALTER TABLE users ADD COLUMN prefs TEXT")
+        if "sessions" in tables and "as_user_id" not in {r[1] for r in c.execute("PRAGMA table_info(sessions)")}:
+            c.execute("ALTER TABLE sessions ADD COLUMN as_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
         if "upgrades" in tables:
             ucols = {r[1] for r in c.execute("PRAGMA table_info(upgrades)")}
             for col, ddl in (("seq", "INTEGER"), ("sequential", "INTEGER NOT NULL DEFAULT 0"), ("max_fail", "INTEGER"), ("pin_version", "TEXT")):

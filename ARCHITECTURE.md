@@ -124,6 +124,9 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
   client's own organization (`require_winbox`, `require_vpn`, `vpn_for`, and VPN validation of every router's client);
   viewers never get them, client admins can't change a router's Winbox service, and turning Winbox off closes the
   client's open sessions.
+- **View as**: an administrator's session can point at a client user (`sessions.as_user_id`); `Sessions.get` then
+  returns that user's kind / role / organization, so every check runs exactly as for them. While it's set, every POST
+  except Stop and Sign out is refused (look-only), and start / stop are audit-logged under the administrator.
 
 ## Security controls
 

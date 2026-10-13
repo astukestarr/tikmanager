@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.39.0 - 2026-10-13
+
+- **View as** for administrators: **Users > View as** next to a client user shows TikManager exactly as they see it -
+  their sidebar, routers, pages, Winbox / VPN access - so you can check what a client can reach. Look-only: every change
+  is refused while viewing (the server enforces it, not just the page), a purple banner says who you're viewing as, and
+  **Stop viewing** returns you to your own account. Only administrators can use it, only for client users (not
+  technicians or disabled users), and starting / stopping is audit-logged.
+
 ## 1.38.0 - 2026-10-13
 
 - **Winbox and site-to-site VPNs for client admins**, turned on per client by an administrator on **Clients** (off by

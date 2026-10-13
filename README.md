@@ -414,6 +414,10 @@ client's admins **Winbox** to their own routers - *read-only* or *full* router l
 Viewers never get either; client admins can't change a router's Winbox service (a technician turns it on for
 TikManager). Every session and change is audit-logged, and turning Winbox off closes that client's open sessions.
 
+**View as** (administrators): on **Users**, *View as* next to a client user shows TikManager exactly as that person sees
+it - their menu, routers, pages and buttons - to check what they can reach. It's look-only: every change is refused
+until you click **Stop viewing** in the purple banner, and starting / stopping is audit-logged.
+
 Sign-in is protected: after 5 wrong passwords or codes an account is locked for 15 minutes, three wrong authenticator
 codes end the sign-in attempt, and every sign-in is in the audit log.
 

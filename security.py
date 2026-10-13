@@ -121,6 +121,13 @@ class Sessions:
             return None
         if now - s["last_seen"] > 60:
             self.db.run("UPDATE sessions SET last_seen = ? WHERE id_hash = ?", (now, token_hash(sid)))
+        if s.get("as_user_id"):   # "View as": everything is decided as the client user; the administrator is kept for the banner / audit
+            u = self.db.one("SELECT id, email, name, kind, role, org_id, disabled FROM users WHERE id = ?", (s["as_user_id"],))
+            if not u or u["disabled"] or u["kind"] != "client":
+                self.db.run("UPDATE sessions SET as_user_id = NULL WHERE id_hash = ?", (token_hash(sid),))
+            else:
+                s = {**s, "real_email": s["email"], "real_role": s["role"], "real_kind": s["kind"], "viewing_as": True,
+                     "email": u["email"], "name": u["name"], "kind": u["kind"], "role": u["role"], "org_id": u["org_id"]}
         return s
 
     def end(self, sid):

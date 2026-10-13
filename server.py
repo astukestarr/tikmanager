@@ -460,7 +460,8 @@ class Handler(BaseHTTPRequestHandler):
                               # admins see when a newer release is out (the banner with "Upgrade now")
                               "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None,
                               "prefs": user_prefs(s["user_id"]),
-                              "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1]})
+                              "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1],
+                              "viewing_as": {"by": s["real_email"]} if s.get("viewing_as") else None})
         if path == "/api/orgs":
             s = self.require()
             where, args = self.org_scope(s, column="o.id")
@@ -959,6 +960,23 @@ class Handler(BaseHTTPRequestHandler):
         # everything else: signed in + CSRF token
         s = self.session()
         self.check_csrf(s)
+        if path == "/api/view-as/stop":
+            if s.get("viewing_as"):
+                db.run("UPDATE sessions SET as_user_id = NULL WHERE id_hash = ?", (token_hash(read_cookie(self.headers.get("Cookie"), SESSION_COOKIE)),))
+                db.audit(s["real_email"], "stopped viewing as", s["email"], self.client_ip(), org_id=s["org_id"])
+            return self.json({"ok": True})
+        if s.get("viewing_as") and path != "/api/logout":   # "View as" is look-only: nothing can be changed in the user's name
+            raise HttpError(403, f"You're viewing as {s['email']} - read-only. Stop viewing to make changes.")
+        if m := re.fullmatch(r"/api/users/(\d+)/view-as", path):   # administrators: see TikManager exactly as this client user does
+            s = self.require(tech=True, admin=True)
+            u = db.one("SELECT * FROM users WHERE id=?", (int(m.group(1)),))
+            if not u or u["kind"] != "client":
+                raise HttpError(400, "You can only view as a client user.")
+            if u["disabled"]:
+                raise HttpError(400, "That user is disabled.")
+            db.run("UPDATE sessions SET as_user_id = ? WHERE id_hash = ?", (u["id"], token_hash(read_cookie(self.headers.get("Cookie"), SESSION_COOKIE))))
+            db.audit(s["email"], "viewing as", u["email"], self.client_ip(), org_id=u["org_id"], detail="read-only")
+            return self.json({"ok": True})
         if path == "/api/me/prefs":   # the signed-in person's own appearance (theme + light/dark mode)
             b = self.body()
             prefs = user_prefs(s["user_id"])

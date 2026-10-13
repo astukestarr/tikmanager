@@ -605,3 +605,8 @@ tr.pt-selrow td { background: color-mix(in srgb, var(--accent) 8%, transparent);
 /* WireGuard port move */
 .wg-port-input { max-width: 9em; }
 .wg-left { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+
+/* "View as" (administrator seeing what a client user sees) */
+.viewas-banner { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #7c3aed; color: #fff; font-weight: 600; font-size: 13px; }
+.viewas-banner.hidden { display: none; }
+.viewas-banner .btn { background: #fff; color: #5b21b6; border-color: #fff; }

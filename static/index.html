@@ -34,6 +34,9 @@
           <span class="who small" id="who"></span>
           <button class="btn" type="button" id="logout">Sign out</button>
         </header>
+        <!-- "View as": an administrator seeing TikManager as a client user (read-only) -->
+        <div class="viewas-banner hidden" id="viewAsBar" role="status"><span id="viewAsText"></span><span class="spacer"></span>
+          <button class="btn" type="button" id="viewAsStop">Stop viewing</button></div>
         <!-- new version available (administrators): on every page until upgraded or hidden for the day -->
         <div class="update-banner hidden" id="updateBanner" role="status" aria-live="polite">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8 12l4-4 4 4"/></svg>

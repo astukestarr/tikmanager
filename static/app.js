@@ -1056,6 +1056,7 @@ async function users() {
         <td class="row">${u.email === me.email ? "" : `
           ${u.invited ? `<button class="btn" type="button" data-act="resend" data-id="${u.id}">New link</button>` : ""}
           ${u.kind === "client" && u.totp_enabled ? `<button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}">Reset MFA</button>` : ""}
+          ${u.kind === "client" && !u.disabled && isTech() && me.role === "admin" ? `<button class="btn" type="button" data-viewas="${u.id}" title="See TikManager exactly as this user does (read-only)">View as</button>` : ""}
           <button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>`}</td></tr>`).join("")}
     </tbody></table></div></div>`;
   $("iForm")?.addEventListener("submit", async (e) => {
@@ -1068,6 +1069,9 @@ async function users() {
       setTimeout(users, 15000);
     } catch (err) { $("iResult").innerHTML = `<p class="status err">${esc(err.message)}</p>`; }
   });
+  document.querySelectorAll("[data-viewas]").forEach((b) => b.addEventListener("click", async () => {
+    try { await post(`/api/users/${b.dataset.viewas}/view-as`); location.href = "/#dashboard"; location.reload(); } catch (err) { alert(err.message); }
+  }));
   document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
     try {
       const r = await post(`/api/users/${b.dataset.id}/${b.dataset.act}`);
@@ -4029,6 +4033,11 @@ async function init() {
   $("menuBtn").addEventListener("click", (e) => { e.stopPropagation(); $("nav").classList.toggle("open"); });
   document.querySelector(".content").addEventListener("click", () => $("nav").classList.remove("open"));
   $("devBadge").classList.toggle("hidden", !me.dev);
+  if (me.viewing_as) {   // look-only: every change is refused by the server; the banner says so and stops it
+    $("viewAsText").textContent = `Viewing as ${me.email}${me.org ? ` (${me.org}, ${me.role === "admin" ? "client admin" : "viewer"})` : ""} - this is exactly what they see. Read-only: nothing can be changed.`;
+    $("viewAsBar").classList.remove("hidden");
+    $("viewAsStop").addEventListener("click", async () => { try { await post("/api/view-as/stop"); } catch (e) { /* signed out */ } location.href = "/#users"; location.reload(); });
+  }
   $("navVersion").textContent = me.version ? `TikManager ${me.version}` : "";
   // the installed version, next to the logo, for everyone
   $("verChip").textContent = me.version ? `v${me.version}` : "";
