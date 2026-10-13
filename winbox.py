@@ -73,7 +73,9 @@ class WinboxRelay:
 
     # --- public API (called from request threads) ------------------------------------------------------------
     def view(self, s):
-        return [self._pub(x, x["user"] == s["email"]) | {"active": len(x["writers"]) // 2, "mine": x["user"] == s["email"]}
+        # the password only to the person who opened the session - never to an administrator viewing as them ("View as")
+        owner = lambda x: x["user"] == s["email"] and not s.get("viewing_as")
+        return [self._pub(x, owner(x)) | {"active": len(x["writers"]) // 2, "mine": x["user"] == s["email"]}
                 for _, x in sorted(self.sessions.items()) if s["kind"] != "client" or x.get("org_id") == s["org_id"]]
 
     def _device(self, device_id):

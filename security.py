@@ -123,7 +123,7 @@ class Sessions:
             self.db.run("UPDATE sessions SET last_seen = ? WHERE id_hash = ?", (now, token_hash(sid)))
         if s.get("as_user_id"):   # "View as": everything is decided as the client user; the administrator is kept for the banner / audit
             u = self.db.one("SELECT id, email, name, kind, role, org_id, disabled FROM users WHERE id = ?", (s["as_user_id"],))
-            if not u or u["disabled"] or u["kind"] != "client":
+            if not u or u["disabled"] or u["kind"] != "client" or s["kind"] != "tech" or s["role"] != "admin":   # no longer allowed
                 self.db.run("UPDATE sessions SET as_user_id = NULL WHERE id_hash = ?", (token_hash(sid),))
             else:
                 s = {**s, "real_email": s["email"], "real_role": s["role"], "real_kind": s["kind"], "viewing_as": True,

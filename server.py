@@ -131,7 +131,8 @@ topo_cache: dict = {}                  # device id -> (read at, raw tables) for 
 geo_lock = threading.Lock()
 geo_last = [0.0]
 adopt_limit = RateLimiter(30, 300)     # per IP
-notes_limit = RateLimiter(60, 300)     # release-note lookups per technician (each may fetch from MikroTik)
+notes_limit = RateLimiter(60, 300)
+router_act_limit = RateLimiter(20, 300)   # VPN reconnects / re-reads per person (each one works a router)     # release-note lookups per technician (each may fetch from MikroTik)
 pending_logins: dict = {}              # ticket -> {user_id, created, enroll_secret}
 pending_lock = threading.Lock()
 
@@ -512,6 +513,10 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, column="s.org_id")
             out = {"sites": unifi.sites(where, args), "running": unifi.state["running"],
                    "configured": bool(db.one("SELECT 1 FROM net_accounts"))}
+            if s["kind"] != "tech":   # the MSP's own connection names / consoles are its business
+                for x in out["sites"]:
+                    if not x["own_account"]:
+                        x["account"] = "Managed by your IT provider"
             if s["kind"] == "tech":
                 out["accounts"] = [{k: a[k] for k in ("id", "kind", "name", "org", "last", "sites")} for a in unifi.accounts()]
                 out["orgs"] = db.q("SELECT id, name FROM orgs WHERE active=1 ORDER BY name")
@@ -1412,6 +1417,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/vpn-reconnect", path):   # reconnect one VPN found on the router
             s = self.require_vpn(write=True)
+            if not router_act_limit.allow(s["email"]):
+                raise HttpError(429, "That's a lot of reconnects - wait a few minutes.")
             d = self.device_for(s, m.group(1))
             if d["state"] != "adopted" or not d["online"]:
                 raise HttpError(400, "The router must be online.")
@@ -1432,6 +1439,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"ok": True, "count": n, "note": "" if n else "It wasn't connected - the router keeps trying on its own."})
         if m := re.fullmatch(r"/api/vpns/(\d+)/reconnect", path):   # reconnect a TikManager VPN at one site (or every site)
             s = self.require_vpn(write=True)
+            if not router_act_limit.allow(s["email"]):
+                raise HttpError(429, "That's a lot of reconnects - wait a few minutes.")
             v = self.vpn_for(s, m.group(1))
             did = int(self.body().get("device_id") or 0)
             sites = db.q("SELECT d.* FROM vpn_sites s JOIN devices d ON d.id = s.device_id WHERE s.vpn_id=? AND s.state='applied'"
@@ -1453,6 +1462,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"ok": True, "done": done, "errors": errs})
         if path == "/api/vpn-inventory/refresh":   # re-read the VPNs on some routers (or every online one) now
             s = self.require_vpn()
+            if s["kind"] == "client" and not router_act_limit.allow(s["email"]):
+                raise HttpError(429, "The routers were just read - wait a few minutes.")
             ids = [int(x) for x in (self.body().get("device_ids") or []) if str(x).isdigit()]
             where, args = self.org_scope(s)
             rows = [self.device_for(s, i) for i in ids] if ids else db.q(f"SELECT * FROM devices WHERE state='adopted' AND online=1 AND {where}", args)

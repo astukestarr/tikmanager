@@ -490,7 +490,8 @@ of **connections**, each one of:
 - **UniFi** - an API key from **unifi.ui.com > Settings > API** (Ubiquiti's Site Manager API: read-only, it can't change
   UniFi settings), created while signed in as the account that owns or is super admin of the consoles.
 - **UISP** - the UISP server's address (`https://your-uisp-server`) and an API token from **UISP > Settings > Users > API
-  tokens** (a read-only token is enough). A UISP server with a self-signed certificate can be trusted with **Trust this
+  tokens** (a read-only token is enough). The server must be reachable on the internet - addresses on localhost, a private
+  LAN or link-local are refused. A UISP server with a self-signed certificate can be trusted with **Trust this
   server's certificate**: TikManager records its SHA-256 fingerprint and refuses the connection if it ever changes
   (verification is never simply switched off).
 

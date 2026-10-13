@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.42.1 - 2026-10-13
+
+Security review of 1.38.0 - 1.42.0 (client Winbox / VPNs, View as, VPN inventory and reconnect, UniFi / UISP). Fixed:
+- **View as showed the client's Winbox password**: an administrator viewing as a client user who had a Winbox session
+  open got that session's router password. The password now only ever goes to the person who opened the session.
+- **View as outlived the administrator role**: a session already viewing as someone kept doing so after the account
+  stopped being an administrator. It now ends as soon as the real account isn't an administrator any more.
+- **UISP connections could point at TikManager's own server or network**: the address is now resolved and refused
+  unless every address is public (no localhost, LAN, link-local or cloud metadata), checked when the connection is
+  saved and on every request, and TikManager connects to the address it checked (a second DNS answer can't redirect it).
+  Error replies are no longer echoed back.
+- **A client's own UISP / UniFi data is bounded and cleaned**: at most 20 MB per response and 2,000 sites / 10,000
+  devices per connection; every value stored as plain, length-limited text. Names that go into alerts (Teams cards,
+  ConnectWise tickets, email, webhooks) are stripped of markup and links, so a device name can't put a clickable link
+  or formatting into your Teams channel.
+- **MSP connection names hidden from client users** (they see "Managed by your IT provider").
+- **Rate limits** on VPN reconnects (everyone) and VPN re-reads (client admins): 20 per 5 minutes per person.
+
 ## 1.42.0 - 2026-10-13
 
 - **UniFi and UISP**: **Admin > Integrations > UniFi & UISP** takes any number of connections - **UniFi** (an API key from

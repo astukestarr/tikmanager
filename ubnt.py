@@ -22,6 +22,7 @@ In dev mode the key "demo" returns sample data instead of calling Ubiquiti.
 import base64
 import hashlib
 import http.client
+import ipaddress
 import json
 import random
 import re
@@ -36,6 +37,23 @@ import urllib.request
 
 UNIFI_API = "https://api.ui.com"
 SYNC_SECONDS = 600
+MAX_BODY = 20 * 1024 * 1024          # per response
+MAX_SITES, MAX_DEVICES = 2000, 10000  # per connection - a client's own server can't fill TikManager's database
+
+
+def txt(v, n=200):
+    """Text from the platform (a client's own server may send anything): a string, no control characters, bounded."""
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    return re.sub(r"[\x00-\x1f\x7f]", " ", str(v))[:n] or None
+
+
+def plain(v, n=80):
+    """A name safe for alert text (Teams cards render markdown, tickets and webhooks show it): no markup or line breaks."""
+    s = re.sub(r"(?i)[a-z][a-z0-9+.-]*://", "", txt(v, n) or "")   # no clickable links either
+    return re.sub(r"[\[\]()<>*_`#|~\\!]", " ", s).strip()
+
+
 KINDS = {"unifi": "UniFi", "uisp": "UISP"}
 
 
@@ -171,12 +189,27 @@ class UispClient:
             raise ValueError("The UISP address is https://your-uisp-server (no path).")
         return f"https://{u.hostname}{f':{u.port}' if u.port else ''}"
 
+    def public_ip(self):
+        """The address to connect to - only if every address of the host is public (no localhost, LAN, link-local or
+        cloud metadata), so a connection can't be pointed at TikManager's own server or network."""
+        try:
+            infos = socket.getaddrinfo(self.host, self.port, proto=socket.IPPROTO_TCP)
+        except OSError:
+            raise NetError(f"{self.host} can't be found (DNS).") from None
+        for info in infos:
+            if not ipaddress.ip_address(info[4][0].split("%")[0]).is_global:
+                raise NetError(f"{self.host} points to a private / local address - the UISP server must be reachable on the internet.")
+        return infos[0][4][0]
+
+    def _sock(self, ip, timeout):
+        return socket.create_connection((ip, self.port), timeout=timeout)
+
     def fingerprint(self):
         """SHA-256 of the server's certificate (to pin a self-signed one), read without trusting it."""
         ctx = ssl.create_default_context()
         ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
         try:
-            with socket.create_connection((self.host, self.port), timeout=15) as raw, ctx.wrap_socket(raw, server_hostname=self.host) as s:
+            with self._sock(self.public_ip(), 15) as raw, ctx.wrap_socket(raw, server_hostname=self.host) as s:
                 return hashlib.sha256(s.getpeercert(binary_form=True)).hexdigest()
         except OSError as e:
             raise NetError(f"Couldn't reach the UISP server: {e}") from None
@@ -189,15 +222,18 @@ class UispClient:
             ctx = ssl.create_default_context()
         conn = http.client.HTTPSConnection(self.host, self.port, timeout=timeout, context=ctx)
         try:
-            conn.connect()
+            ip = self.public_ip()   # checked once, then connected to directly (a second DNS answer can't redirect it)
+            conn.sock = ctx.wrap_socket(self._sock(ip, timeout), server_hostname=self.host)
             if self.pin and hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest() != self.pin:
                 raise NetError("The UISP server's certificate has changed since it was trusted - check it, then save the connection again to trust the new one.")
             conn.request("GET", f"/nms/api/v2.1{path}", headers={"x-auth-token": self.key, "Accept": "application/json"})
             r = conn.getresponse()
-            body = r.read(50 * 1024 * 1024)
+            body = r.read(MAX_BODY + 1)
+            if len(body) > MAX_BODY:
+                raise NetError("The UISP server sent more data than TikManager accepts.")
             if r.status >= 400:
                 hint = {401: " (check the API token)", 403: " (the token can't read this)"}.get(r.status, "")
-                raise NetError(f"HTTP {r.status}{hint}: {body[:200].decode('utf-8', 'replace')}")
+                raise NetError(f"HTTP {r.status}{hint}")   # not the body: it could be anything
             return json.loads(body or b"null")
         except ssl.SSLCertVerificationError:
             raise NetError("The UISP server's certificate isn't trusted - if it's self-signed, tick \"Trust this server's certificate\".") from None
@@ -270,7 +306,9 @@ class Ubnt:
             raise ValueError("Paste the API key." if kind == "unifi" else "Paste the UISP API token.")
         url = UispClient.check_url(url) if kind == "uisp" else None
         if kind == "uisp" and not (self.s.dev and sec["key"] == "demo"):
-            sec["pin"] = UispClient(url, sec["key"]).fingerprint() if trust_cert else None
+            uc = UispClient(url, sec["key"])
+            uc.public_ip()   # refuse localhost / LAN / link-local addresses before saving anything
+            sec["pin"] = uc.fingerprint() if trust_cert else None
         if old:
             self.db.run("UPDATE net_accounts SET kind=?, name=?, url=?, org_id=? WHERE id=?", (kind, name, url, org_id, aid))
         else:
@@ -307,7 +345,15 @@ class Ubnt:
             sites, devs = self.client(a).fetch()
             from integrations import norm
             by_name = {norm(o["name"]): o["id"] for o in self.db.q("SELECT id, name FROM orgs WHERE active=1")}
+            if len(sites) > MAX_SITES or len(devs) > MAX_DEVICES:
+                raise NetError(f"Too many sites / devices ({len(sites)} / {len(devs)}) - TikManager reads up to {MAX_SITES} / {MAX_DEVICES} per connection.")
             for s in sites:
+                for k in ("ext", "name", "internal", "console", "type"):
+                    s[k] = txt(s.get(k))
+                s["gateway_mac"] = macnorm(s.get("gateway_mac"))[:12]
+                s["stats"] = {k: (v if isinstance(v, (int, float)) and not isinstance(v, bool) else txt(v)) for k, v in (s.get("stats") or {}).items()}
+                if not s["ext"]:
+                    continue
                 key = f"{a['id']}:{s['ext']}"
                 old = self.db.one("SELECT org_id FROM net_sites WHERE id=?", (key,))
                 org = a["org_id"] or (old["org_id"] if old else by_name.get(norm(s["name"])) or by_name.get(norm(s["console"])))
@@ -319,6 +365,11 @@ class Ubnt:
                     self.db.run("""INSERT INTO net_sites (account_id, name, internal, console, gateway_mac, type, org_id, stats, seen_at, id)
                                    VALUES (?,?,?,?,?,?,?,?,?,?)""", (*vals, key))
             for d in devs:
+                for k in ("ext", "site_ext", "host", "name", "model", "ip", "status", "version", "update", "startup"):
+                    d[k] = txt(d.get(k))
+                d["mac"] = macnorm(d.get("mac"))[:12]
+                if not d["ext"]:
+                    continue
                 did = f"{a['id']}:{d['ext']}"
                 prev = self.db.one("SELECT offline_since FROM net_devices WHERE id=?", (did,))
                 off = None if online(d["status"]) else ((prev or {}).get("offline_since") or now)
@@ -401,11 +452,11 @@ class Ubnt:
         out, limit = {}, time.time() - minutes * 60
         for s in self.sites():
             if s["offline"] and s["offline_since"] and s["offline_since"] < limit:
-                names = [d["name"] for d in self.devices(s["id"]) if not online(d["status"])]
+                names = [plain(d["name"]) for d in self.devices(s["id"]) if not online(d["status"])]
                 plat = KINDS.get(s["kind"], "")
-                where = s["account"] + (f" / console {s['console']}" if s["console"] else "")
+                where = plain(s["account"]) + (f" / console {plain(s['console'])}" if s["console"] else "")
                 more = " ..." if len(names) > 20 else ""
-                out[f"net:{s['id']}"] = ("unifi", None, s["org_id"], f"{plat} {s['name']}: {s['offline']} device{'s' if s['offline'] != 1 else ''} offline",
+                out[f"net:{s['id']}"] = ("unifi", None, s["org_id"], f"{plat} {plain(s['name'])}: {s['offline']} device{'s' if s['offline'] != 1 else ''} offline",
                                          f"{where}. Offline: {', '.join(names[:20])}{more}")
         return out
 
