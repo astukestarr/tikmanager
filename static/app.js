@@ -3789,12 +3789,12 @@ let vpnTab = "managed";
 async function vpnsView() {
   $("main").innerHTML = `<div class="row"><h1>Site-to-site VPN</h1><span class="spacer"></span>
       ${canVpn() ? `<button class="btn primary" type="button" id="vpnNew">New VPN</button>` : ""}</div>
-    <div class="tabs" role="tablist">${[["managed", "Managed by TikManager"], ...(isTech() ? [["found", "Existing VPNs on routers"]] : [])].map(([k, l]) =>
+    <div class="tabs" role="tablist">${[["managed", "Managed by TikManager"], ["found", "Existing VPNs on routers"]].map(([k, l]) =>
       `<button type="button" role="tab" data-vtab="${k}" class="${k === vpnTab ? "active" : ""}">${l}</button>`).join("")}</div>
     <div id="vpnBody"></div>`;
   document.querySelectorAll("[data-vtab]").forEach((b) => b.addEventListener("click", () => { vpnTab = b.dataset.vtab; vpnsView(); }));
   $("vpnNew")?.addEventListener("click", () => go("vpn", "new"));
-  if (vpnTab === "found" && isTech()) return vpnFound();
+  if (vpnTab === "found") return vpnFound();
   const rows = await api("/api/vpns");
   $("vpnBody").innerHTML = `<p class="muted">Connect a client's sites with WireGuard: one hub with a public address, every other router dials in to it.
       The routers make their own keys; TikManager backs each one up before changing anything.</p>

@@ -472,7 +472,9 @@ traffic (a srcnat rule without an out-interface), restrict that rule to the WAN 
 their policies, L2TP/SSTP/OpenVPN/PPTP clients and servers (with who is connected), EoIP/GRE/IPIP tunnels - read every
 15 minutes or on demand, read-only. Only names, addresses, subnets, status and traffic are read (a field whitelist: no
 passwords, pre-shared keys or private keys). A remote end that is another TikManager router's WAN/public IP is shown as
-that router; PPTP and IPsec without phase 2 are flagged. The same list appears on each router's page.
+that router; PPTP and IPsec without phase 2 are flagged. The same list appears on each router's page. Client admins
+with site-to-site VPNs turned on see this tab too, for their own routers only (remote ends are matched only against
+their own routers, so other clients' routers are never named).
 
 ## Tasks (scripts, groups, schedules, automatic firmware updates)
 

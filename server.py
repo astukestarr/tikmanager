@@ -537,10 +537,12 @@ class Handler(BaseHTTPRequestHandler):
                 o["suggest"] = m["id"] if m else None
             errors = db.q("SELECT d.name, d.itg_error FROM devices d WHERE d.itg_error IS NOT NULL LIMIT 20")
             return self.json({**lk, "clients": orgs, "errors": errors})
-        if path == "/api/vpn-inventory":   # VPNs found on the routers (configured outside TikManager)
-            self.require(tech=True)
-            routers = db.q("""SELECT d.id, d.org_id, o.name AS org, d.name, d.online, d.wan_ip, d.public_ip, d.vpn_inv, d.vpn_inv_at
-                              FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' ORDER BY o.name, d.name""")
+        if path == "/api/vpn-inventory":   # VPNs found on the routers (configured outside TikManager); a client admin: their own
+            s = self.require_vpn()
+            where, args = self.org_scope(s, column="d.org_id")
+            # remote ends are matched only against routers this person may see, so a client never learns other clients' routers
+            routers = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.online, d.wan_ip, d.public_ip, d.vpn_inv, d.vpn_inv_at
+                              FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
             out = []
             for r in routers:
                 t = vpninv.for_device(r, routers)
@@ -1335,9 +1337,10 @@ class Handler(BaseHTTPRequestHandler):
                 db.audit(s["email"], "IT Glue sync started", ip=self.client_ip())
             return self.json({"ok": True})
         if path == "/api/vpn-inventory/refresh":   # re-read the VPNs on some routers (or every online one) now
-            s = self.require(tech=True)
+            s = self.require_vpn()
             ids = [int(x) for x in (self.body().get("device_ids") or []) if str(x).isdigit()]
-            rows = [self.device_for(s, i) for i in ids] if ids else db.q("SELECT * FROM devices WHERE state='adopted' AND online=1")
+            where, args = self.org_scope(s)
+            rows = [self.device_for(s, i) for i in ids] if ids else db.q(f"SELECT * FROM devices WHERE state='adopted' AND online=1 AND {where}", args)
             if len(rows) <= 2:
                 return self.json({"ok": True, "done": sum(1 for d in rows if poller.collect_vpns(d))})
             threading.Thread(target=lambda: [poller.collect_vpns(d) for d in rows], daemon=True, name="vpn-inventory").start()

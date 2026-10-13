@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.40.0 - 2026-10-13
+
+- **Existing VPNs on routers for client admins**: client admins with site-to-site VPNs turned on now also get the
+  **Existing VPNs on routers** tab (VPNs set up outside TikManager - WireGuard, IPsec, L2TP / SSTP / OpenVPN / PPTP,
+  EoIP / GRE / IPIP) and **Read routers again**, for their own routers only. A tunnel's remote end is matched only
+  against their own routers, so another client's router is never named; asking to re-read another client's router
+  returns "not found". Nothing new is read from routers (still no passwords or keys).
+
 ## 1.39.0 - 2026-10-13
 
 - **View as** for administrators: **Users > View as** next to a client user shows TikManager exactly as they see it -
