@@ -497,7 +497,8 @@ of **connections**, each one of:
 
 Each connection either belongs to **your MSP account** - its sites are matched to clients automatically, first by
 **public IP** (a site whose public address is the WAN / public IP of one of a client's routers belongs to that client;
-UniFi: the site's WAN address, or the console's when it runs just that site; UISP: the public address of a device at the
+UniFi: the site's WAN address, or the console's - also for a console at the customer running several of their sites, such
+as a Cloud Key with no UniFi gateway, but never a hosted network server's; UISP: the public address of a device at the
 site), then by name - or to **one client** (their own UniFi account or UISP server): everything in it belongs to that
 client. On **Devices > UniFi / UISP** each site shows its public IP and why it has its client; choosing a client by hand
 sticks (syncs never change it) until you pick **Match automatically** again. Connections are read every 10 minutes (or **Sync now**); keys and

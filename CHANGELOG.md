@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.1 - 2026-10-13
+
+- **Public-IP site matching for multi-site consoles at the customer**: a UniFi console on the customer's network that runs
+  several of their sites (e.g. a Cloud Key with no UniFi gateway, so the sites report no WAN address) is matched by the
+  console's own public IP - shown as "Console's public IP ... = router ...". Not for hosted / self-hosted network servers
+  or consoles with more than 10 sites, whose address is the MSP's or Ubiquiti's, not the customer's.
+
 ## 1.43.0 - 2026-10-13
 
 - **UniFi / UISP on the network map**: devices the router sees that a UniFi / UISP connection knows (matched by MAC) get a

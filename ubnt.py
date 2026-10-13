@@ -193,9 +193,15 @@ class UnifiClient:
         for s in sites:
             per_host.setdefault(s["host"], []).append(s)
         host_ip = {h.get("id"): public(h.get("ipAddress")) for h in hosts}
-        for s in sites:   # a console with one site: its own public address is that site's (a hosted multi-site server's isn't)
-            if not s["wan_ips"] and len(per_host.get(s["host"], [])) == 1 and host_ip.get(s["host"]):
+        host_type = {h.get("id"): str(h.get("type") or "") for h in hosts}
+        for s in sites:
+            n = len(per_host.get(s["host"], []))
+            if not s["wan_ips"] and n == 1 and host_ip.get(s["host"]):   # its console runs only this site: the console's address is the site's
                 s["wan_ips"] = [host_ip[s["host"]]]
+            # a console on the customer's LAN running several of their sites (e.g. a Cloud Key with no UniFi gateway): its
+            # public address is still theirs - but not a hosted / self-hosted network server's (that's the MSP's address)
+            elif n > 1 and n <= 10 and host_ip.get(s["host"]) and not re.search(r"server|host", host_type.get(s["host"], ""), re.I):
+                s["console_ip"] = host_ip[s["host"]]
         devices = []
         for g in groups:
             hs = per_host.get(g.get("hostId"), [])
@@ -419,14 +425,18 @@ class Ubnt:
                 ips = [ip for ip in (s.get("wan_ips") or []) if public(ip)][:5]
                 wan = ips[0] if ips else None
                 old = self.db.one("SELECT org_id, org_manual, matched FROM net_sites WHERE id=?", (key,))
-                ipm = next(((by_ip[ip], ip) for ip in ips if ip in by_ip), None)
+                ipm = next(((by_ip[ip], ip, "Public IP") for ip in ips if ip in by_ip), None)
+                cip = public(s.get("console_ip"))
+                if not ipm and cip and cip in by_ip:   # weaker: the console's address (several sites on one console at the customer)
+                    ipm = (by_ip[cip], cip, "Console's public IP")
+                wan = wan or cip
                 if a["org_id"]:
                     org, why, manual = a["org_id"], "the client's own connection", 0
                 elif old and old["org_manual"]:
                     org, why, manual = old["org_id"], old["matched"], 1
                 elif ipm:   # the strongest evidence: same public address as one of the client's routers
-                    (org, router), ip = ipm
-                    why, manual = f"Public IP {ip} = router {router}", 0
+                    (org, router), ip, how = ipm
+                    why, manual = f"{how} {ip} = router {router}", 0
                 elif old and old["org_id"]:
                     org, why, manual = old["org_id"], old["matched"] or "name", 0
                 else:
