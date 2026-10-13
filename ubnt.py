@@ -207,9 +207,12 @@ class UnifiClient:
             hs = per_host.get(g.get("hostId"), [])
             cmap = self._connector_map(g.get("hostId"), hs) if len(hs) > 1 and not self.demo else {}
             gw = {s["gateway_mac"]: s["ext"] for s in hs if s["gateway_mac"]}
+            # by elimination: when only one of the console's sites reports any devices, the ones left over are that site's
+            with_devs = [s for s in hs if (s["stats"].get("total") or 0) > 0]
+            only = with_devs[0]["ext"] if len(hs) > 1 and len(with_devs) == 1 else None
             for d in g.get("devices") or []:
                 m = macnorm(d.get("mac"))
-                devices.append({"ext": str(d.get("id") or m), "site_ext": hs[0]["ext"] if len(hs) == 1 else cmap.get(m) or gw.get(m),
+                devices.append({"ext": str(d.get("id") or m), "site_ext": hs[0]["ext"] if len(hs) == 1 else cmap.get(m) or gw.get(m) or only,
                                 "host": hname.get(g.get("hostId")) or g.get("hostId"), "mac": m, "name": d.get("name") or d.get("model") or m,
                                 "model": d.get("model") or d.get("shortname"), "ip": d.get("ip"), "status": d.get("status"), "version": d.get("version"),
                                 "update": d.get("updateAvailable") or None, "is_console": bool(d.get("isConsole")), "startup": d.get("startupTime")})
@@ -535,6 +538,13 @@ class Ubnt:
         rows = self.db.q("""SELECT d.mac, d.name, d.model, d.ip, d.status, d.version, d.update_available, d.is_console, s.id AS site_id, s.name AS site,
                             a.kind FROM net_devices d JOIN net_sites s ON s.id = d.site_key JOIN net_accounts a ON a.id = d.account_id
                             WHERE s.org_id = ? AND d.mac IS NOT NULL AND d.mac != ''""", (org_id,))
+        # devices a multi-site console couldn't place on a site: still this client's when every site of that console is theirs
+        rows += self.db.q("""SELECT d.mac, d.name, d.model, d.ip, d.status, d.version, d.update_available, d.is_console, NULL AS site_id,
+                             d.host AS site, a.kind FROM net_devices d JOIN net_accounts a ON a.id = d.account_id
+                             WHERE d.site_key IS NULL AND d.mac IS NOT NULL AND d.mac != '' AND d.host IS NOT NULL
+                               AND EXISTS (SELECT 1 FROM net_sites s WHERE s.account_id = d.account_id AND s.console = d.host AND s.org_id = ?)
+                               AND NOT EXISTS (SELECT 1 FROM net_sites s WHERE s.account_id = d.account_id AND s.console = d.host
+                                               AND (s.org_id IS NULL OR s.org_id != ?))""", (org_id, org_id))
         return {r["mac"]: {"source": KINDS.get(r["kind"], r["kind"]), "platform": KINDS.get(r["kind"], r["kind"]), "name": r["name"], "model": r["model"],
                            "ip": r["ip"], "status": "online" if online(r["status"]) else (r["status"] or "offline"), "version": r["version"],
                            "update": r["update_available"], "console": bool(r["is_console"]), "site": r["site"], "site_id": r["site_id"]} for r in rows}

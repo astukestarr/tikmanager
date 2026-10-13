@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.2 - 2026-10-13
+
+- **UniFi devices on multi-site consoles**: when only one of a console's sites reports any devices, the devices Ubiquiti's
+  API doesn't place are that site's (e.g. a Cloud Key with a main site and an empty second one) - they now show on the
+  site and on the network map instead of under "not matched to a site".
+- **Network map**: devices of a multi-site console that still can't be placed on a site are used for the router's client
+  when every site of that console belongs to that client - so they're badged UniFi / listed, not just "Ubiquiti".
+
 ## 1.43.1 - 2026-10-13
 
 - **Public-IP site matching for multi-site consoles at the customer**: a UniFi console on the customer's network that runs
