@@ -45,6 +45,16 @@ DC:9F:DB E0:63:DA E4:38:83 F0:9F:C2 F4:92:BF F4:E2:C6 FC:EC:DA""".split())
 UBNT_TEXT = re.compile(r"unifi|ubnt|ubiquiti|\bus(w|g|-)|\buap|\bu6|\bu7|\budm|\bucg|\buxg|edgerouter|edgeswitch|airmax|airos|litebeam|nanobeam|powerbeam|rocket", re.I)
 
 
+MAX_BRIDGE = 3000   # bridge host entries shown on one map (a big flat network can have tens of thousands)
+SWITCH_RX = re.compile(r"\b(us|usw|switch|edgeswitch|es|flex|aggregation|enterprise|pro\s?\d+\s?(poe)?)\b|^us[\s-]?\d|^usw|^es-", re.I)
+
+
+def _ports(k):
+    """A UniFi / UISP switch's port count from its model ("US 48 PoE 750W" -> 48) - the biggest one is the core switch."""
+    m = re.search(r"(\d{1,2})(?!\d)", str(k.get("model") or ""))
+    return int(m.group(1)) if m else 0
+
+
 def _mac12(m):
     return re.sub(r"[^0-9a-f]", "", str(m or "").lower())[:12]
 
@@ -136,8 +146,10 @@ def build(raw, device, full=True, known=None):
                 return n
         return next((n for n in networks if iface and n["interface"] == iface), None)
 
-    # devices: ARP + DHCP leases, joined on MAC; the bridge host table says which port each MAC is on
-    port_of = {str(h.get("mac-address") or "").upper(): _port(h.get("on-interface")) for h in raw.get("hosts") or [] if h.get("local") != "true"}
+    # devices: ARP + DHCP leases, joined on MAC; the bridge host table says which port each MAC is on - and devices that are
+    # only in the bridge host table (no IP the router knows: on another VLAN, a management network, idle) are shown too
+    hosts = [h for h in raw.get("hosts") or [] if h.get("local") != "true"]
+    port_of = {str(h.get("mac-address") or "").upper(): _port(h.get("on-interface")) for h in hosts}
     devices = {}
     for a in raw.get("arp") or []:
         mac = str(a.get("mac-address") or "").upper()
@@ -150,6 +162,11 @@ def build(raw, device, full=True, known=None):
         d = devices.setdefault(mac, {"mac": mac, "ip": l.get("address") or "", "name": "", "iface": l.get("interface") or ""})
         d["name"] = l.get("host") or l.get("comment") or d["name"]
         d["ip"] = d["ip"] or l.get("address") or ""
+    for h in hosts[:MAX_BRIDGE]:
+        mac = str(h.get("mac-address") or "").upper()
+        if mac and mac not in devices:
+            vif = vlan_by.get((h.get("bridge"), str(h.get("vid")))) if h.get("vid") else None
+            devices[mac] = {"mac": mac, "ip": "", "name": "", "iface": vif or h.get("bridge") or "", "bridge_only": True}
 
     # switches / access points / routers next door (neighbour discovery), placed on their network and port
     other = {"name": "Other", "interface": "", "network": "", "gateway": "", "vlan": None, "infra": [], "groups": {}}
@@ -168,31 +185,37 @@ def build(raw, device, full=True, known=None):
         if port and port != (n or {}).get("interface"):
             infra_by_port.setdefault(port, node)
 
+    # the switch behind each router port: a UniFi / UISP switch the router sees on that port (by MAC, from the bridge table)
+    # is what the port really connects to - it becomes the port's switch on the map and everything behind the port hangs
+    # under it (it wins over another neighbour heard on the same port, e.g. a device that only speaks LLDP)
+    sw_by_port = {}
+    for mac, d in devices.items():
+        k = known.get(_mac12(mac))
+        port = port_of.get(mac, "")
+        if k and port and SWITCH_RX.search(f"{k.get('model') or ''} {k.get('name') or ''}"):
+            best = sw_by_port.get(port)
+            if not best or _ports(k) > _ports(known[_mac12(best)]):
+                sw_by_port[port] = mac
+    for port, mac in sw_by_port.items():
+        d, k = devices.pop(mac), known[_mac12(mac)]
+        node = {"name": k.get("name") or mac, "ip": d.get("ip") or k.get("ip") or "", "mac": mac, "platform": k.get("source") or "",
+                "model": k.get("model") or "", "version": k.get("version") or "", "port": port, "via": f"{k.get('source')} (bridge table)",
+                "groups": {}, "ubnt": k, "uplink": True}
+        seen.add(_mac12(mac))
+        n = network_for(node["ip"], d.get("iface") or "") or other
+        n["infra"].append(node)
+        infra_by_port[port] = node
+
     for d in devices.values():
         tag = ubnt_tag(d["mac"], d["name"], known)
         kind = "network" if tag and tag.get("source") else kind_of(d["mac"], d["name"])
-        entry = {"name": d["name"] or (tag or {}).get("name") or d["ip"] or d["mac"], "ip": d["ip"], "mac": d["mac"], "port": port_of.get(d["mac"], ""),
-                 "ubnt": tag}
+        entry = {"name": d["name"] or (tag or {}).get("name") or d["ip"] or d["mac"], "ip": d["ip"] or (tag or {}).get("ip") or "", "mac": d["mac"],
+                 "port": port_of.get(d["mac"], ""), "ubnt": tag, "bridge_only": bool(d.get("bridge_only"))}
         seen.add(_mac12(d["mac"]))
         target = infra_by_port.get(entry["port"])   # behind a switch / AP on the same router port
         if target is None:
-            target = network_for(d["ip"], d["iface"]) or other
+            target = network_for(entry["ip"], d["iface"]) or other
         target["groups"].setdefault(kind, []).append(entry)
-
-    # UniFi / UISP devices the router only sees in its bridge host table (no IP in ARP / DHCP - e.g. switches and APs on a
-    # management VLAN): they're at this location, so they go on the map at their port. Devices of the client's other
-    # locations aren't in this router's tables and aren't shown.
-    for h in raw.get("hosts") or []:
-        mac = str(h.get("mac-address") or "").upper()
-        if h.get("local") == "true" or _mac12(mac) in seen or _mac12(mac) not in known:
-            continue
-        k = known[_mac12(mac)]
-        seen.add(_mac12(mac))
-        port = _port(h.get("on-interface"))
-        entry = {"name": k.get("name") or mac, "ip": k.get("ip") or "", "mac": mac, "port": port, "ubnt": k, "bridge_only": True}
-        vif = vlan_by.get((h.get("bridge"), str(h.get("vid")))) if h.get("vid") else None
-        target = infra_by_port.get(port) or network_for(k.get("ip") or "", vif or h.get("bridge") or "") or other
-        target["groups"].setdefault("network", []).append(entry)
 
     def groups(g):
         return [{"kind": k, "label": LABELS[k], "count": len(g[k]), "devices": sorted(g[k], key=lambda x: _ip(x["ip"]) or ipaddress.ip_address("255.255.255.255"))}

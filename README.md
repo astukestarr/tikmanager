@@ -512,7 +512,9 @@ Key network server) doesn't tell the cloud API which site each device is on: Tik
 Ubiquiti's cloud connector where it can and matches gateways by MAC; devices it still can't place are listed for
 technicians only. On a router's **network map**, UniFi / UISP devices the router sees are badged **UniFi** / **UISP** (matched
 by MAC: name, model, status, firmware update and site) - including devices that are only in the router's bridge host table
-(no IP, e.g. on a management VLAN), placed at their port - and other Ubiquiti gear **Ubiquiti**. Only devices at that
+(no IP, e.g. on a management VLAN), placed at their port - and other Ubiquiti gear **Ubiquiti**. When a UniFi / UISP
+switch is behind a router port, it's shown as that port's switch and everything behind the port hangs under it; every
+device in the router's bridge host table is shown (not only those with an IP in ARP / DHCP). Only devices at that
 router's location (in its tables) are shown, not the client's other locations. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
 minutes by default.
 

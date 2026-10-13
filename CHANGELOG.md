@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.5 - 2026-10-13
+
+- **Network map: the switch behind each port, and every device**: when a UniFi / UISP switch is in the router's bridge table
+  on a port, it's shown as that port's switch (e.g. "sfp-sfpplus1 -> Downstairs Spearville, US 48 PoE 750W" - the biggest
+  one if there are several) and everything behind the port hangs under it, instead of under whatever other neighbour was
+  heard on that port first. Devices that are only in the bridge host table (no IP in ARP / DHCP - other VLANs, idle
+  devices) are now shown too, recognised by maker like the rest (up to 3,000 per map).
+
 ## 1.43.4 - 2026-10-13
 
 - **UniFi / UISP devices drawn on the network map**: each recognised device is shown by name under the switch / network
