@@ -196,13 +196,26 @@ class UispClient:
             infos = socket.getaddrinfo(self.host, self.port, proto=socket.IPPROTO_TCP)
         except OSError:
             raise NetError(f"{self.host} can't be found (DNS).") from None
+        ips = []
         for info in infos:
-            if not ipaddress.ip_address(info[4][0].split("%")[0]).is_global:
+            ip = info[4][0].split("%")[0]
+            if not ipaddress.ip_address(ip).is_global:
                 raise NetError(f"{self.host} points to a private / local address - the UISP server must be reachable on the internet.")
-        return infos[0][4][0]
+            if ip not in ips:
+                ips.append(ip)
+        return sorted(ips, key=lambda ip: ":" in ip)   # IPv4 first: many servers have no working IPv6 route
 
-    def _sock(self, ip, timeout):
-        return socket.create_connection((ip, self.port), timeout=timeout)
+    def _sock(self, ips, timeout):
+        """Connect to the first of the checked addresses that answers; say which ones didn't."""
+        tried = []
+        for ip in ips:
+            try:
+                return socket.create_connection((ip, self.port), timeout=min(timeout, 12))
+            except OSError as e:
+                tried.append(f"{ip}:{self.port} ({'timed out' if isinstance(e, TimeoutError) or 'timed out' in str(e) else e})")
+        raise NetError(f"Couldn't reach the UISP server {self.host}: {'; '.join(tried)}. If {self.host} works in a browser, TikManager's server can't "
+                       "reach that address - check its outbound firewall, any allowlist in front of UISP, or (if UISP is on the same network as "
+                       "TikManager) hairpin NAT.")
 
     def fingerprint(self):
         """SHA-256 of the server's certificate (to pin a self-signed one), read without trusting it."""

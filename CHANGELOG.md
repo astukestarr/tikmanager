@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.42.2 - 2026-10-13
+
+- **UISP connections**: every address of the UISP server is tried (IPv4 first) instead of only the first one DNS returns -
+  a server with an IPv6 address but no working IPv6 route used to time out. When none answers, the error names each
+  address and port tried and what to check (TikManager's outbound firewall, an allowlist in front of UISP, hairpin NAT).
+
 ## 1.42.1 - 2026-10-13
 
 Security review of 1.38.0 - 1.42.0 (client Winbox / VPNs, View as, VPN inventory and reconnect, UniFi / UISP). Fixed:
