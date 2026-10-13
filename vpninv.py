@@ -8,6 +8,14 @@ and link() points each tunnel's remote address at the TikManager router that own
 """
 import json
 
+# what "Reconnect" may touch: only these menus, only an entry the inventory saw (routeros.RouterOS.tunnel_reconnect)
+RECONNECT_MENUS = {"/interface/wireguard/peers", "/ip/ipsec/active-peers", "/interface/l2tp-client", "/interface/sstp-client",
+                   "/interface/ovpn-client", "/interface/pptp-client", "/interface/eoip", "/interface/gre", "/interface/ipip"}
+
+
+def rid(menu, match):
+    return json.dumps({"menu": menu, "match": match}, sort_keys=True)
+
 from routeros import VPN_IFACE, _dur_s
 
 OWN = {"tikmanager", VPN_IFACE}
@@ -55,7 +63,8 @@ def normalize(raw):
                     "remote": host(p.get("endpoint-address") or p.get("current-endpoint-address")),
                     "status": state, "since": f"handshake {age}s ago" if age is not None else "never connected",
                     "networks": nets, "rx": int(p.get("rx") or 0), "tx": int(p.get("tx") or 0),
-                    "notes": "" if p.get("endpoint-address") else "remote end connects in", "iface": iface})
+                    "notes": "" if p.get("endpoint-address") else "remote end connects in", "iface": iface,
+                    "rid": rid("/interface/wireguard/peers", {"interface": iface, "allowed-address": p.get("allowed-address") or ""})})
 
     # IPsec: one row per peer, with its policies (the subnets it carries) and whether phase 1/2 are up
     active = {host(a.get("remote-address")): a for a in raw.get("/ip/ipsec/active-peers", [])}
@@ -81,7 +90,8 @@ def normalize(raw):
         out.append({"kind": "IPsec", "name": peer.get("name") or remote, "remote": "" if remote in ("0.0.0.0", "::") else remote,
                     "status": state, "since": f"up {a.get('uptime')}" if a and a.get("uptime") else "",
                     "networks": [f"{p.get('src-address')} ↔ {p.get('dst-address')}" for p in pol],
-                    "rx": int((a or {}).get("rx-bytes") or 0), "tx": int((a or {}).get("tx-bytes") or 0), "notes": "; ".join(notes)})
+                    "rx": int((a or {}).get("rx-bytes") or 0), "tx": int((a or {}).get("tx-bytes") or 0), "notes": "; ".join(notes),
+                    "rid": rid("/ip/ipsec/active-peers", {"remote": remote}) if remote not in ("0.0.0.0", "::", "") else None})
 
     # dial-out clients and plain tunnels
     for menu, kind in {**CLIENTS, **TUNNELS}.items():
@@ -95,7 +105,8 @@ def normalize(raw):
             if yes(c.get("use-ipsec")) or c.get("use-ipsec") == "required":
                 notes.append("with IPsec")
             out.append({"kind": kind, "name": c.get("name"), "remote": host(c.get("connect-to") or c.get("remote-address")), "status": state,
-                        "since": "", "networks": via(c.get("name")), "rx": 0, "tx": 0, "notes": "; ".join(notes)})
+                        "since": "", "networks": via(c.get("name")), "rx": 0, "tx": 0, "notes": "; ".join(notes),
+                        "rid": rid(menu, {"name": c.get("name")})})
 
     # remote-access servers, with who is connected right now (names and addresses only)
     ppp = raw.get("/ppp/active", [])

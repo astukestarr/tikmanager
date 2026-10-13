@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.41.0 - 2026-10-13
+
+- **Reconnect a VPN tunnel**: a **Reconnect** button on every existing VPN (the Existing VPNs tab and the router's
+  "VPNs on this router") and on every site of a TikManager VPN. IPsec drops its active peer so it renegotiates straight
+  away; WireGuard peers, L2TP / SSTP / OpenVPN / PPTP clients and EoIP / GRE / IPIP tunnels are switched off and back on
+  (only ones that are switched on); a TikManager VPN reconnects its WireGuard peers at that site. It asks first (the
+  tunnel drops for a few seconds) and re-reads the router about 15 seconds later.
+  - Only a tunnel the router's inventory found can be reconnected - the server looks the request up there, so a request
+    can't switch anything else on the router - and never TikManager's own management tunnel.
+  - Technicians with write access, and client admins with site-to-site VPNs turned on (their own routers only).
+    Audit-logged and recorded in the router's events.
+- Client admins with site-to-site VPNs turned on also see **VPNs on this router** on their routers' pages (remote ends
+  matched only against their own routers).
+
 ## 1.40.0 - 2026-10-13
 
 - **Existing VPNs on routers for client admins**: client admins with site-to-site VPNs turned on now also get the

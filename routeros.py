@@ -443,6 +443,37 @@ class RouterOS:
             raise RouterError("The router didn't report the VPN interface's public key.")
         return key
 
+    def tunnel_reconnect(self, menu, match):
+        """Reconnect one VPN: IPsec drops its active peer (it renegotiates straight away); WireGuard peers, dial-out clients and
+        EoIP / GRE / IPIP are switched off and on. Only entries that are currently enabled are touched. Returns how many."""
+        if menu == "/ip/ipsec/active-peers":
+            n = 0
+            for a in self.get(menu) or []:
+                if str(a.get("remote-address") or "").split("/")[0].split(":")[0] == match.get("remote"):
+                    self._req("DELETE", f"{menu}/{a['.id']}")
+                    n += 1
+            return n
+        rows = [r for r in self.get(menu) or [] if all(str(r.get(k, "")) == str(v) for k, v in match.items())
+                and str(r.get("disabled")) != "true" and r.get("comment") != VPN_TAG]
+        if not rows:
+            raise RouterError("That VPN isn't on the router any more (or it's switched off).")
+        for r in rows:
+            self._req("PATCH", f"{menu}/{r['.id']}", {"disabled": "true"})
+        time.sleep(2)
+        for r in rows:
+            self._req("PATCH", f"{menu}/{r['.id']}", {"disabled": "false"})
+        return len(rows)
+
+    def vpn_reconnect(self):
+        """Reconnect TikManager's site-to-site VPN on this router: its peers (tagged VPN_TAG) off and on - a fresh handshake."""
+        rows = [r for r in self.get(f"/interface/wireguard/peers?comment={urllib.parse.quote(VPN_TAG)}") or [] if str(r.get("disabled")) != "true"]
+        for r in rows:
+            self._req("PATCH", f"/interface/wireguard/peers/{r['.id']}", {"disabled": "true"})
+        time.sleep(2)
+        for r in rows:
+            self._req("PATCH", f"/interface/wireguard/peers/{r['.id']}", {"disabled": "false"})
+        return len(rows)
+
     def vpn_clear(self, name, remove_interface=False):
         """Remove every peer, route, address and firewall rule TikManager added for the VPN (and optionally the interface)."""
         tag = urllib.parse.quote(VPN_TAG)
@@ -963,6 +994,14 @@ class SimRouter:
 
     def vpn_clear(self, name, remove_interface=False):
         self._sim().pop("vpn_cfg", None)
+
+    def tunnel_reconnect(self, menu, match):
+        time.sleep(0.5)
+        return 1
+
+    def vpn_reconnect(self):
+        time.sleep(0.5)
+        return len((self._sim().get("vpn_cfg") or {}).get("peers", []))
 
     def vpn_apply(self, name, cfg):
         time.sleep(0.5)

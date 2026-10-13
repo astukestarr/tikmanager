@@ -822,9 +822,10 @@ class Handler(BaseHTTPRequestHandler):
             d["vpn"] = db.one("""SELECT v.id, v.name, v.status, s.state, s.tunnel_ip, s.handshake_age, s.ping_ms,
                                  CASE WHEN v.hub_device_id = s.device_id THEN 'hub' ELSE 'spoke' END AS role
                                  FROM vpn_sites s JOIN vpns v ON v.id = s.vpn_id WHERE s.device_id=?""", (d["id"],)) if s["kind"] == "tech" else None
-            if s["kind"] == "tech":
-                d["vpn_found"] = vpninv.for_device(d, db.q("""SELECT d.id, d.name, d.wan_ip, d.public_ip, o.name AS org FROM devices d
-                                                              LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted'"""))
+            if s["kind"] == "tech" or self.client_access(s)[1]:   # remote ends are matched only against routers this person may see
+                where, args = self.org_scope(s, column="d.org_id")
+                d["vpn_found"] = vpninv.for_device(d, db.q(f"""SELECT d.id, d.name, d.wan_ip, d.public_ip, o.name AS org FROM devices d
+                                                              LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where}""", args))
             d.pop("vpn_inv", None)
             d["last_upgrade"] = db.one("""SELECT status, detail, finished_at FROM upgrades WHERE device_id=? AND status IN ('done','failed')
                                           ORDER BY finished_at DESC LIMIT 1""", (d["id"],))
@@ -1336,6 +1337,47 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=integ.itg_sync, args=(settings.public_url,), daemon=True, name="itg-sync").start()
                 db.audit(s["email"], "IT Glue sync started", ip=self.client_ip())
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/vpn-reconnect", path):   # reconnect one VPN found on the router
+            s = self.require_vpn(write=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router must be online.")
+            want = str(self.body().get("rid") or "")
+            t = next((t for t in vpninv.normalize(json.loads(d.get("vpn_inv") or "null") or {}) if t.get("rid") == want), None)
+            if not t:   # only something the inventory saw on this router - a request can't toggle anything else
+                raise HttpError(400, "That VPN isn't in this router's list - read the routers again.")
+            ref = json.loads(t["rid"])
+            if ref["menu"] not in vpninv.RECONNECT_MENUS:
+                raise HttpError(400, "That kind of VPN can't be reconnected from here.")
+            try:
+                n = poller.client(d).tunnel_reconnect(ref["menu"], ref["match"])
+            except RouterError as e:
+                raise HttpError(502, f"The router didn't do it: {e}") from None
+            db.audit(s["email"], "vpn reconnected", d["name"], self.client_ip(), org_id=d["org_id"], detail=f"{t['kind']} {t['name']}")
+            db.event(d["id"], d["org_id"], "vpn", f"{t['kind']} \"{t['name']}\" reconnected by {s['email']}")
+            threading.Timer(15, lambda: poller.collect_vpns(d)).start()   # re-read once it has had time to come back
+            return self.json({"ok": True, "count": n, "note": "" if n else "It wasn't connected - the router keeps trying on its own."})
+        if m := re.fullmatch(r"/api/vpns/(\d+)/reconnect", path):   # reconnect a TikManager VPN at one site (or every site)
+            s = self.require_vpn(write=True)
+            v = self.vpn_for(s, m.group(1))
+            did = int(self.body().get("device_id") or 0)
+            sites = db.q("SELECT d.* FROM vpn_sites s JOIN devices d ON d.id = s.device_id WHERE s.vpn_id=? AND s.state='applied'"
+                         + (" AND d.id=?" if did else ""), (v["id"], did) if did else (v["id"],))
+            if not sites:
+                raise HttpError(400, "Nothing to reconnect - the VPN isn't applied at that site.")
+            done, errs = [], []
+            for d in sites:
+                try:
+                    if not d["online"]:
+                        raise RouterError("offline")
+                    poller.client(d).vpn_reconnect()
+                    done.append(d["name"])
+                except RouterError as e:
+                    errs.append(f"{d['name']}: {e}")
+            db.audit(s["email"], "vpn reconnected", v["name"], self.client_ip(), org_id=v["org_id"], detail=", ".join(done) + (f"; failed: {'; '.join(errs)}" if errs else ""))
+            if not done:
+                raise HttpError(502, "; ".join(errs))
+            return self.json({"ok": True, "done": done, "errors": errs})
         if path == "/api/vpn-inventory/refresh":   # re-read the VPNs on some routers (or every online one) now
             s = self.require_vpn()
             ids = [int(x) for x in (self.body().get("device_ids") or []) if str(x).isdigit()]

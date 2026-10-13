@@ -426,7 +426,7 @@ async function router(id) {
         <input id="dhcpQ" type="search" placeholder="Search name, IP, MAC" aria-label="Search DHCP clients">
         <button class="btn" type="button" id="dhcpRefresh">Refresh</button></div><div id="dhcpBody"><p class="muted small">Reading leases...</p></div></div>` : ""}
       ${d.vpn_found && d.vpn_found.length ? `<div class="card"><div class="row"><h2>VPNs on this router</h2><span class="spacer"></span><span class="small muted">read ${ago(d.vpn_inv_at)}</span></div>
-        <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th></tr></thead>
+        <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th><th></th></tr></thead>
         <tbody>${tunnelRows(d.vpn_found.map((t) => ({ r: d, t })), false)}</tbody></table></div></div>` : ""}
       ${d.online ? `<div class="card" id="topoCard"><h2>Network map</h2><p class="muted small">Reading the router's routes, neighbours and devices...</p></div>` : ""}` : ""}
       ${adopted && tab === "wireless" ? (d.online ? `<div class="card" id="wlCard"><div class="row"><h2>Wireless</h2><span class="spacer"></span>
@@ -3749,8 +3749,20 @@ function tunnelRows(list, showRouter) {
     <td class="mono small">${(t.networks || []).slice(0, 6).map(esc).join("<br>")}${(t.networks || []).length > 6 ? `<br>+${t.networks.length - 6} more` : ""}
       ${(t.users || []).length ? `<div class="small">${t.users.slice(0, 8).map(esc).join("<br>")}</div>` : ""}</td>
     <td class="small nowrap">${t.rx || t.tx ? `↓ ${bytes(t.rx)} ↑ ${bytes(t.tx)}` : ""}</td>
-    <td class="small ${/insecure|no phase 2/.test(t.notes || "") ? "status warn" : "muted"}">${esc(t.notes || "")}</td></tr>`).join("");
+    <td class="small ${/insecure|no phase 2/.test(t.notes || "") ? "status warn" : "muted"}">${esc(t.notes || "")}</td>
+    <td>${canVpn() && t.rid && t.status !== "disabled" && r.online ? `<button class="btn small" type="button" data-recon="${r.id}" data-rid="${esc(t.rid)}" data-rname="${esc(t.name)}">Reconnect</button>` : ""}</td></tr>`).join("");
 }
+// Reconnect one existing VPN (any list of tunnelRows): confirm, ask the router, say what happened
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-recon]");
+  if (!b) return;
+  if (!confirm(`Reconnect "${b.dataset.rname}"?\n\nThe tunnel drops for a few seconds and comes straight back. Anyone using it (including you, if you're connected through it) is briefly cut off.`)) return;
+  b.disabled = true; b.textContent = "Reconnecting...";
+  try {
+    const r = await post(`/api/devices/${b.dataset.recon}/vpn-reconnect`, { rid: b.dataset.rid });
+    b.textContent = r.note ? "Not connected" : "Reconnected"; b.title = r.note || "The list updates when the routers are read again (about 15 s).";
+  } catch (err) { b.disabled = false; b.textContent = "Reconnect"; alert(err.message); }
+});
 const foundView = { org: "", kind: "", problems: false };
 async function vpnFound() {
   const rows = await api("/api/vpn-inventory");
@@ -3765,14 +3777,14 @@ async function vpnFound() {
       <span class="spacer"></span><button class="btn" type="button" id="fRefresh">Read routers again</button></div>
     <p class="small muted" id="fMsg">${all.length} VPN connections on ${rows.length - none - unread} routers · read every 15 minutes, read-only (no passwords or keys are collected).
       ${none ? `${none} routers have no other VPNs.` : ""} ${unread ? `${unread} not read yet.` : ""} Linked names are other TikManager routers.</p>
-    <div class="table-wrap"><table><thead><tr><th>Router</th><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th></tr></thead>
+    <div class="table-wrap"><table><thead><tr><th>Router</th><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th><th></th></tr></thead>
       <tbody id="fRows"></tbody></table></div></div>`;
   if ($("fOrg")) $("fOrg").value = foundView.org;
   $("fKind").value = foundView.kind;
   const draw = () => {
     const list = all.filter(({ r, t }) => (!foundView.org || String(r.org_id) === foundView.org) && (!foundView.kind || t.kind === foundView.kind) &&
       (!foundView.problems || t.status === "down" || /insecure|no phase 2/.test(t.notes || "")));
-    $("fRows").innerHTML = tunnelRows(list, true) || `<tr><td colspan="8" class="muted">Nothing matches.</td></tr>`;
+    $("fRows").innerHTML = tunnelRows(list, true) || `<tr><td colspan="9" class="muted">Nothing matches.</td></tr>`;
   };
   $("fOrg")?.addEventListener("change", (e) => { foundView.org = e.target.value; draw(); });
   $("fKind").addEventListener("change", (e) => { foundView.kind = e.target.value; draw(); });
@@ -3899,10 +3911,17 @@ async function vpnView(id) {
     $("vpnStatus").innerHTML = `<div class="row"><h2>Tunnels</h2><span class="spacer"></span><span class="small muted">${w.last_applied ? `applied ${ago(w.last_applied)}` : "not applied yet"} · tunnel network <span class="mono">${esc(w.tunnel_net)}</span> · port ${w.port}</span>
         ${canVpn() && w.status !== "applying" && w.status !== "draft" ? `<button class="btn" type="button" id="vReapply">Apply again</button>` : ""}</div>
       ${w.last_error ? `<p class="status err small">${esc(w.last_error)}</p>` : ""}
-      <div class="table-wrap"><table><thead><tr><th>Role</th><th>Router</th><th>Tunnel IP</th><th>Shares</th><th>Tunnel</th><th>Traffic</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>Role</th><th>Router</th><th>Tunnel IP</th><th>Shares</th><th>Tunnel</th><th>Traffic</th><th></th></tr></thead><tbody>
       ${w.sites.map((s) => `<tr><td><span class="pill ${s.role === "hub" ? "up-sched" : ""}">${s.role}</span></td><td><a href="#router/${s.device_id}">${esc(s.name)}</a> <span class="dot ${s.online ? "on" : "off"}"></span></td>
         <td class="mono">${esc(s.tunnel_ip)}</td><td class="mono small">${s.subnets.map(esc).join("<br>")}</td><td>${tunnelState(s)}</td>
-        <td class="small nowrap">${s.rx != null ? `↓ ${bytes(s.rx)} ↑ ${bytes(s.tx)}` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+        <td class="small nowrap">${s.rx != null ? `↓ ${bytes(s.rx)} ↑ ${bytes(s.tx)}` : ""}</td>
+        <td>${canVpn() && s.state === "applied" && s.online && w.status !== "applying" ? `<button class="btn small" type="button" data-vrecon="${s.device_id}" data-vname="${esc(s.name)}">Reconnect</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+    document.querySelectorAll("[data-vrecon]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm(`Reconnect the VPN at ${b.dataset.vname}?\n\nIts tunnel drops for a few seconds and comes straight back.`)) return;
+      b.disabled = true; b.textContent = "Reconnecting...";
+      try { await post(`/api/vpns/${v.id}/reconnect`, { device_id: +b.dataset.vrecon }); say(`Reconnected at ${b.dataset.vname} - the handshake shows within a few seconds.`, true); }
+      catch (err) { say(err.message); b.disabled = false; b.textContent = "Reconnect"; }
+    }));
     $("vReapply")?.addEventListener("click", async () => { try { await post(`/api/vpns/${v.id}/apply`); refresh(); } catch (e) { say(e.message); } });
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
