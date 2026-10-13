@@ -770,7 +770,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise HttpError(502, f"Couldn't read the router's tables: {e}") from None
                 topo_cache[key] = hit
             # client users see their network, but not the full routing table (other networks an MSP connected)
-            return self.json({**topology.build(hit[1], d, full=s["kind"] == "tech"), "read_at": hit[0]})
+            return self.json({**topology.build(hit[1], d, full=s["kind"] == "tech", known=unifi.known_for_org(d["org_id"])), "read_at": hit[0]})
         if m := re.fullmatch(r"/api/devices/(\d+)/firewall/address-list", path):   # one address list's entries, read live
             s = self.require(tech=True)
             d = self.device_for(s, m.group(1))
@@ -1351,10 +1351,15 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(404, "Site not found.")
             if site["account_org"]:
                 raise HttpError(400, "This site comes from a client's own connection - everything in it belongs to that client.")
+            if b.get("org_id") == "auto":   # back to automatic matching (public IP, then name) at the next sync
+                db.run("UPDATE net_sites SET org_manual=0, org_id=NULL, matched=NULL WHERE id=?", (site["id"],))   # decided afresh
+                db.audit(s["email"], "UniFi / UISP site set to automatic matching", site["name"], self.client_ip(), org_id=site["org_id"])
+                threading.Thread(target=unifi.sync, args=(s["email"], site["account_id"]), daemon=True, name="net-sync-now").start()
+                return self.json({"ok": True})
             org = db.one("SELECT id, name FROM orgs WHERE id=?", (int(b.get("org_id") or 0),)) if b.get("org_id") else None
             if b.get("org_id") and not org:
                 raise HttpError(400, "Client not found.")
-            db.run("UPDATE net_sites SET org_id=? WHERE id=?", (org["id"] if org else None, site["id"]))
+            db.run("UPDATE net_sites SET org_id=?, org_manual=1, matched=? WHERE id=?", (org["id"] if org else None, f"chosen by {s['email']}", site["id"]))
             db.audit(s["email"], "UniFi / UISP site assigned", f"{site['name']} -> {org['name'] if org else 'no client'}", self.client_ip(),
                      org_id=org["id"] if org else site["org_id"])
             return self.json({"ok": True})

@@ -613,3 +613,16 @@ tr.pt-selrow td { background: color-mix(in srgb, var(--accent) 8%, transparent);
 
 /* UniFi sites */
 .u-detail > td { background: color-mix(in srgb, var(--accent, #2563eb) 5%, transparent); padding: 8px 12px 12px; }
+
+/* UniFi / UISP on the network map */
+.ub-badge { background: #006fff; color: #fff; border-color: #006fff; font-size: 10.5px; padding: 0 6px; vertical-align: middle; }
+.ub-badge.ub-guess { background: transparent; color: #006fff; }
+.ub-badge.ub-off { background: #dc2626; border-color: #dc2626; }
+.tubnt { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--border); display: grid; gap: 8px; }
+.tubnt-site { display: grid; gap: 6px; }
+.tubnt-devs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tubnt-dev { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-left: 3px solid #006fff; border-radius: 8px; padding: 4px 8px; background: var(--panel); }
+.tubnt-dev.off { border-left-color: #dc2626; }
+.tubnt-dev small { display: block; color: var(--muted); font-size: 11px; }
+.tubnt-dev .tic svg { width: 16px; height: 16px; }
+.tnode .ub-badge { display: inline-block; width: auto; margin-left: 4px; }

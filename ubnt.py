@@ -76,6 +76,37 @@ def online(status):
     return str(status or "").lower() in ("online", "active", "connected")
 
 
+DOC_NETS = [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")]
+ALLOW_DOC = False   # dev mode: the simulated routers and demo data use the documentation ranges as "public" addresses
+
+
+def public(ip):
+    """The address if it's a public (internet) IP, else None."""
+    try:
+        a = ipaddress.ip_address(str(ip or "").split("/")[0].strip())
+        return str(a) if a.is_global or (ALLOW_DOC and any(a in n for n in DOC_NETS)) else None
+    except ValueError:
+        return None
+
+
+def public_in(obj, depth=0):
+    """Public IPs found anywhere in a statistics block (UniFi's wans / gateway shapes vary by version) - only keys that
+    name an address (externalIp, wanIp, ipAddress ...)."""
+    out = []
+    if depth > 4:
+        return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (dict, list)):
+                out += public_in(v, depth + 1)
+            elif re.search(r"ip(addr(ess)?)?s?$|externalip|wanip|publicip", str(k), re.I) and public(v):
+                out.append(public(v))
+    elif isinstance(obj, list):
+        for v in obj[:20]:
+            out += public_in(v, depth + 1)
+    return out
+
+
 # --- platform clients: each returns (sites, devices) in one shape ------------------------------------------------------------
 #   site:   {ext, name, internal, console, gateway_mac, type, stats}
 #   device: {ext, site_ext | None, host, mac, name, model, ip, status, version, update, is_console, startup}
@@ -156,10 +187,15 @@ class UnifiClient:
                           "stats": {"total": num(c.get("totalDevice")), "offline": num(c.get("offlineDevice")), "updates": num(c.get("pendingUpdateDevice")),
                                     "wifi_clients": num(c.get("wifiClient")), "wired_clients": num(c.get("wiredClient")), "guest_clients": num(c.get("guestClient")),
                                     "critical": num(c.get("criticalNotification")), "isp": isp.get("name") or isp.get("organization"),
-                                    "wan_uptime": pct.get("wanUptime"), "internet_issues": len(st.get("internetIssues") or [])}})
+                                    "wan_uptime": pct.get("wanUptime"), "internet_issues": len(st.get("internetIssues") or [])},
+                          "wan_ips": public_in({"wans": st.get("wans"), "gateway": st.get("gateway")})})
         per_host = {}
         for s in sites:
             per_host.setdefault(s["host"], []).append(s)
+        host_ip = {h.get("id"): public(h.get("ipAddress")) for h in hosts}
+        for s in sites:   # a console with one site: its own public address is that site's (a hosted multi-site server's isn't)
+            if not s["wan_ips"] and len(per_host.get(s["host"], [])) == 1 and host_ip.get(s["host"]):
+                s["wan_ips"] = [host_ip[s["host"]]]
         devices = []
         for g in groups:
             hs = per_host.get(g.get("hostId"), [])
@@ -265,13 +301,18 @@ class UispClient:
                 continue
             desc = s.get("description") or {}
             sites.append({"ext": str(sid), "name": ident.get("name") or str(sid), "internal": ident.get("name"), "console": None, "gateway_mac": "",
-                          "type": "endpoint" if ident.get("type") == "endpoint" else "site", "stats": {"address": desc.get("address")}})
+                          "type": "endpoint" if ident.get("type") == "endpoint" else "site", "stats": {"address": desc.get("address")}, "wan_ips": []})
         devices = []
         for d in raw_devs:
             ident, ov, fw = d.get("identification") or {}, d.get("overview") or {}, d.get("firmware") or {}
             cur = ident.get("firmwareVersion") or fw.get("current")
             latest = fw.get("latest") if fw.get("latest") and fw.get("latest") != cur and fw.get("compatible", True) else None
             up = num(ov.get("uptime"))
+            site_id = str((ident.get("site") or {}).get("id") or "")
+            pubs = [p for p in (public(d.get("ipAddress")), *[public(x) for x in (d.get("ipAddressList") or [])[:10] if isinstance(x, str)]) if p]
+            for s in sites:
+                if s["ext"] == site_id:
+                    s["wan_ips"] += [p for p in pubs if p not in s["wan_ips"]]
             devices.append({"ext": str(ident.get("id") or ident.get("mac")), "site_ext": str((ident.get("site") or {}).get("id") or "") or None,
                             "host": None, "mac": macnorm(ident.get("mac")), "name": ident.get("displayName") or ident.get("name") or ident.get("hostname") or ident.get("mac"),
                             "model": ident.get("modelName") or ident.get("model"), "ip": str(d.get("ipAddress") or "").split("/")[0] or None,
@@ -284,6 +325,8 @@ class UispClient:
 class Ubnt:
     def __init__(self, db, vault, settings):
         self.db, self.vault, self.s = db, vault, settings
+        global ALLOW_DOC
+        ALLOW_DOC = bool(settings.dev)
         self.state = {"running": False}
         self.lock = threading.Lock()
 
@@ -358,6 +401,11 @@ class Ubnt:
             sites, devs = self.client(a).fetch()
             from integrations import norm
             by_name = {norm(o["name"]): o["id"] for o in self.db.q("SELECT id, name FROM orgs WHERE active=1")}
+            by_ip = {}   # routers' WAN / public addresses -> (client, router)
+            for r in self.db.q("SELECT name, org_id, wan_ip, public_ip FROM devices WHERE state='adopted' AND org_id IS NOT NULL"):
+                for ip in (public(r["wan_ip"]), public(r["public_ip"])):
+                    if ip:
+                        by_ip.setdefault(ip, (r["org_id"], r["name"]))
             if len(sites) > MAX_SITES or len(devs) > MAX_DEVICES:
                 raise NetError(f"Too many sites / devices ({len(sites)} / {len(devs)}) - TikManager reads up to {MAX_SITES} / {MAX_DEVICES} per connection.")
             for s in sites:
@@ -368,15 +416,29 @@ class Ubnt:
                 if not s["ext"]:
                     continue
                 key = f"{a['id']}:{s['ext']}"
-                old = self.db.one("SELECT org_id FROM net_sites WHERE id=?", (key,))
-                org = a["org_id"] or (old["org_id"] if old else by_name.get(norm(s["name"])) or by_name.get(norm(s["console"])))
-                vals = (a["id"], s["name"], s["internal"], s["console"], s["gateway_mac"], s["type"], org, json.dumps(s["stats"]), now)
-                if old:
-                    self.db.run("UPDATE net_sites SET account_id=?, name=?, internal=?, console=?, gateway_mac=?, type=?, org_id=?, stats=?, seen_at=? WHERE id=?",
-                                (*vals, key))
+                ips = [ip for ip in (s.get("wan_ips") or []) if public(ip)][:5]
+                wan = ips[0] if ips else None
+                old = self.db.one("SELECT org_id, org_manual, matched FROM net_sites WHERE id=?", (key,))
+                ipm = next(((by_ip[ip], ip) for ip in ips if ip in by_ip), None)
+                if a["org_id"]:
+                    org, why, manual = a["org_id"], "the client's own connection", 0
+                elif old and old["org_manual"]:
+                    org, why, manual = old["org_id"], old["matched"], 1
+                elif ipm:   # the strongest evidence: same public address as one of the client's routers
+                    (org, router), ip = ipm
+                    why, manual = f"Public IP {ip} = router {router}", 0
+                elif old and old["org_id"]:
+                    org, why, manual = old["org_id"], old["matched"] or "name", 0
                 else:
-                    self.db.run("""INSERT INTO net_sites (account_id, name, internal, console, gateway_mac, type, org_id, stats, seen_at, id)
-                                   VALUES (?,?,?,?,?,?,?,?,?,?)""", (*vals, key))
+                    org = by_name.get(norm(s["name"])) or by_name.get(norm(s["console"]))
+                    why, manual = ("name" if org else None), 0
+                vals = (a["id"], s["name"], s["internal"], s["console"], s["gateway_mac"], s["type"], org, json.dumps(s["stats"]), now, wan, why, manual)
+                if old:
+                    self.db.run("""UPDATE net_sites SET account_id=?, name=?, internal=?, console=?, gateway_mac=?, type=?, org_id=?, stats=?, seen_at=?,
+                                   wan_ip=?, matched=?, org_manual=? WHERE id=?""", (*vals, key))
+                else:
+                    self.db.run("""INSERT INTO net_sites (account_id, name, internal, console, gateway_mac, type, org_id, stats, seen_at, wan_ip, matched,
+                                   org_manual, id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (*vals, key))
             for d in devs:
                 for k in ("ext", "site_ext", "host", "name", "model", "ip", "status", "version", "update", "startup"):
                     d[k] = txt(d.get(k))
@@ -449,12 +511,23 @@ class Ubnt:
                         "offline_since": min([d["offline_since"] for d in off if d["offline_since"]], default=None),
                         "wifi_clients": st.get("wifi_clients"), "wired_clients": st.get("wired_clients"), "isp": st.get("isp"),
                         "wan_uptime": st.get("wan_uptime"), "internet_issues": st.get("internet_issues") or 0, "address": st.get("address"),
-                        "seen_at": r["seen_at"]})
+                        "seen_at": r["seen_at"], "wan_ip": r["wan_ip"], "matched": r["matched"], "manual": bool(r["org_manual"])})
         return out
 
     def devices(self, site_key):
         return self.db.q("""SELECT id, name, model, mac, ip, status, version, update_available, is_console, startup_time, offline_since
                             FROM net_devices WHERE site_key=? ORDER BY is_console DESC, name""", (site_key,))
+
+    def known_for_org(self, org_id):
+        """{mac: device} for the UniFi / UISP devices of one client's sites - what the network map tags and adds."""
+        if not org_id:
+            return {}
+        rows = self.db.q("""SELECT d.mac, d.name, d.model, d.ip, d.status, d.version, d.update_available, d.is_console, s.id AS site_id, s.name AS site,
+                            a.kind FROM net_devices d JOIN net_sites s ON s.id = d.site_key JOIN net_accounts a ON a.id = d.account_id
+                            WHERE s.org_id = ? AND d.mac IS NOT NULL AND d.mac != ''""", (org_id,))
+        return {r["mac"]: {"source": KINDS.get(r["kind"], r["kind"]), "platform": KINDS.get(r["kind"], r["kind"]), "name": r["name"], "model": r["model"],
+                           "ip": r["ip"], "status": "online" if online(r["status"]) else (r["status"] or "offline"), "version": r["version"],
+                           "update": r["update_available"], "console": bool(r["is_console"]), "site": r["site"], "site_id": r["site_id"]} for r in rows}
 
     def unplaced(self):
         return self.db.q("""SELECT d.id, d.name, d.model, d.mac, d.ip, d.status, d.version, d.update_available, d.host AS console, a.name AS account
@@ -477,8 +550,8 @@ class Ubnt:
 # --- demo data (dev mode, key "demo") ------------------------------------------------------------------------------------------
 def _demo_unifi():
     r = random.Random(7)
-    hosts = [{"id": f"demo-host-{i}", "ipAddress": f"198.51.100.{10 + i}", "reportedState": {"hostname": n}}
-             for i, n in enumerate(["Northwind-UCG", "AcmeDental-UDM", "MSP-Hosted-Network"])]
+    hosts = [{"id": f"demo-host-{i}", "ipAddress": ip, "reportedState": {"hostname": n}}
+             for i, (n, ip) in enumerate([("Northwind-UCG", "203.0.113.3"), ("AcmeDental-UDM", "198.51.100.11"), ("MSP-Hosted-Network", "198.51.100.12")])]
 
     def stats(total, off, upd, wifi, wired, isp):
         return {"counts": {"totalDevice": total, "offlineDevice": off, "pendingUpdateDevice": upd, "wifiClient": wifi, "wiredClient": wired,
@@ -486,7 +559,8 @@ def _demo_unifi():
                 "ispInfo": {"name": isp}, "percentages": {"wanUptime": round(r.uniform(97.5, 100), 2)}, "internetIssues": []}
     sites = [{"siteId": "s-nw", "hostId": "demo-host-0", "meta": {"name": "default", "desc": "Northwind Clinics", "gatewayMac": "70:a7:41:00:00:01"}, "statistics": stats(6, 1, 2, 31, 12, "Cox Business")},
              {"siteId": "s-acme", "hostId": "demo-host-1", "meta": {"name": "default", "desc": "Acme Dental", "gatewayMac": "70:a7:41:00:01:01"}, "statistics": stats(4, 0, 0, 14, 6, "Spectrum")},
-             {"siteId": "s-h1", "hostId": "demo-host-2", "meta": {"name": "a1b2c3", "desc": "Bluewater Library", "gatewayMac": "70:a7:41:00:02:01"}, "statistics": stats(3, 0, 1, 22, 3, "AT&T")},
+             {"siteId": "s-h1", "hostId": "demo-host-2", "meta": {"name": "a1b2c3", "desc": "Bluewater Library", "gatewayMac": "70:a7:41:00:02:01"},
+              "statistics": {**stats(3, 0, 1, 22, 3, "AT&T"), "wans": {"WAN": {"externalIp": "203.0.113.5"}}}},
              {"siteId": "s-h2", "hostId": "demo-host-2", "meta": {"name": "d4e5f6", "desc": "Harbor Insurance", "gatewayMac": "70:a7:41:00:03:01"}, "statistics": stats(2, 0, 0, 8, 4, "Lumen")}]
 
     def dev(h, k, name, model, console=False, status="online", upd=None):

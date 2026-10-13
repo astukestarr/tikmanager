@@ -37,6 +37,29 @@ NAMES = [   # (kind, pattern on the device name) - checked in this order
     ("mobile", r"iphone|ipad|android|galaxy|pixel|oneplus|moto|watch"),
     ("iot", r"\bpi\b|^pi-|raspberry|thermostat|nest|ecobee|roku|chromecast|sonos|echo|alexa|ring|hue|tv\b|-tv|sensor"),
 ]
+# Ubiquiti's MAC prefixes (UniFi / UISP / airMAX / EdgeMAX gear): a device with one is tagged "Ubiquiti" on the map even
+# when no UniFi / UISP connection knows it (ubnt.py devices are matched by their exact MAC first).
+UBNT_OUI = set("""00:15:6D 00:27:22 04:18:D6 0C:EA:14 18:E8:29 1C:6A:1B 24:5A:4C 24:A4:3C 28:70:4E 44:D9:E7 58:D6:1F 60:22:32 68:72:51 68:D7:9A
+6C:63:F8 70:A7:41 74:83:C2 74:AC:B9 74:FB:17 78:45:58 78:8A:20 80:2A:A8 84:78:48 94:2A:6F 9C:05:D6 AC:8B:A9 B4:FB:E4 D0:21:F9 D8:B3:70
+DC:9F:DB E0:63:DA E4:38:83 F0:9F:C2 F4:92:BF F4:E2:C6 FC:EC:DA""".split())
+UBNT_TEXT = re.compile(r"unifi|ubnt|ubiquiti|\bus(w|g|-)|\buap|\bu6|\bu7|\budm|\bucg|\buxg|edgerouter|edgeswitch|airmax|airos|litebeam|nanobeam|powerbeam|rocket", re.I)
+
+
+def _mac12(m):
+    return re.sub(r"[^0-9a-f]", "", str(m or "").lower())[:12]
+
+
+def ubnt_tag(mac, text, known):
+    """{platform, name, model, status, update, site, ...} for a device a UniFi / UISP connection knows (exact MAC), else
+    {platform: "Ubiquiti"} when its MAC prefix or what it announces says Ubiquiti, else None."""
+    hit = (known or {}).get(_mac12(mac))
+    if hit:
+        return hit
+    if str(mac or "").upper()[:8] in UBNT_OUI or (text and UBNT_TEXT.search(text)):
+        return {"platform": "Ubiquiti"}
+    return None
+
+
 LABELS = {"network": "Network devices", "phone": "Phones", "printer": "Printers", "camera": "Cameras", "server": "Servers & VMs",
           "computer": "Computers", "mobile": "Personal devices", "iot": "IoT", "unknown": "Unidentified"}
 ORDER = list(LABELS)
@@ -75,9 +98,12 @@ def _port(iface):
     return str(iface or "").split(",")[0].strip()
 
 
-def build(raw, device, full=True):
+def build(raw, device, full=True, known=None):
     """raw = RouterOS.topology(); device = the TikManager device row. full=False (client users): the routing table is
-    reduced to the Internet route - it can show other networks an MSP has connected."""
+    reduced to the Internet route - it can show other networks an MSP has connected. known = {mac: UniFi / UISP device}
+    of this router's client (ubnt.py): matching devices are tagged, the rest are listed as seen by UniFi / UISP only."""
+    known = known or {}
+    seen = set()
     addrs = [a for a in raw.get("addresses") or [] if a.get("disabled") != "true"]
     comments = {i.get("name"): i.get("comment") or "" for i in raw.get("interfaces") or []}
     vlan_id = {v.get("name"): v.get("vlan-id") for v in raw.get("vlans") or []}
@@ -133,6 +159,8 @@ def build(raw, device, full=True):
         node = {"name": nb.get("identity") or nb.get("address") or mac, "ip": nb.get("address4") or nb.get("address") or "", "mac": mac,
                 "platform": nb.get("platform") or "", "model": nb.get("board") or "", "version": nb.get("version") or "",
                 "port": port, "via": nb.get("discovered-by") or "", "groups": {}}
+        node["ubnt"] = ubnt_tag(mac, f"{node['platform']} {node['model']} {nb.get('identity') or ''} {nb.get('system-description') or ''}", known)
+        seen.add(_mac12(mac))
         n = network_for(node["ip"], port) or network_for("", (nb.get("interface") or "").split(",")[-1].strip())
         (n or other)["infra"].append(node)
         devices.pop(mac, None)
@@ -140,8 +168,11 @@ def build(raw, device, full=True):
             infra_by_port.setdefault(port, node)
 
     for d in devices.values():
-        kind = kind_of(d["mac"], d["name"])
-        entry = {"name": d["name"] or d["ip"] or d["mac"], "ip": d["ip"], "mac": d["mac"], "port": port_of.get(d["mac"], "")}
+        tag = ubnt_tag(d["mac"], d["name"], known)
+        kind = "network" if tag and tag.get("source") else kind_of(d["mac"], d["name"])
+        entry = {"name": d["name"] or (tag or {}).get("name") or d["ip"] or d["mac"], "ip": d["ip"], "mac": d["mac"], "port": port_of.get(d["mac"], ""),
+                 "ubnt": tag}
+        seen.add(_mac12(d["mac"]))
         target = infra_by_port.get(entry["port"])   # behind a switch / AP on the same router port
         if target is None:
             target = network_for(d["ip"], d["iface"]) or other
@@ -170,5 +201,13 @@ def build(raw, device, full=True):
         others.append({"dst": dst, "gateway": str(r.get("gateway") or ""), "kind": kind, "active": r.get("active") == "true",
                        "comment": r.get("comment") or "", "table": r.get("routing-table") or ""})
     total = sum(g["count"] for n in out_nets for g in n["groups"]) + sum(g["count"] for n in out_nets for i in n["infra"] for g in i["groups"])
+    # UniFi / UISP devices of this client the router doesn't see (behind a UniFi gateway, another site, offline ...)
+    extra = {}
+    for mac, k in known.items():
+        if mac not in seen:
+            extra.setdefault((k["source"], k["site"]), []).append(k)
+    ubnt = [{"source": src, "site": site, "site_id": devs[0]["site_id"], "devices": sorted(devs, key=lambda x: (not x.get("console"), x["name"] or ""))}
+            for (src, site), devs in sorted(extra.items(), key=lambda x: (x[0][0], x[0][1] or ""))]
     return {"internet": internet, "networks": out_nets, "routes": others if full else [], "routes_hidden": (not full) and bool(others),
-            "devices": total, "infra": sum(len(n["infra"]) for n in out_nets)}
+            "devices": total, "infra": sum(len(n["infra"]) for n in out_nets), "ubnt": ubnt,
+            "ubnt_matched": sum(1 for m in seen if m in known)}

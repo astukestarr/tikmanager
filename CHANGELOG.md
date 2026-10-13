@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.0 - 2026-10-13
+
+- **UniFi / UISP on the network map**: devices the router sees that a UniFi / UISP connection knows (matched by MAC) get a
+  **UniFi** / **UISP** badge with their name, model, site, status and firmware update (the switch / AP icon and the device
+  lists too); other Ubiquiti gear is badged **Ubiquiti** (by MAC prefix or what it announces). The router's client's
+  UniFi / UISP devices it doesn't see - behind a UniFi gateway, at another site, offline - are listed under
+  **From UniFi / UISP** with their status and updates. Only that client's sites are used.
+- **Sites matched to clients by public IP**: a site whose public address equals the WAN / public IP of one of a client's
+  routers belongs to that client - before the name match. UniFi: the site's reported WAN address, or the console's own
+  address when it runs only that site (never a hosted multi-site server's); UISP: the public address of a device at the
+  site. The UniFi / UISP page shows each site's public IP and why it has its client ("Public IP ... = router ...",
+  "matched by name", "chosen by hand").
+- A client chosen by hand now sticks - syncs never change it - until **Match automatically** is picked again, which works
+  the client out afresh.
+
 ## 1.42.2 - 2026-10-13
 
 - **UISP connections**: every address of the UISP server is tried (IPv4 first) instead of only the first one DNS returns -

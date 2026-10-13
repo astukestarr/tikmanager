@@ -2534,6 +2534,10 @@ const TOPO_ICONS = {
 };
 const isAp = (i) => /ap|wap|cap|wifi|wireless|uap|u6|u7|access/i.test(`${i.model} ${i.name}`);
 
+// UniFi / UISP / Ubiquiti badge for a map entry (topology.ubnt_tag)
+const ubBadge = (u) => !u ? "" : `<span class="pill ub-badge ${u.source ? "" : "ub-guess"} ${u.status && u.status !== "online" ? "ub-off" : ""}" title="${esc(u.source
+  ? [`${u.source}: ${u.name || ""}`, u.model, u.site && `site ${u.site}`, u.status, u.version && `firmware ${u.version}`, u.update && `update ${u.update} available`].filter(Boolean).join(" · ")
+  : "Ubiquiti device (by its MAC address / announcement) - not in any UniFi / UISP connection")}">${esc(u.source || "Ubiquiti")}${u.update ? " ↑" : ""}</span>`;
 async function loadTopology(d, refresh = false) {
   const card = $("topoCard");
   if (!card) return;
@@ -2557,7 +2561,7 @@ async function loadTopology(d, refresh = false) {
       <div class="tnets ${t.networks.length === 1 ? "single" : ""}">${t.networks.map((n, ni) => `<div class="tcol">
         <div class="tnode tnet"><span class="tic">${TOPO_ICONS.net}</span><span><b>${esc(n.name)}</b><small class="mono">${esc(n.network)}${n.vlan ? ` · VLAN ${esc(n.vlan)}` : ""}</small></span></div>
         ${n.infra.map((i, ii) => `<div class="tbranch"><div class="tnode tinfra"><span class="tic">${isAp(i) ? TOPO_ICONS.ap : TOPO_ICONS.network}</span>
-            <span><b>${esc(i.name)}</b><small>${esc([i.model || i.platform, i.ip, i.port ? `port ${i.port}` : ""].filter(Boolean).join(" · "))}</small></span></div>
+            <span><b>${esc(i.name)}</b> ${ubBadge(i.ubnt)}<small>${esc([(i.ubnt && i.ubnt.model) || i.model || i.platform, i.ip, i.port ? `port ${i.port}` : ""].filter(Boolean).join(" · "))}</small></span></div>
             ${i.groups.length ? `<div class="tgroups">${bubbles(i.groups, `${ni}.${ii}`)}</div>` : ""}</div>`).join("")}
         ${n.groups.length ? `<div class="tbranch direct">${n.infra.length ? `<div class="small muted tdirect">Directly on the router</div>` : ""}<div class="tgroups">${bubbles(n.groups, `${ni}`)}</div></div>` : ""}
         ${!n.infra.length && !n.groups.length ? `<div class="small muted tempty">No devices seen</div>` : ""}
@@ -2567,9 +2571,18 @@ async function loadTopology(d, refresh = false) {
           <span class="pill r-${esc(r.kind)}">${esc({ vpn: "VPN", static: "Static", dynamic: "Dynamic" }[r.kind] || r.kind)}</span>
           <span class="mono">${esc(r.dst)}</span><span class="small muted">via ${esc(r.gateway)}${r.comment ? ` · ${esc(r.comment)}` : ""}${r.active ? "" : " · inactive"}</span></div>`).join("")}</div>`
           : t.routes_hidden ? `<div class="troutes small muted">This router also routes to other networks (shown to technicians).</div>` : ""}
+    ${t.ubnt && t.ubnt.length ? `<div class="tubnt"><div class="row"><b>From UniFi / UISP</b><span class="small muted">this client's devices that ${esc(d.name)} doesn't see
+        (behind a UniFi gateway, at another site, or offline)${t.ubnt_matched ? ` · ${t.ubnt_matched} more matched on the map above` : ""}</span><span class="spacer"></span>
+        <a class="btn" href="#unifi">UniFi / UISP sites</a></div>
+      ${t.ubnt.map((g) => `<div class="tubnt-site"><div class="small"><span class="pill">${esc(g.source)}</span> <b>${esc(g.site || "")}</b> · ${g.devices.length} device${g.devices.length === 1 ? "" : "s"}
+          ${g.devices.filter((x) => x.status !== "online").length ? ` · <span class="status err">${g.devices.filter((x) => x.status !== "online").length} offline</span>` : ""}</div>
+        <div class="tubnt-devs">${g.devices.map((x) => `<span class="tubnt-dev ${x.status === "online" ? "" : "off"}" title="${esc([x.model, x.ip, x.version && `firmware ${x.version}`, x.update && `update ${x.update} available`].filter(Boolean).join(" · "))}">
+          <span class="dot ${x.status === "online" ? "on" : "off"}"></span><span class="tic">${/ap|u6|u7|uap|nano|lite|beam|rocket/i.test(`${x.model} ${x.name}`) ? TOPO_ICONS.ap : TOPO_ICONS.network}</span>
+          <span><b>${esc(x.name || "")}</b><small>${esc(x.model || "")}${x.ip ? ` · ${esc(x.ip)}` : ""}</small></span>${x.update ? `<span class="pill up-run" title="Update available">update</span>` : ""}</span>`).join("")}</div></div>`).join("")}</div>` : ""}
     <div id="topoList"></div>
     <p class="small muted">Switches and access points come from neighbour discovery (MNDP / LLDP / CDP); devices from the ARP table and
-      DHCP leases, recognised by maker and name - some stay Unidentified. Click a group to list its devices.</p>`;
+      DHCP leases, recognised by maker and name - some stay Unidentified. <b>UniFi</b> / <b>UISP</b> badges: matched by MAC to your UniFi / UISP
+      connections; <b>Ubiquiti</b>: Ubiquiti gear no connection knows. Click a group to list its devices.</p>`;
   const show = (where, kind) => {
     rView.topoSel = [where, kind];
     const [ni, ii] = where.split(".").map(Number);
@@ -2580,7 +2593,8 @@ async function loadTopology(d, refresh = false) {
     $("topoList").innerHTML = `<div class="topo-list"><div class="row"><b>${esc(g.label)}</b><span class="muted small">${esc(holder.name)} · ${g.count}</span>
         <span class="spacer"></span><button class="btn" type="button" id="topoClose">Close</button></div>
       <div class="table-wrap"><table><thead><tr><th>Name</th><th>IP address</th><th>MAC address</th><th>Port</th></tr></thead>
-      <tbody>${g.devices.map((x) => `<tr><td>${esc(x.name)}</td><td class="mono">${esc(x.ip)}</td><td class="mono small">${esc(x.mac)}</td><td class="mono small">${esc(x.port)}</td></tr>`).join("")}</tbody></table></div></div>`;
+      <tbody>${g.devices.map((x) => `<tr><td>${esc(x.name)} ${ubBadge(x.ubnt)}${x.ubnt && x.ubnt.model ? `<div class="small muted">${esc(x.ubnt.model)}${x.ubnt.site ? ` · ${esc(x.ubnt.site)}` : ""}</div>` : ""}</td>
+        <td class="mono">${esc(x.ip)}</td><td class="mono small">${esc(x.mac)}</td><td class="mono small">${esc(x.port)}</td></tr>`).join("")}</tbody></table></div></div>`;
     $("topoClose").addEventListener("click", () => { rView.topoSel = null; show("-", "-"); });
   };
   card.querySelectorAll(".tbub").forEach((b) => b.addEventListener("click", () => show(b.dataset.where, b.dataset.kind)));
@@ -4094,9 +4108,12 @@ async function unifiPage() {
       && (!q || `${s.name} ${s.internal} ${s.console || ""} ${s.account || ""} ${s.org || ""} ${s.isp || ""} ${s.address || ""}`.toLowerCase().includes(q))
       && (!uView.problems || s.offline || s.updates));
     $("uRows").innerHTML = rows.map((s) => `<tr class="click" data-usite="${esc(s.id)}"><td><b>${esc(s.name)}</b>${s.type === "endpoint" ? ` <span class="pill">subscriber</span>` : ""}${s.internet_issues ? ` <span class="pill up-failed">internet issues</span>` : ""}
-        ${s.address ? `<div class="small muted">${esc(s.address)}</div>` : ""}</td>
-      ${tech ? `<td class="noclick">${canWrite() && !s.own_account ? `<select data-uassign="${esc(s.id)}" aria-label="Client for ${esc(s.name)}"><option value="">— not assigned —</option>${(x.orgs || []).map((o) =>
-        `<option value="${o.id}" ${o.id === s.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : `${esc(s.org || "—")}${s.own_account ? ` <span class="small muted">(their own)</span>` : ""}`}</td>` : ""}
+        ${s.address ? `<div class="small muted">${esc(s.address)}</div>` : ""}${s.wan_ip ? `<div class="small muted mono" title="Public IP">${esc(s.wan_ip)}</div>` : ""}</td>
+      ${tech ? `<td class="noclick">${canWrite() && !s.own_account ? `<select data-uassign="${esc(s.id)}" aria-label="Client for ${esc(s.name)}">
+          <option value="auto">${s.manual ? "↺ Match automatically" : "— automatic —"}</option><option value="" ${s.manual && !s.org_id ? "selected" : ""}>— not assigned —</option>${(x.orgs || []).map((o) =>
+        `<option value="${o.id}" ${o.id === s.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
+          <div class="small muted">${s.matched ? esc(s.matched.startsWith("chosen") ? "chosen by hand" : s.matched === "name" ? "matched by name" : s.matched) : s.org_id ? "" : "no match"}</div>`
+        : `${esc(s.org || "—")}${s.own_account ? ` <span class="small muted">(their own)</span>` : ""}`}</td>` : ""}
       <td class="small"><span class="pill">${s.kind === "uisp" ? "UISP" : "UniFi"}</span> ${esc(s.account || "")}${s.console ? `<div class="muted">${esc(s.console)}</div>` : ""}</td><td>${s.devices}</td>
       <td>${s.offline ? `<span class="status err">${s.offline}</span>${s.offline_since ? `<div class="small muted">since ${ago(s.offline_since)}</div>` : ""}` : `<span class="status ok">0</span>`}</td>
       <td>${s.updates ? `<span class="pill up-run">${s.updates}</span>` : "0"}</td>
@@ -4118,8 +4135,10 @@ async function unifiPage() {
   $("uRows").addEventListener("change", async (e) => {
     const sel = e.target.closest("[data-uassign]");
     if (!sel) return;
-    try { await post("/api/unifi/assign", { site: sel.dataset.uassign, org_id: sel.value ? +sel.value : null }); const s = x.sites.find((y) => y.id === sel.dataset.uassign); s.org_id = sel.value ? +sel.value : null; }
-    catch (err) { alert(err.message); unifiPage(); }
+    try {
+      await post("/api/unifi/assign", { site: sel.dataset.uassign, org_id: sel.value === "auto" ? "auto" : sel.value ? +sel.value : null });
+      if (sel.value === "auto") setTimeout(unifiPage, 2500); else { const s = x.sites.find((y) => y.id === sel.dataset.uassign); s.org_id = sel.value ? +sel.value : null; s.manual = true; s.matched = "chosen"; }
+    } catch (err) { alert(err.message); unifiPage(); }
   });
   $("uSync")?.addEventListener("click", async () => {
     $("uSync").disabled = true; $("uSync").textContent = "Syncing...";

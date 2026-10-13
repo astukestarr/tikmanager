@@ -190,7 +190,10 @@ CREATE TABLE IF NOT EXISTS net_accounts (                -- UniFi / UISP connect
 CREATE TABLE IF NOT EXISTS net_sites (
   id TEXT PRIMARY KEY,                                    -- "<account id>:<site id on the platform>"
   account_id INTEGER NOT NULL REFERENCES net_accounts(id) ON DELETE CASCADE, name TEXT, internal TEXT, console TEXT, gateway_mac TEXT,
-  type TEXT, org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, stats TEXT, seen_at REAL
+  type TEXT, org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, stats TEXT, seen_at REAL,
+  wan_ip TEXT,                                            -- the site's public address (matched against routers' WAN / public IPs)
+  matched TEXT,                                           -- why it has its client: "Public IP ... = router ...", "name", "chosen by ..."
+  org_manual INTEGER NOT NULL DEFAULT 0                   -- 1: a person chose the client - syncs never change it
 );
 CREATE TABLE IF NOT EXISTS net_devices (
   id TEXT PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES net_accounts(id) ON DELETE CASCADE,
@@ -228,6 +231,11 @@ class DB:
             c.execute("ALTER TABLE users ADD COLUMN entra_oid TEXT")
         if "users" in tables and "prefs" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
             c.execute("ALTER TABLE users ADD COLUMN prefs TEXT")
+        if "net_sites" in tables:
+            cols = {r[1] for r in c.execute("PRAGMA table_info(net_sites)")}
+            for col, ddl in (("wan_ip", "TEXT"), ("matched", "TEXT"), ("org_manual", "INTEGER NOT NULL DEFAULT 0")):
+                if col not in cols:
+                    c.execute(f"ALTER TABLE net_sites ADD COLUMN {col} {ddl}")
         if "sessions" in tables and "as_user_id" not in {r[1] for r in c.execute("PRAGMA table_info(sessions)")}:
             c.execute("ALTER TABLE sessions ADD COLUMN as_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
         if "upgrades" in tables:

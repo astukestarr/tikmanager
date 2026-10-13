@@ -495,9 +495,12 @@ of **connections**, each one of:
   server's certificate**: TikManager records its SHA-256 fingerprint and refuses the connection if it ever changes
   (verification is never simply switched off).
 
-Each connection either belongs to **your MSP account** - assign each of its sites to a client on **Devices > UniFi /
-UISP** (sites are matched to clients by name the first time) - or to **one client** (their own UniFi account or UISP
-server): everything in it belongs to that client. Connections are read every 10 minutes (or **Sync now**); keys and
+Each connection either belongs to **your MSP account** - its sites are matched to clients automatically, first by
+**public IP** (a site whose public address is the WAN / public IP of one of a client's routers belongs to that client;
+UniFi: the site's WAN address, or the console's when it runs just that site; UISP: the public address of a device at the
+site), then by name - or to **one client** (their own UniFi account or UISP server): everything in it belongs to that
+client. On **Devices > UniFi / UISP** each site shows its public IP and why it has its client; choosing a client by hand
+sticks (syncs never change it) until you pick **Match automatically** again. Connections are read every 10 minutes (or **Sync now**); keys and
 tokens are stored encrypted and never shown again.
 
 **Devices > UniFi / UISP** lists every site with its client, source, devices, offline devices (and since when),
@@ -506,7 +509,9 @@ devices (model, IP, status, firmware and the update available). Client users see
 UISP subscriber locations (endpoints) are marked as such. A UniFi console that runs several sites (a self-hosted or Cloud
 Key network server) doesn't tell the cloud API which site each device is on: TikManager asks the console through
 Ubiquiti's cloud connector where it can and matches gateways by MAC; devices it still can't place are listed for
-technicians only. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
+technicians only. On a router's **network map**, UniFi / UISP devices the router sees are badged **UniFi** / **UISP** (matched
+by MAC: name, model, status, firmware update and site), other Ubiquiti gear **Ubiquiti**, and the client's UniFi / UISP
+devices the router doesn't see are listed under **From UniFi / UISP**. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
 minutes by default.
 
 ## Tasks (scripts, groups, schedules, automatic firmware updates)
