@@ -315,6 +315,46 @@ class Handler(BaseHTTPRequestHandler):
             r["networks"] = json.loads(r["networks"] or "[]")
         return rows
 
+    # --- client admins: Winbox and site-to-site VPNs, only where a TikManager administrator turned them on for the client ---
+    def client_access(self, s):
+        """(winbox level 'off'/'read'/'full', vpn allowed) for a client admin's organization; technicians aren't limited here."""
+        if s["kind"] != "client" or s["role"] != "admin" or not s["org_id"]:
+            return "off", False
+        o = db.one("SELECT client_winbox, client_vpn FROM orgs WHERE id=?", (s["org_id"],)) or {}
+        level = o.get("client_winbox") if o.get("client_winbox") in ("read", "full") else "off"
+        return level, bool(o.get("client_vpn"))
+
+    def require_vpn(self, write=False):
+        """Technicians (write needs a non-read-only account), or a client admin whose organization has VPNs turned on."""
+        s = self.require()
+        if s["kind"] == "tech":
+            if write and s["role"] == "readonly":
+                raise HttpError(403, "Your account is read-only.")
+            return s
+        if s["role"] != "admin":
+            raise HttpError(403, "Only your organization's admins can manage site-to-site VPNs.")
+        if not self.client_access(s)[1]:
+            raise HttpError(403, "Site-to-site VPNs aren't turned on for your organization - ask your IT provider.")
+        return s
+
+    def require_winbox(self, d, s=None):
+        """The Winbox router-login group this person gets on device d: 'read' / 'full'; refuses everyone else."""
+        s = s or self.require()
+        if s["kind"] == "tech":
+            return s, "read" if s["role"] == "readonly" else "full"
+        if s["role"] != "admin":
+            raise HttpError(403, "Only your organization's admins can use Winbox.")
+        level = self.client_access(s)[0]
+        if level == "off" or d["org_id"] != s["org_id"]:
+            raise HttpError(403, "Winbox isn't turned on for your organization - ask your IT provider.")
+        return s, level
+
+    def vpn_for(self, s, vid):
+        v = db.one("SELECT v.*, o.name AS org FROM vpns v JOIN orgs o ON o.id = v.org_id WHERE v.id=?", (int(vid),))
+        if not v or (s["kind"] == "client" and v["org_id"] != s["org_id"]):
+            raise HttpError(404, "VPN not found.")
+        return v
+
     def device_for(self, s, did):
         d = db.one("SELECT * FROM devices WHERE id = ?", (int(did),))
         if not d or (s["kind"] == "client" and d["org_id"] != s["org_id"]):
@@ -419,11 +459,12 @@ class Handler(BaseHTTPRequestHandler):
                               "org": org["name"] if org else None, "csrf": s["csrf"], "dev": settings.dev, "version": __version__,
                               # admins see when a newer release is out (the banner with "Upgrade now")
                               "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None,
-                              "prefs": user_prefs(s["user_id"])})
+                              "prefs": user_prefs(s["user_id"]),
+                              "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1]})
         if path == "/api/orgs":
             s = self.require()
             where, args = self.org_scope(s, column="o.id")
-            return self.json(db.q(f"""SELECT o.id, o.name, COUNT(d.id) AS devices, SUM(d.online) AS online,
+            return self.json(db.q(f"""SELECT o.id, o.name, o.client_winbox, o.client_vpn, COUNT(d.id) AS devices, SUM(d.online) AS online,
                                        SUM(CASE WHEN d.state='adopted' AND d.online=0 THEN 1 ELSE 0 END) AS offline
                                        FROM orgs o LEFT JOIN devices d ON d.org_id = o.id WHERE {where} GROUP BY o.id ORDER BY o.name""", args))
         if path == "/api/devices":
@@ -505,24 +546,24 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"id": r["id"], "org_id": r["org_id"], "org": r["org"], "name": r["name"], "online": r["online"],
                             "collected_at": r["vpn_inv_at"], "tunnels": t})
             return self.json(out)
-        if path == "/api/vpns":   # every site-to-site VPN with its sites' live state
-            self.require(tech=True)
-            out = db.q("""SELECT v.*, o.name AS org, d.name AS hub FROM vpns v JOIN orgs o ON o.id = v.org_id
-                          LEFT JOIN devices d ON d.id = v.hub_device_id ORDER BY o.name, v.name""")
+        if path == "/api/vpns":   # every site-to-site VPN with its sites' live state (a client admin: their own)
+            s = self.require_vpn()
+            where, args = self.org_scope(s, column="v.org_id")
+            out = db.q(f"""SELECT v.*, o.name AS org, d.name AS hub FROM vpns v JOIN orgs o ON o.id = v.org_id
+                          LEFT JOIN devices d ON d.id = v.hub_device_id WHERE {where} ORDER BY o.name, v.name""", args)
             for v in out:
                 v["sites"] = self.vpn_sites(v)
             return self.json(out)
         if m := re.fullmatch(r"/api/vpns/(\d+)", path):
-            self.require(tech=True)
-            v = db.one("SELECT v.*, o.name AS org FROM vpns v JOIN orgs o ON o.id = v.org_id WHERE v.id=?", (int(m.group(1)),))
-            if not v:
-                raise HttpError(404, "VPN not found.")
+            s = self.require_vpn()
+            v = self.vpn_for(s, m.group(1))
             v["sites"] = self.vpn_sites(v)
             v["busy"] = v["id"] in vpns.busy
             return self.json({"vpn": v, "candidates": self.vpn_candidates(v["org_id"], v["id"])})
         if path == "/api/vpn-candidates":   # a client's routers with their subnets, for a new VPN
-            self.require(tech=True)
-            return self.json({"candidates": self.vpn_candidates(int(q.get("org_id") or 0), None)})
+            s = self.require_vpn()
+            org_id = s["org_id"] if s["kind"] == "client" else int(q.get("org_id") or 0)
+            return self.json({"candidates": self.vpn_candidates(org_id, None)})
         # --- scripts, groups, tasks (technicians) ---
         if path == "/api/scripts":
             self.require(tech=True)
@@ -603,8 +644,9 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, admin=True)
             return self.json(offsite.public())
         if m := re.fullmatch(r"/api/devices/(\d+)/winbox", path):   # the router's Winbox service + open sessions to it
-            s = self.require(tech=True)
+            s = self.require()
             d = self.device_for(s, m.group(1))
+            s, group = self.require_winbox(d, s)
             svc, err = None, None
             if d["state"] == "adopted" and d["online"]:
                 try:
@@ -615,8 +657,8 @@ class Handler(BaseHTTPRequestHandler):
             ok = bool(svc) and not svc["disabled"] and winbox_allows_tikmanager(svc["address"])
             return self.json({"service": svc, "error": err, "reachable": ok, "tunnel_ip": tip, "host": urllib.parse.urlparse(settings.public_url).hostname,
                               "your_ip": self.client_ip(), "sessions": [x for x in winbox.view(s) if x["device_id"] == d["id"]],
-                              "ports": f"{winbox.ports.start}-{winbox.ports.stop - 1}", "can_fix": s["role"] != "readonly",
-                              "group": "read" if s["role"] == "readonly" else "full"})
+                              "ports": f"{winbox.ports.start}-{winbox.ports.stop - 1}",
+                              "can_fix": s["kind"] == "tech" and s["role"] != "readonly", "group": group})
         if path == "/api/winbox":   # all open Winbox sessions (Security page)
             s = self.require(tech=True)
             return self.json({"sessions": winbox.view(s)})
@@ -941,6 +983,22 @@ class Handler(BaseHTTPRequestHandler):
             oid = db.run("INSERT INTO orgs (name, created_at) VALUES (?,?)", (name, now()))
             db.audit(s["email"], "client created", name, self.client_ip(), org_id=oid)
             return self.json({"ok": True, "id": oid})
+        if m := re.fullmatch(r"/api/orgs/(\d+)/access", path):   # what this client's admins may use: Winbox (off/read/full), site-to-site VPNs
+            s = self.require(tech=True, admin=True)
+            o = db.one("SELECT * FROM orgs WHERE id=?", (int(m.group(1)),))
+            if not o:
+                raise HttpError(404, "Client not found.")
+            b = self.body()
+            wb = b.get("winbox") if b.get("winbox") in ("off", "read", "full") else o["client_winbox"]
+            vpn = bool(b["vpn"]) if "vpn" in b else bool(o["client_vpn"])
+            db.run("UPDATE orgs SET client_winbox=?, client_vpn=? WHERE id=?", (wb, int(vpn), o["id"]))
+            db.audit(s["email"], "client admin access changed", o["name"], self.client_ip(), org_id=o["id"],
+                     detail=f"Winbox: {wb}, site-to-site VPNs: {'on' if vpn else 'off'}")
+            if wb == "off":   # turning Winbox off closes this client's open sessions straight away
+                for x in [x for x in winbox.view({"kind": "client", "org_id": o["id"], "email": ""})]:
+                    if db.one("SELECT 1 FROM users WHERE email=? AND kind='client'", (x["user"],)):
+                        winbox.close(x["port"], x["user"], True, why="Winbox turned off for the client")
+            return self.json({"ok": True})
         if path == "/api/adoption/rotate":   # replace the adoption command; old copies stop working
             s = self.require(tech=True, admin=True)
             db.set_setting("enroll_version", int(db.setting("enroll_version", "1")) + 1)
@@ -1267,10 +1325,12 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=lambda: [poller.collect_vpns(d) for d in rows], daemon=True, name="vpn-inventory").start()
             return self.json({"ok": True, "background": True, "count": len(rows)})
         if path == "/api/vpns":   # create / update; {apply: true} applies right away
-            s = self.require(tech=True, write=True)
+            s = self.require_vpn(write=True)
             b = self.body()
+            if b.get("id"):
+                self.vpn_for(s, b["id"])   # a client admin can only change their own organization's VPNs
             try:
-                org_id = int(b.get("org_id") or 0)
+                org_id = s["org_id"] if s["kind"] == "client" else int(b.get("org_id") or 0)
                 sites = [{"device_id": int(x["device_id"]), "subnets": [str(n) for n in x.get("subnets") or []][:50]} for x in (b.get("sites") or [])[:250]]
                 name = str(b.get("name") or "").strip()[:80] or "Site-to-site VPN"
                 vid = vpns.save(int(b["id"]) if b.get("id") else None, org_id, name, int(b.get("hub_device_id") or 0),
@@ -1282,10 +1342,8 @@ class Handler(BaseHTTPRequestHandler):
                 vpns.apply(vid, s["email"])
             return self.json({"ok": True, "id": vid})
         if m := re.fullmatch(r"/api/vpns/(\d+)/(apply|disable|delete)", path):
-            s = self.require(tech=True, write=True)
-            v = db.one("SELECT * FROM vpns WHERE id=?", (int(m.group(1)),))
-            if not v:
-                raise HttpError(404, "VPN not found.")
+            s = self.require_vpn(write=True)
+            v = self.vpn_for(s, m.group(1))
             act = m.group(2)
             if act == "delete" and v["status"] in ("draft", "disabled") and not db.one(
                     "SELECT 1 FROM vpn_sites WHERE vpn_id=? AND state IN ('applied','failed','removing')", (v["id"],)):
@@ -1574,8 +1632,10 @@ class Handler(BaseHTTPRequestHandler):
         if m := re.fullmatch(r"/api/devices/(\d+)/winbox/(open|fix|enable)", path):
             # opening: any technician - the session's router login is read-only for read-only technicians; fixing the
             # router's Winbox service changes the router, so that needs write access
-            s = self.require(tech=True, write=m.group(2) != "open")
+            # client admins may open (where turned on for their organization) but never change the router's Winbox service
+            s = self.require(tech=m.group(2) != "open", write=m.group(2) != "open")
             d = self.device_for(s, m.group(1))
+            s, group = self.require_winbox(d, s)
             if d["state"] != "adopted" or not d["online"]:
                 raise HttpError(400, "The router must be online.")
             cl = poller.client(d)
@@ -1594,16 +1654,18 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "This router's Winbox only accepts certain addresses - allow TikManager's tunnel address first.")
             allow = str(self.body().get("allow_ip") or self.client_ip()).strip()
             try:
-                return self.json({"ok": True, "session": winbox.open(d, s["email"], allow, svc["port"], "read" if s["role"] == "readonly" else "full"),
+                return self.json({"ok": True, "session": winbox.open(d, s["email"], allow, svc["port"], group),
                                   "host": urllib.parse.urlparse(settings.public_url).hostname})
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
         if m := re.fullmatch(r"/api/winbox/(\d+)/(extend|close)", path):
-            s = self.require(tech=True)
+            s = self.require()   # a client admin can only extend / close their own sessions (winbox checks the owner)
+            if s["kind"] == "client" and self.client_access(s)[0] == "off":
+                raise HttpError(403, "Winbox isn't turned on for your organization.")
             try:
                 if m.group(2) == "extend":
-                    return self.json({"ok": True, "session": winbox.extend(int(m.group(1)), s["email"], s["role"] == "admin")})
-                winbox.close(int(m.group(1)), s["email"], s["role"] == "admin", why=f"closed by {s['email']}")
+                    return self.json({"ok": True, "session": winbox.extend(int(m.group(1)), s["email"], s["kind"] == "tech" and s["role"] == "admin")})
+                winbox.close(int(m.group(1)), s["email"], s["kind"] == "tech" and s["role"] == "admin", why=f"closed by {s['email']}")
                 return self.json({"ok": True})
             except ValueError as e:
                 raise HttpError(400, str(e)) from None

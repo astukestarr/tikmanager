@@ -46,6 +46,9 @@ async function api(path, opts = {}) {
 const post = (path, data = {}) => api(path, { method: "POST", body: JSON.stringify(data) });
 const isTech = () => me.kind === "tech";
 const canWrite = () => isTech() && me.role !== "readonly";
+// client admins get Winbox / site-to-site VPNs only where a TikManager administrator turned them on for their organization
+const canWinbox = () => isTech() || (me.client_winbox && me.client_winbox !== "off");
+const canVpn = () => canWrite() || (me.kind === "client" && !!me.client_vpn);
 // "Acme staff" once Admin > Branding has a company name, otherwise "Staff"
 const staffName = () => (window.BRAND && window.BRAND.company ? `${window.BRAND.company} staff` : "Staff");
 
@@ -370,7 +373,7 @@ async function router(id) {
         : `This router is over ${LC_OLD} years old - worth planning its replacement.`}
         ${d.lc_suggest ? `<br><b>Suggested replacement:</b> ${lcSuggest(d)} <span class="muted">- ${esc(d.lc_suggest_why || "")}</span>` : ""}</p>` : ""}
       ${d.state === "adopted" && isTech() ? upgradeBox(d) : ""}
-      ${d.state === "adopted" && isTech() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
+      ${d.state === "adopted" && canWinbox() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
       ${d.vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b><span class="spacer"></span><a href="#vpn/${d.vpn.id}">${esc(d.vpn.name)}</a></div>
         <div class="small">${d.vpn.role === "hub" ? "Hub" : "Spoke"} · <span class="mono">${esc(d.vpn.tunnel_ip)}</span></div>${tunnelState(d.vpn)}</div>` : ""}
       ${d.state === "adopted" ? `
@@ -718,11 +721,11 @@ async function loadWinbox(d) {
     body = `<p class="small muted">${esc(w.error || "The router must be online to open Winbox.")}</p>`;
   } else if (svc.disabled) {
     body = `<p class="small">Winbox is turned off on this router.</p>
-      ${w.can_fix ? `<button class="btn" type="button" id="wbEnable">Turn on for TikManager only</button>` : `<p class="small muted">A technician with write access can turn it on for TikManager.</p>`}
+      ${w.can_fix ? `<button class="btn" type="button" id="wbEnable">Turn on for TikManager only</button>` : `<p class="small muted">${isTech() ? "A technician with write access" : "Your IT provider"} can turn it on for TikManager.</p>`}
       <p class="small muted">Turns Winbox on, reachable only from TikManager's tunnel address (${esc(w.tunnel_ip)}) - not from the internet or the LAN.</p>`;
   } else if (!w.reachable) {
     body = `<p class="small">Winbox only accepts <span class="mono">${esc(svc.address)}</span>, so TikManager can't reach it.</p>
-      ${w.can_fix ? `<button class="btn" type="button" id="wbFix">Allow TikManager's tunnel address</button>` : `<p class="small muted">A technician with write access can allow it.</p>`}
+      ${w.can_fix ? `<button class="btn" type="button" id="wbFix">Allow TikManager's tunnel address</button>` : `<p class="small muted">${isTech() ? "A technician with write access" : "Your IT provider"} can allow it.</p>`}
       <p class="small muted">Adds ${esc(w.tunnel_ip)}/32 to Winbox's "Available From" - nothing else changes.</p>`;
   } else {
     body = `<p class="small muted">Opens a port on TikManager, relayed to this router's Winbox over its tunnel - no Winbox port on the router's internet side.
@@ -1015,9 +1018,23 @@ async function clients() {
   $("main").innerHTML = `<div class="row"><div><h1>Clients</h1><p class="muted">Each client sees only its own routers.</p></div><span class="spacer"></span></div>
     ${canWrite() ? `<div class="card"><form id="oForm" class="row"><input id="oName" placeholder="New client name" maxlength="120" required aria-label="Client name">
       <button class="btn primary" type="submit">Add client</button><span class="status" id="oStatus"></span></form></div>` : ""}
-    <div class="card"><div class="table-wrap"><table><thead><tr><th>Client</th><th>Routers</th><th>Online</th><th>Offline</th></tr></thead><tbody>
-      ${orgs.map((o) => `<tr><td>${esc(o.name)}</td><td>${o.devices}</td><td>${o.online || 0}</td><td>${o.offline ? `<span class="status err">${o.offline}</span>` : 0}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">No clients yet.</td></tr>`}
-    </tbody></table></div></div>`;
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>Client</th><th>Routers</th><th>Online</th><th>Offline</th>
+      <th title="What this client's own admins may use (client admin accounts only - viewers never)">Client admins: Winbox</th><th>Client admins: site-to-site VPNs</th></tr></thead><tbody>
+      ${orgs.map((o) => `<tr><td>${esc(o.name)}</td><td>${o.devices}</td><td>${o.online || 0}</td><td>${o.offline ? `<span class="status err">${o.offline}</span>` : 0}</td>
+        <td>${me.role === "admin" ? `<select data-oacc="${o.id}" data-k="winbox" aria-label="Winbox for ${esc(o.name)}'s admins">${[["off", "Off"], ["read", "Read-only"], ["full", "Full"]].map(([k, l]) =>
+          `<option value="${k}" ${o.client_winbox === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : esc({ off: "Off", read: "Read-only", full: "Full" }[o.client_winbox] || "Off")}</td>
+        <td>${me.role === "admin" ? `<label class="small"><input type="checkbox" data-oacc="${o.id}" data-k="vpn" ${o.client_vpn ? "checked" : ""}> Allowed</label>` : o.client_vpn ? "Allowed" : "Off"}</td></tr>`).join("")
+        || `<tr><td colspan="6" class="muted">No clients yet.</td></tr>`}
+    </tbody></table></div>
+    <p class="small muted">Off by default. Winbox gives the client's admins a Winbox session to their own routers through TikManager (address-locked, 30 minutes,
+      a temporary router login - read-only or full, as chosen here). Site-to-site VPNs lets them create and change WireGuard VPNs between their own routers.
+      Every session and change is in the audit log.</p><p class="small status" id="oAccStatus"></p></div>`;
+  document.querySelectorAll("[data-oacc]").forEach((el) => el.addEventListener("change", async () => {
+    const body = el.dataset.k === "vpn" ? { vpn: el.checked } : { winbox: el.value };
+    const st = $("oAccStatus");
+    try { await post(`/api/orgs/${el.dataset.oacc}/access`, body); st.textContent = "Saved."; st.className = "small status ok"; }
+    catch (err) { st.textContent = err.message; st.className = "small status err"; clients(); }
+  }));
   $("oForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     try { await post("/api/orgs", { name: $("oName").value }); clients(); } catch (err) { $("oStatus").textContent = err.message; $("oStatus").className = "status err"; }
@@ -3767,13 +3784,13 @@ async function vpnFound() {
 let vpnTab = "managed";
 async function vpnsView() {
   $("main").innerHTML = `<div class="row"><h1>Site-to-site VPN</h1><span class="spacer"></span>
-      ${canWrite() ? `<button class="btn primary" type="button" id="vpnNew">New VPN</button>` : ""}</div>
-    <div class="tabs" role="tablist">${[["managed", "Managed by TikManager"], ["found", "Existing VPNs on routers"]].map(([k, l]) =>
+      ${canVpn() ? `<button class="btn primary" type="button" id="vpnNew">New VPN</button>` : ""}</div>
+    <div class="tabs" role="tablist">${[["managed", "Managed by TikManager"], ...(isTech() ? [["found", "Existing VPNs on routers"]] : [])].map(([k, l]) =>
       `<button type="button" role="tab" data-vtab="${k}" class="${k === vpnTab ? "active" : ""}">${l}</button>`).join("")}</div>
     <div id="vpnBody"></div>`;
   document.querySelectorAll("[data-vtab]").forEach((b) => b.addEventListener("click", () => { vpnTab = b.dataset.vtab; vpnsView(); }));
   $("vpnNew")?.addEventListener("click", () => go("vpn", "new"));
-  if (vpnTab === "found") return vpnFound();
+  if (vpnTab === "found" && isTech()) return vpnFound();
   const rows = await api("/api/vpns");
   $("vpnBody").innerHTML = `<p class="muted">Connect a client's sites with WireGuard: one hub with a public address, every other router dials in to it.
       The routers make their own keys; TikManager backs each one up before changing anything.</p>
@@ -3781,7 +3798,7 @@ async function vpnsView() {
       ${rows.map((v) => { const up = v.sites.filter((s) => s.state === "applied" && s.handshake_age != null && s.handshake_age < 180).length;
         return `<tr class="click" data-vpn="${v.id}"><td><b>${esc(v.name)}</b><div class="small muted mono">${esc(v.tunnel_net)}</div></td><td>${esc(v.org)}</td><td>${esc(v.hub || "—")}</td>
           <td>${up} / ${v.sites.length}</td><td>${vpnPill(v.status)}${v.last_error ? `<div class="small status err">${esc(v.last_error)}</div>` : ""}</td><td class="small">${v.last_applied ? ago(v.last_applied) : "never"}</td></tr>`; }).join("")}
-      </tbody></table></div>` : `<p class="muted">No VPNs yet.${canWrite() ? " Click New VPN to connect a client's sites." : ""}</p>`}</div>`;
+      </tbody></table></div>` : `<p class="muted">No VPNs yet.${canVpn() ? " Click New VPN to connect a client's sites." : ""}</p>`}</div>`;
   document.querySelectorAll("[data-vpn]").forEach((r) => r.addEventListener("click", () => go("vpn", r.dataset.vpn)));
 }
 
@@ -3792,7 +3809,7 @@ async function vpnView(id) {
   if (!isNew) ({ vpn: v, candidates: cands } = await api(`/api/vpns/${id}`));
   const st = { org_id: v ? v.org_id : orgs[0]?.id, hub: v ? v.hub_device_id : null, sites: new Map() };
   if (v) v.sites.filter((s) => s.state !== "removing").forEach((s) => st.sites.set(s.device_id, { subnets: new Set(s.subnets), custom: "" }));
-  const ro = !canWrite();
+  const ro = !canVpn();
   $("main").innerHTML = `<p><a href="#vpns">← Site-to-site VPN</a></p>
     <div class="row"><h1>${isNew ? "New site-to-site VPN" : esc(v.name)}</h1><span id="vpnPill">${v ? vpnPill(v.status) : ""}</span></div>
     ${v ? `<div class="card" id="vpnStatus"></div>` : ""}
@@ -3876,7 +3893,7 @@ async function vpnView(id) {
     const w = x.vpn;
     $("vpnPill").innerHTML = vpnPill(w.status);
     $("vpnStatus").innerHTML = `<div class="row"><h2>Tunnels</h2><span class="spacer"></span><span class="small muted">${w.last_applied ? `applied ${ago(w.last_applied)}` : "not applied yet"} · tunnel network <span class="mono">${esc(w.tunnel_net)}</span> · port ${w.port}</span>
-        ${canWrite() && w.status !== "applying" && w.status !== "draft" ? `<button class="btn" type="button" id="vReapply">Apply again</button>` : ""}</div>
+        ${canVpn() && w.status !== "applying" && w.status !== "draft" ? `<button class="btn" type="button" id="vReapply">Apply again</button>` : ""}</div>
       ${w.last_error ? `<p class="status err small">${esc(w.last_error)}</p>` : ""}
       <div class="table-wrap"><table><thead><tr><th>Role</th><th>Router</th><th>Tunnel IP</th><th>Shares</th><th>Tunnel</th><th>Traffic</th></tr></thead><tbody>
       ${w.sites.map((s) => `<tr><td><span class="pill ${s.role === "hub" ? "up-sched" : ""}">${s.role}</span></td><td><a href="#router/${s.device_id}">${esc(s.name)}</a> <span class="dot ${s.online ? "on" : "off"}"></span></td>
@@ -3918,7 +3935,7 @@ const NAV = [
     { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" }] },
   { group: "Network", icon: "network", items: [
     { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
-    { view: "vpns", label: "Site-to-site VPN", who: "tech" }] },
+    { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
     { view: "alerts", label: "Alerts", who: "tech", count: "alerts" }, { view: "logs", label: "Logs", who: "tech" }, { view: "security", label: "Security", who: "tech" }] },
   { group: "Maintenance", icon: "maint", items: [
@@ -3927,7 +3944,7 @@ const NAV = [
   { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
 ];
 const navCounts = {};
-const navOk = (who) => !who || (who === "tech" ? isTech() : who === "admin" ? isTech() || me.role === "admin" : isTech() && me.role === "admin");
+const navOk = (who) => !who || (who === "tech" ? isTech() : who === "vpn" ? isTech() || canVpn() : who === "admin" ? isTech() || me.role === "admin" : isTech() && me.role === "admin");
 const navOpen = () => { try { return new Set(JSON.parse(localStorage.getItem("tmNavOpen") || '["Devices"]')); } catch (e) { return new Set(["Devices"]); } };
 function renderNav() {
   const open = navOpen();

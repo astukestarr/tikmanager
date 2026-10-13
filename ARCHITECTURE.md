@@ -119,7 +119,11 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
   administrator, created by the one-time setup link) works without Microsoft.
 - **Client users** are invited by email link; password (14+ characters, scrypt) and **mandatory TOTP**. Roles: client
   admin / viewer. Clients see their routers, backups' existence and events, but never configurations or secrets, and
-  can't change routers.
+  can't change routers - except where a TikManager administrator turns on, per client (Clients page), **Winbox**
+  (off / read-only / full router login) and/or **site-to-site VPNs** for that client's admins. Both stay inside the
+  client's own organization (`require_winbox`, `require_vpn`, `vpn_for`, and VPN validation of every router's client);
+  viewers never get them, client admins can't change a router's Winbox service, and turning Winbox off closes the
+  client's open sessions.
 
 ## Security controls
 

@@ -11,7 +11,9 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS orgs (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, created_at REAL NOT NULL,
   cw_id INTEGER UNIQUE, source TEXT NOT NULL DEFAULT 'manual', active INTEGER NOT NULL DEFAULT 1,
-  itg_id TEXT                               -- linked IT Glue organization
+  itg_id TEXT,                              -- linked IT Glue organization
+  client_winbox TEXT NOT NULL DEFAULT 'off', -- client admins may open Winbox to their routers: off / read / full
+  client_vpn INTEGER NOT NULL DEFAULT 0      -- client admins may manage their site-to-site VPNs
 );
 CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS users (
@@ -200,7 +202,8 @@ class DB:
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "orgs" in tables:
             cols = {r[1] for r in c.execute("PRAGMA table_info(orgs)")}
-            for col, ddl in (("cw_id", "INTEGER"), ("source", "TEXT NOT NULL DEFAULT 'manual'"), ("active", "INTEGER NOT NULL DEFAULT 1"), ("itg_id", "TEXT")):
+            for col, ddl in (("cw_id", "INTEGER"), ("source", "TEXT NOT NULL DEFAULT 'manual'"), ("active", "INTEGER NOT NULL DEFAULT 1"), ("itg_id", "TEXT"),
+                             ("client_winbox", "TEXT NOT NULL DEFAULT 'off'"), ("client_vpn", "INTEGER NOT NULL DEFAULT 0")):
                 if col not in cols:
                     c.execute(f"ALTER TABLE orgs ADD COLUMN {col} {ddl}")
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS orgs_cw ON orgs(cw_id)")

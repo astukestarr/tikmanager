@@ -35,7 +35,10 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
   the unauthenticated routes in `route_post` goes through `check_csrf`.
 - **Authorization on every endpoint**: `self.require(tech=..., write=..., admin=...)`; client users only ever see their
   own organization - use `self.org_scope(...)` for list queries and `self.device_for(s, id)` for a single router.
-  Configurations, secrets, scripts, VPNs and upgrades are technician-only.
+  Configurations, secrets, scripts, VPNs and upgrades are technician-only - except Winbox sessions and site-to-site VPNs,
+  which a TikManager administrator can turn on per client for that client's **admins** (`orgs.client_winbox` /
+  `client_vpn`; enforced by `require_winbox()` / `require_vpn()` / `vpn_for()` in `server.py` - use them, never `tech=True`
+  alone, on Winbox and VPN endpoints).
 - **Secrets never stored in plain text**: router passwords are derived (`security.derive(KEY, purpose)`); anything else
   secret is sealed with the vault (`backups.vault.seal(data, context)`), and APIs return only "saved: yes/no", never the
   value. Never log secrets; audit-log only *which* setting changed.

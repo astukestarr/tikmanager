@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.38.0 - 2026-10-13
+
+- **Winbox and site-to-site VPNs for client admins**, turned on per client by an administrator on **Clients** (off by
+  default):
+  - **Winbox**: *Off*, *Read-only* or *Full*. The client's admins get the Winbox box on their routers' Overview and open
+    sessions through the same relay as technicians - locked to their address, 30 minutes, with a temporary router login
+    in the group chosen here. They can extend and close their own sessions only, can't change a router's Winbox service
+    (Turn on / Allow TikManager stay with technicians), and only ever see their own organization's sessions. Turning
+    Winbox off for a client closes its open sessions straight away.
+  - **Site-to-site VPNs**: the client's admins see **Network > Site-to-site VPN** and can create, apply, disable and
+    delete VPNs between their own routers. Everything is limited to their organization - the client is fixed to theirs,
+    other clients' VPNs return "not found", and every router in a VPN must belong to them. The "Existing VPNs on
+    routers" tab stays technician-only.
+  - Client **viewers** never get either. Changing these switches is administrator-only and audit-logged.
+
 ## 1.37.1 - 2026-10-12
 
 Security review of everything added since 1.19.1 (email, lifecycle, wireless, flagged routers, RouterOS security,
