@@ -2538,6 +2538,13 @@ const isAp = (i) => /ap|wap|cap|wifi|wireless|uap|u6|u7|access/i.test(`${i.model
 const ubBadge = (u) => !u ? "" : `<span class="pill ub-badge ${u.source ? "" : "ub-guess"} ${u.status && u.status !== "online" ? "ub-off" : ""}" title="${esc(u.source
   ? [`${u.source}: ${u.name || ""}`, u.model, u.site && `site ${u.site}`, u.status, u.version && `firmware ${u.version}`, u.update && `update ${u.update} available`].filter(Boolean).join(" · ")
   : "Ubiquiti device (by its MAC address / announcement) - not in any UniFi / UISP connection")}">${esc(u.source || "Ubiquiti")}${u.update ? " ↑" : ""}</span>`;
+const ubDevs = (groups) => groups.flatMap((g) => g.devices).filter((x) => x.ubnt && x.ubnt.source);
+const ubIsAp = (x) => /\b(ap|u6|u7|uap|ac|nano|lite|beam|rocket|mesh|in-?wall|pro max|flexhd|bea?con)\b/i.test(`${x.ubnt.model || ""} ${x.ubnt.name || x.name}`);
+const ubChips = (groups) => { const list = ubDevs(groups); return list.length ? `<div class="tubchips">${list.map((x) => { const on = !x.ubnt.status || x.ubnt.status === "online";
+  return `<span class="tubchip ${on ? "" : "off"}" title="${esc([`${x.ubnt.source}: ${x.ubnt.name || x.name}`, x.ubnt.model, x.ip, x.port && `port ${x.port}`, x.bridge_only && "bridge table only",
+    x.ubnt.version && `firmware ${x.ubnt.version}`, x.ubnt.update && `update ${x.ubnt.update} available`, x.ubnt.site && `site ${x.ubnt.site}`].filter(Boolean).join(" · "))}">
+    <span class="dot ${on ? "on" : "off"}"></span><span class="tic">${ubIsAp(x) ? TOPO_ICONS.ap : TOPO_ICONS.network}</span>
+    <span><b>${esc(x.ubnt.name || x.name)}</b><small>${esc([x.ubnt.model, x.ip].filter(Boolean).join(" · "))}</small></span>${x.ubnt.update ? `<span class="tub-up" title="Update available">↑</span>` : ""}</span>`; }).join("")}</div>` : ""; };
 async function loadTopology(d, refresh = false) {
   const card = $("topoCard");
   if (!card) return;
@@ -2549,7 +2556,7 @@ async function loadTopology(d, refresh = false) {
       title="${esc(g.label)}: ${g.count}"><span class="tic">${TOPO_ICONS[g.kind] || TOPO_ICONS.unknown}</span><b class="tcnt">${g.count}</b><span class="tlbl">${esc(g.label)}</span></button>`).join("");
   const gw = t.internet.gateways;
   card.innerHTML = `<div class="row"><h2>Network map</h2><span class="spacer"></span>
-      <span class="small muted">${t.infra} switch${t.infra === 1 ? "" : "es"} / APs · ${t.devices} devices${t.ubnt_matched ? ` · <span class="pill ub-badge">${t.ubnt_matched} UniFi / UISP</span>` : ""} · read ${ago(t.read_at)}</span>
+      <span class="small muted">${t.infra} switch${t.infra === 1 ? "" : "es"} / APs · ${t.devices} devices${t.ubnt_matched ? ` · <button type="button" class="pill ub-badge" id="topoUb" title="List them">${t.ubnt_matched} UniFi / UISP</button>` : ""} · read ${ago(t.read_at)}</span>
       <button class="btn" type="button" id="topoRefresh">Refresh</button></div>
     <div class="topo">
       <div class="tnode tcloud"><span class="tic">${TOPO_ICONS.cloud}</span><span><b>Internet</b>${gw.length ? `<small>${gw.map((g) => `via ${esc(g.gateway)}${gw.length > 1 ? (g.active ? " (active)" : " (standby)") : ""}`).join(" · ")}</small>` : ""}</span></div>
@@ -2562,8 +2569,8 @@ async function loadTopology(d, refresh = false) {
         <div class="tnode tnet"><span class="tic">${TOPO_ICONS.net}</span><span><b>${esc(n.name)}</b><small class="mono">${esc(n.network)}${n.vlan ? ` · VLAN ${esc(n.vlan)}` : ""}</small></span></div>
         ${n.infra.map((i, ii) => `<div class="tbranch"><div class="tnode tinfra"><span class="tic">${isAp(i) ? TOPO_ICONS.ap : TOPO_ICONS.network}</span>
             <span><b>${esc(i.name)}</b> ${ubBadge(i.ubnt)}<small>${esc([(i.ubnt && i.ubnt.model) || i.model || i.platform, i.ip, i.port ? `port ${i.port}` : ""].filter(Boolean).join(" · "))}</small></span></div>
-            ${i.groups.length ? `<div class="tgroups">${bubbles(i.groups, `${ni}.${ii}`)}</div>` : ""}</div>`).join("")}
-        ${n.groups.length ? `<div class="tbranch direct">${n.infra.length ? `<div class="small muted tdirect">Directly on the router</div>` : ""}<div class="tgroups">${bubbles(n.groups, `${ni}`)}</div></div>` : ""}
+            ${ubChips(i.groups)}${i.groups.length ? `<div class="tgroups">${bubbles(i.groups, `${ni}.${ii}`)}</div>` : ""}</div>`).join("")}
+        ${n.groups.length ? `<div class="tbranch direct">${n.infra.length ? `<div class="small muted tdirect">Directly on the router</div>` : ""}${ubChips(n.groups)}<div class="tgroups">${bubbles(n.groups, `${ni}`)}</div></div>` : ""}
         ${!n.infra.length && !n.groups.length ? `<div class="small muted tempty">No devices seen</div>` : ""}
       </div>`).join("")}</div>
     </div>
@@ -2592,6 +2599,16 @@ async function loadTopology(d, refresh = false) {
     $("topoClose").addEventListener("click", () => { rView.topoSel = null; show("-", "-"); });
   };
   card.querySelectorAll(".tbub").forEach((b) => b.addEventListener("click", () => show(b.dataset.where, b.dataset.kind)));
+  $("topoUb")?.addEventListener("click", () => {   // every UniFi / UISP device on this map, with where it sits
+    const rows = t.networks.flatMap((n) => [...ubDevs(n.groups).map((x) => [x, n.name]), ...n.infra.flatMap((i) => ubDevs(i.groups).map((x) => [x, `${n.name} › ${i.name}`]))]);
+    $("topoList").innerHTML = `<div class="topo-list"><div class="row"><b>UniFi / UISP devices here</b><span class="muted small">${rows.length}</span><span class="spacer"></span>
+        <a class="btn" href="#unifi">UniFi / UISP sites</a><button class="btn" type="button" id="topoClose">Close</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Device</th><th>Model</th><th>IP</th><th>Behind</th><th>Port</th><th>Status</th><th>Firmware</th></tr></thead><tbody>
+      ${rows.map(([x, where]) => `<tr><td><b>${esc(x.ubnt.name || x.name)}</b> ${ubBadge(x.ubnt)}</td><td>${esc(x.ubnt.model || "")}</td><td class="mono small">${esc(x.ip || "")}${x.bridge_only ? `<div class="small muted">bridge table</div>` : ""}</td>
+        <td class="small">${esc(where)}</td><td class="mono small">${esc(x.port || "")}</td><td>${esc(x.ubnt.status || "")}</td>
+        <td class="small">${esc(x.ubnt.version || "")}${x.ubnt.update ? ` <span class="pill up-run">→ ${esc(x.ubnt.update)}</span>` : ""}</td></tr>`).join("")}</tbody></table></div></div>`;
+    $("topoClose").addEventListener("click", () => { $("topoList").innerHTML = ""; });
+  });
   $("topoRefresh").addEventListener("click", () => loadTopology(d, true));
   if (rView.topoSel) show(...rView.topoSel);
 }

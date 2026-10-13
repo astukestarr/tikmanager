@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.4 - 2026-10-13
+
+- **UniFi / UISP devices drawn on the network map**: each recognised device is shown by name under the switch / network
+  it's behind - AP or switch icon, model and IP, a green / red status dot and ↑ when an update is waiting (hover for
+  port, firmware and site). Before, they were only counted inside the "Network devices" bubble. Clicking the
+  "N UniFi / UISP" count in the map header lists them all with where they sit, port, status and firmware.
+
 ## 1.43.3 - 2026-10-13
 
 - **Network map shows only the UniFi / UISP devices at that location**: devices are matched against the router's own

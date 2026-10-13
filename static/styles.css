@@ -626,3 +626,13 @@ tr.pt-selrow td { background: color-mix(in srgb, var(--accent) 8%, transparent);
 .tubnt-dev small { display: block; color: var(--muted); font-size: 11px; }
 .tubnt-dev .tic svg { width: 16px; height: 16px; }
 .tnode .ub-badge { display: inline-block; width: auto; margin-left: 4px; }
+
+/* UniFi / UISP devices drawn on the network map */
+.tubchips { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; align-items: stretch; }
+.tubchip { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-left: 3px solid #006fff; border-radius: 8px; padding: 3px 8px; background: var(--panel); font-size: 12px; text-align: left; }
+.tubchip.off { border-left-color: #dc2626; }
+.tubchip b { display: block; font-weight: 600; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tubchip small { display: block; color: var(--muted); font-size: 10.5px; }
+.tubchip .tic svg { width: 15px; height: 15px; color: #006fff; }
+.tub-up { margin-left: auto; color: #b45309; font-weight: 700; }
+button.pill.ub-badge { cursor: pointer; font: inherit; font-size: 11px; }
