@@ -2549,7 +2549,7 @@ async function loadTopology(d, refresh = false) {
       title="${esc(g.label)}: ${g.count}"><span class="tic">${TOPO_ICONS[g.kind] || TOPO_ICONS.unknown}</span><b class="tcnt">${g.count}</b><span class="tlbl">${esc(g.label)}</span></button>`).join("");
   const gw = t.internet.gateways;
   card.innerHTML = `<div class="row"><h2>Network map</h2><span class="spacer"></span>
-      <span class="small muted">${t.infra} switch${t.infra === 1 ? "" : "es"} / APs · ${t.devices} devices · read ${ago(t.read_at)}</span>
+      <span class="small muted">${t.infra} switch${t.infra === 1 ? "" : "es"} / APs · ${t.devices} devices${t.ubnt_matched ? ` · <span class="pill ub-badge">${t.ubnt_matched} UniFi / UISP</span>` : ""} · read ${ago(t.read_at)}</span>
       <button class="btn" type="button" id="topoRefresh">Refresh</button></div>
     <div class="topo">
       <div class="tnode tcloud"><span class="tic">${TOPO_ICONS.cloud}</span><span><b>Internet</b>${gw.length ? `<small>${gw.map((g) => `via ${esc(g.gateway)}${gw.length > 1 ? (g.active ? " (active)" : " (standby)") : ""}`).join(" · ")}</small>` : ""}</span></div>
@@ -2571,18 +2571,11 @@ async function loadTopology(d, refresh = false) {
           <span class="pill r-${esc(r.kind)}">${esc({ vpn: "VPN", static: "Static", dynamic: "Dynamic" }[r.kind] || r.kind)}</span>
           <span class="mono">${esc(r.dst)}</span><span class="small muted">via ${esc(r.gateway)}${r.comment ? ` · ${esc(r.comment)}` : ""}${r.active ? "" : " · inactive"}</span></div>`).join("")}</div>`
           : t.routes_hidden ? `<div class="troutes small muted">This router also routes to other networks (shown to technicians).</div>` : ""}
-    ${t.ubnt && t.ubnt.length ? `<div class="tubnt"><div class="row"><b>From UniFi / UISP</b><span class="small muted">this client's devices that ${esc(d.name)} doesn't see
-        (behind a UniFi gateway, at another site, or offline)${t.ubnt_matched ? ` · ${t.ubnt_matched} more matched on the map above` : ""}</span><span class="spacer"></span>
-        <a class="btn" href="#unifi">UniFi / UISP sites</a></div>
-      ${t.ubnt.map((g) => `<div class="tubnt-site"><div class="small"><span class="pill">${esc(g.source)}</span> <b>${esc(g.site || "")}</b> · ${g.devices.length} device${g.devices.length === 1 ? "" : "s"}
-          ${g.devices.filter((x) => x.status !== "online").length ? ` · <span class="status err">${g.devices.filter((x) => x.status !== "online").length} offline</span>` : ""}</div>
-        <div class="tubnt-devs">${g.devices.map((x) => `<span class="tubnt-dev ${x.status === "online" ? "" : "off"}" title="${esc([x.model, x.ip, x.version && `firmware ${x.version}`, x.update && `update ${x.update} available`].filter(Boolean).join(" · "))}">
-          <span class="dot ${x.status === "online" ? "on" : "off"}"></span><span class="tic">${/ap|u6|u7|uap|nano|lite|beam|rocket/i.test(`${x.model} ${x.name}`) ? TOPO_ICONS.ap : TOPO_ICONS.network}</span>
-          <span><b>${esc(x.name || "")}</b><small>${esc(x.model || "")}${x.ip ? ` · ${esc(x.ip)}` : ""}</small></span>${x.update ? `<span class="pill up-run" title="Update available">update</span>` : ""}</span>`).join("")}</div></div>`).join("")}</div>` : ""}
     <div id="topoList"></div>
     <p class="small muted">Switches and access points come from neighbour discovery (MNDP / LLDP / CDP); devices from the ARP table and
       DHCP leases, recognised by maker and name - some stay Unidentified. <b>UniFi</b> / <b>UISP</b> badges: matched by MAC to your UniFi / UISP
-      connections; <b>Ubiquiti</b>: Ubiquiti gear no connection knows. Click a group to list its devices.</p>`;
+      connections - including devices only in the router's bridge table (no IP), placed at their port; <b>Ubiquiti</b>: Ubiquiti gear no
+      connection knows. Only devices at this router's location are shown. Click a group to list its devices.</p>`;
   const show = (where, kind) => {
     rView.topoSel = [where, kind];
     const [ni, ii] = where.split(".").map(Number);
@@ -2594,7 +2587,8 @@ async function loadTopology(d, refresh = false) {
         <span class="spacer"></span><button class="btn" type="button" id="topoClose">Close</button></div>
       <div class="table-wrap"><table><thead><tr><th>Name</th><th>IP address</th><th>MAC address</th><th>Port</th></tr></thead>
       <tbody>${g.devices.map((x) => `<tr><td>${esc(x.name)} ${ubBadge(x.ubnt)}${x.ubnt && x.ubnt.model ? `<div class="small muted">${esc(x.ubnt.model)}${x.ubnt.site ? ` · ${esc(x.ubnt.site)}` : ""}</div>` : ""}</td>
-        <td class="mono">${esc(x.ip)}</td><td class="mono small">${esc(x.mac)}</td><td class="mono small">${esc(x.port)}</td></tr>`).join("")}</tbody></table></div></div>`;
+        <td class="mono">${esc(x.ip)}${x.bridge_only ? `<div class="small muted" title="Not in the router's ARP / DHCP tables - found in its bridge host table">bridge table</div>` : ""}</td>
+        <td class="mono small">${esc(x.mac)}</td><td class="mono small">${esc(x.port)}</td></tr>`).join("")}</tbody></table></div></div>`;
     $("topoClose").addEventListener("click", () => { rView.topoSel = null; show("-", "-"); });
   };
   card.querySelectorAll(".tbub").forEach((b) => b.addEventListener("click", () => show(b.dataset.where, b.dataset.kind)));

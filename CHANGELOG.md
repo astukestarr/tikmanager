@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.3 - 2026-10-13
+
+- **Network map shows only the UniFi / UISP devices at that location**: devices are matched against the router's own
+  tables - ARP, DHCP, neighbours and now the **bridge host table** - so UniFi / UISP gear with no IP there (switches and
+  APs on a management VLAN) is placed on the map at its port / VLAN, badged and marked "bridge table". The list of the
+  client's devices from every location ("From UniFi / UISP") is gone; the map header counts the UniFi / UISP devices
+  recognised at this location.
+
 ## 1.43.2 - 2026-10-13
 
 - **UniFi devices on multi-site consoles**: when only one of a console's sites reports any devices, the devices Ubiquiti's

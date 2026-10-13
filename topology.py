@@ -104,6 +104,7 @@ def build(raw, device, full=True, known=None):
     of this router's client (ubnt.py): matching devices are tagged, the rest are listed as seen by UniFi / UISP only."""
     known = known or {}
     seen = set()
+    vlan_by = {(v.get("interface"), str(v.get("vlan-id"))): v.get("name") for v in raw.get("vlans") or []}
     addrs = [a for a in raw.get("addresses") or [] if a.get("disabled") != "true"]
     comments = {i.get("name"): i.get("comment") or "" for i in raw.get("interfaces") or []}
     vlan_id = {v.get("name"): v.get("vlan-id") for v in raw.get("vlans") or []}
@@ -178,6 +179,21 @@ def build(raw, device, full=True, known=None):
             target = network_for(d["ip"], d["iface"]) or other
         target["groups"].setdefault(kind, []).append(entry)
 
+    # UniFi / UISP devices the router only sees in its bridge host table (no IP in ARP / DHCP - e.g. switches and APs on a
+    # management VLAN): they're at this location, so they go on the map at their port. Devices of the client's other
+    # locations aren't in this router's tables and aren't shown.
+    for h in raw.get("hosts") or []:
+        mac = str(h.get("mac-address") or "").upper()
+        if h.get("local") == "true" or _mac12(mac) in seen or _mac12(mac) not in known:
+            continue
+        k = known[_mac12(mac)]
+        seen.add(_mac12(mac))
+        port = _port(h.get("on-interface"))
+        entry = {"name": k.get("name") or mac, "ip": k.get("ip") or "", "mac": mac, "port": port, "ubnt": k, "bridge_only": True}
+        vif = vlan_by.get((h.get("bridge"), str(h.get("vid")))) if h.get("vid") else None
+        target = infra_by_port.get(port) or network_for(k.get("ip") or "", vif or h.get("bridge") or "") or other
+        target["groups"].setdefault("network", []).append(entry)
+
     def groups(g):
         return [{"kind": k, "label": LABELS[k], "count": len(g[k]), "devices": sorted(g[k], key=lambda x: _ip(x["ip"]) or ipaddress.ip_address("255.255.255.255"))}
                 for k in ORDER if g.get(k)]
@@ -201,13 +217,6 @@ def build(raw, device, full=True, known=None):
         others.append({"dst": dst, "gateway": str(r.get("gateway") or ""), "kind": kind, "active": r.get("active") == "true",
                        "comment": r.get("comment") or "", "table": r.get("routing-table") or ""})
     total = sum(g["count"] for n in out_nets for g in n["groups"]) + sum(g["count"] for n in out_nets for i in n["infra"] for g in i["groups"])
-    # UniFi / UISP devices of this client the router doesn't see (behind a UniFi gateway, another site, offline ...)
-    extra = {}
-    for mac, k in known.items():
-        if mac not in seen:
-            extra.setdefault((k["source"], k["site"]), []).append(k)
-    ubnt = [{"source": src, "site": site, "site_id": devs[0]["site_id"], "devices": sorted(devs, key=lambda x: (not x.get("console"), x["name"] or ""))}
-            for (src, site), devs in sorted(extra.items(), key=lambda x: (x[0][0], x[0][1] or ""))]
     return {"internet": internet, "networks": out_nets, "routes": others if full else [], "routes_hidden": (not full) and bool(others),
-            "devices": total, "infra": sum(len(n["infra"]) for n in out_nets), "ubnt": ubnt,
+            "devices": total, "infra": sum(len(n["infra"]) for n in out_nets),
             "ubnt_matched": sum(1 for m in seen if m in known)}

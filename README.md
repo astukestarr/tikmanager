@@ -511,8 +511,9 @@ UISP subscriber locations (endpoints) are marked as such. A UniFi console that r
 Key network server) doesn't tell the cloud API which site each device is on: TikManager asks the console through
 Ubiquiti's cloud connector where it can and matches gateways by MAC; devices it still can't place are listed for
 technicians only. On a router's **network map**, UniFi / UISP devices the router sees are badged **UniFi** / **UISP** (matched
-by MAC: name, model, status, firmware update and site), other Ubiquiti gear **Ubiquiti**, and the client's UniFi / UISP
-devices the router doesn't see are listed under **From UniFi / UISP**. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
+by MAC: name, model, status, firmware update and site) - including devices that are only in the router's bridge host table
+(no IP, e.g. on a management VLAN), placed at their port - and other Ubiquiti gear **Ubiquiti**. Only devices at that
+router's location (in its tables) are shown, not the client's other locations. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
 minutes by default.
 
 ## Tasks (scripts, groups, schedules, automatic firmware updates)
