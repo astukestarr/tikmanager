@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.42.0 - 2026-10-13
+
+- **UniFi and UISP**: **Admin > Integrations > UniFi & UISP** takes any number of connections - **UniFi** (an API key from
+  unifi.ui.com, Ubiquiti's read-only Site Manager API) and **UISP** servers (address + API token). Each belongs to your
+  MSP account (assign each site to a client; first matched by name) or to **one client** (their own UniFi account / UISP
+  server - everything in it is theirs).
+  - **Devices > UniFi / UISP**: every site with client, source, devices, offline devices (and since when), firmware
+    updates waiting, and for UniFi clients, WAN uptime, ISP and internet issues; click a site for its devices (model, IP,
+    status, firmware, update available). Client users see their own sites, read-only.
+  - Synced every 10 minutes or with **Sync now**; keys / tokens are sealed with the vault and never shown again.
+  - A UISP server with a self-signed certificate can be trusted by **pinning** its certificate's SHA-256 (the connection
+    is refused if it changes) - never by turning verification off. UISP addresses must be `https://host[:port]`.
+  - UniFi consoles that run several sites: devices are placed through the console's integration API via Ubiquiti's cloud
+    connector where available, and gateways by MAC; the rest are listed for technicians.
+  - New alert **UniFi / UISP site has offline devices** - one per site (a dead console is one alert), after 10 minutes by
+    default.
+
 ## 1.41.0 - 2026-10-13
 
 - **Reconnect a VPN tunnel**: a **Reconnect** button on every existing VPN (the Existing VPNs tab and the router's

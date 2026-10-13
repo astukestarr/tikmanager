@@ -1165,6 +1165,8 @@ const INTEGRATIONS = [
     about: "Post alerts to a Teams channel (set up on the Alerts page)." },
   { id: "webhooks", name: "Webhooks", cat: "Notifications", color: "#e8611a", link: "alerts",
     about: "Alerts to Slack, Discord, ntfy or any HTTPS endpoint (Alerts page)." },
+  { id: "ubnt", name: "UniFi & UISP", cat: "Network", color: "#006fff",
+    about: "UniFi (unifi.ui.com) and UISP sites and devices - your accounts and clients' own - each site assigned to a client." },
   { id: "github", name: "GitHub script library", cat: "Scripts", color: "#24292f", test: true,
     about: "Browse the community RouterOS script library; share scripts with a token." },
   { id: "offsite", name: "Off-site backup", cat: "Backup", color: "#2e9d5b", link: "system",
@@ -1176,6 +1178,7 @@ const integInitials = (n) => n.replace(/[^A-Za-z0-9 ]/g, "").split(/\s+/).map((w
 function integState(x, r) {
   const res = intView.result[x.id];
   if (x.id === "webhooks") return r.webhooks.count ? ["ok", `${r.webhooks.count} webhook${r.webhooks.count === 1 ? "" : "s"}`] : ["off", "Not set up"];
+  if (x.id === "ubnt") { const a = r.ubnt.accounts; return !a.length ? ["off", "Not set up"] : a.some((y) => y.last && !y.last.ok) ? ["err", "A connection failed"] : ["ok", `${a.length} connection${a.length === 1 ? "" : "s"}`]; }
   if (x.id === "github" && !r.github.configured) return ["ok", "Browsing (no token)"];
   if (x.id === "offsite" && r.offsite.configured && r.offsite.last && r.offsite.last.ok === false) return ["err", "Last backup failed"];
   if (!r[x.id]?.configured) return ["off", "Not set up"];
@@ -1271,6 +1274,22 @@ async function integDetail(r, kind) {
       <div class="grid2">${field("github", "library", "Library repository", { ph: "astukestarr/routeros-scripts" })}${field("github", "token", "GitHub token", { secret: true })}</div>
       <div class="actions"><button class="btn primary" type="button" data-isave="github">Save</button><button class="btn" type="button" data-itest="github">Test</button>
         <span class="status" id="iStatus_github"></span></div></div>`,
+    ubnt: () => `
+    <div class="card"><div class="row"><h2>Connections</h2></div>
+      <p class="small muted">Each connection is a <b>UniFi</b> account (unifi.ui.com - an API key from Settings &gt; API, Ubiquiti's read-only Site Manager API) or a
+        <b>UISP</b> server (its address + an API token from UISP &gt; Settings &gt; Users &gt; API tokens; read-only is enough). Mark a connection as a client's own
+        and everything in it belongs to that client; for your own (MSP) accounts, assign each site to a client on <a href="#unifi">Devices &gt; UniFi / UISP</a>.
+        Read every 10 minutes.</p>
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Belongs to</th><th>Sites</th><th>Last sync</th><th></th></tr></thead><tbody>
+      ${r.ubnt.accounts.map((a) => `<tr><td><b>${esc(a.name)}</b>${a.url ? `<div class="small muted mono">${esc(a.url)}</div>` : ""}</td>
+        <td>${a.kind === "uisp" ? "UISP" : "UniFi"}${a.pinned ? ` <span class="pill" title="Self-signed certificate trusted by its fingerprint">pinned certificate</span>` : ""}</td>
+        <td>${a.org ? esc(a.org) : `<span class="muted">Your MSP account</span>`}</td><td>${a.sites}</td>
+        <td class="small">${a.last ? `<span class="${a.last.ok ? "status ok" : "status err"}">${a.last.ok ? "OK" : "Failed"}</span> ${ago(a.last.at)}<div class="muted">${esc(a.last.detail)}</div>` : "never"}</td>
+        <td class="row"><button class="btn small" type="button" data-na="sync" data-id="${a.id}">Sync</button><button class="btn small" type="button" data-na="test" data-id="${a.id}">Test</button>
+          <button class="btn small" type="button" data-na="edit" data-id="${a.id}">Edit</button><button class="btn small danger" type="button" data-na="delete" data-id="${a.id}">Remove</button></td></tr>`).join("")
+        || `<tr><td colspan="6" class="muted">No connections yet - Add connection.</td></tr>`}</tbody></table></div>
+      <div class="actions"><button class="btn primary" type="button" id="naNew">Add connection</button><span class="status" id="iStatus_ubnt"></span></div>
+      <div id="naForm"></div></div>`,
     itg: () => `
     <div class="card"><div class="row"><h2>IT Glue</h2>${pill(r.itg.configured)}</div>
       <p class="small muted">Document every router in IT Glue as a configuration (name, model, serial, WAN IP, RouterOS version and a link back here).
@@ -1309,6 +1328,50 @@ async function integDetail(r, kind) {
   }
   if (kind === "cw" && r.cw.configured) loadCw(false);   // only the open integration's lists
   if (kind === "itg" && r.itg.configured) loadItg(r, false);
+  if (kind === "ubnt") wireNetAccounts(r);
+}
+// UniFi & UISP connections: add / edit / test / sync / remove
+async function wireNetAccounts(r) {
+  const orgs = await api("/api/orgs").catch(() => []);
+  const say = (m, ok) => { $("iStatus_ubnt").textContent = m; $("iStatus_ubnt").className = `status ${ok ? "ok" : "err"}`; };
+  const form = (a) => {
+    a = a || { kind: "unifi", name: "", url: "", org_id: null };
+    $("naForm").innerHTML = `<h3>${a.id ? `Edit ${esc(a.name)}` : "Add a connection"}</h3>
+      <div class="grid2"><label class="field">Type <select id="naKind"><option value="unifi">UniFi (unifi.ui.com)</option><option value="uisp">UISP server</option></select></label>
+        <label class="field">Name <input id="naName" value="${esc(a.name)}" placeholder="e.g. Our UniFi account, Miller Farms UISP" maxlength="80"></label>
+        <label class="field na-uisp">UISP address <input id="naUrl" value="${esc(a.url || "")}" placeholder="https://uisp.example.com" spellcheck="false"></label>
+        <label class="field"><span id="naKeyLabel">API key</span> <input id="naKey" type="password" autocomplete="new-password" placeholder="${a.key_set ? "saved - leave blank to keep" : ""}" spellcheck="false"></label>
+        <label class="field">Belongs to <select id="naOrg"><option value="">Your MSP account - assign sites to clients</option>${orgs.map((o) => `<option value="${o.id}" ${o.id === a.org_id ? "selected" : ""}>Client: ${esc(o.name)} (their own)</option>`).join("")}</select></label>
+        <label class="chk na-uisp"><input type="checkbox" id="naPin" ${a.pinned ? "checked" : ""}> Trust this server's certificate (self-signed)</label></div>
+      <p class="small muted na-uisp">Only tick this for a UISP server with a self-signed certificate: TikManager records the certificate's fingerprint now and refuses the
+        connection if it ever changes. A normal (e.g. Let's Encrypt) certificate needs nothing.</p>
+      <div class="actions"><button class="btn primary" type="button" id="naSave">Save and sync</button><button class="btn" type="button" id="naCancel">Cancel</button></div>`;
+    $("naKind").value = a.kind;
+    const kindUi = () => { const uisp = $("naKind").value === "uisp"; document.querySelectorAll(".na-uisp").forEach((el) => el.classList.toggle("hidden", !uisp));
+      $("naKeyLabel").textContent = uisp ? "API token" : "API key"; };
+    $("naKind").addEventListener("change", kindUi); kindUi();
+    $("naCancel").addEventListener("click", () => { $("naForm").innerHTML = ""; });
+    $("naSave").addEventListener("click", async () => {
+      say("Saving...", true);
+      try {
+        await post("/api/net/accounts", { id: a.id, kind: $("naKind").value, name: $("naName").value, url: $("naUrl").value, key: $("naKey").value,
+          org_id: $("naOrg").value ? +$("naOrg").value : null, trust_cert: $("naKind").value === "uisp" && $("naPin").checked });
+        intView.result.ubnt = { ok: true }; await adminIntegrations(); say("Saved - syncing in the background (refresh in a moment).", true);
+      } catch (e) { say(e.message); }
+    });
+  };
+  $("naNew").addEventListener("click", () => form());
+  document.querySelectorAll("[data-na]").forEach((b) => b.addEventListener("click", async () => {
+    const a = r.ubnt.accounts.find((y) => y.id === +b.dataset.id), act = b.dataset.na;
+    if (act === "edit") return form(a);
+    if (act === "delete" && !confirm(`Remove the connection "${a.name}"? Its sites and devices disappear from TikManager (nothing changes in UniFi / UISP).`)) return;
+    say(act === "sync" ? "Syncing..." : act === "test" ? "Testing..." : "Removing...", true);
+    try {
+      const x = await post(`/api/net/accounts/${a.id}/${act}`);
+      if (act === "test") return say(x.detail, x.ok);
+      await adminIntegrations(); say(act === "sync" ? (x.last && !x.last.ok ? x.last.detail : "Synced.") : "Removed.", !(x.last && !x.last.ok));
+    } catch (e) { say(e.message); }
+  }));
 }
 
 // Which ConnectWise company types count as customers: saved on the server; first time, everything except the usual
@@ -3955,7 +4018,8 @@ const NAV = [
   { view: "dashboard", label: "Dashboard", icon: "dashboard" },
   { group: "Devices", icon: "routers", count: "devices", items: [
     { view: "routers", label: "All devices", count: "devices" }, { view: "routers", arg: "ap", label: "Access points", count: "ap" },
-    { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" }] },
+    { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" },
+    { view: "unifi", label: "UniFi / UISP", count: "unifi", who: "unifi" }] },
   { group: "Network", icon: "network", items: [
     { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
     { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
@@ -3967,7 +4031,7 @@ const NAV = [
   { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
 ];
 const navCounts = {};
-const navOk = (who) => !who || (who === "tech" ? isTech() : who === "vpn" ? isTech() || canVpn() : who === "admin" ? isTech() || me.role === "admin" : isTech() && me.role === "admin");
+const navOk = (who) => !who || (who === "unifi" ? !!me.unifi : who === "tech" ? isTech() : who === "vpn" ? isTech() || canVpn() : who === "admin" ? isTech() || me.role === "admin" : isTech() && me.role === "admin");
 const navOpen = () => { try { return new Set(JSON.parse(localStorage.getItem("tmNavOpen") || '["Devices"]')); } catch (e) { return new Set(["Devices"]); } };
 function renderNav() {
   const open = navOpen();
@@ -3997,11 +4061,92 @@ function navActive() {
     if (g.querySelector(".active") && !g.classList.contains("open")) { g.classList.add("open"); g.querySelector(".nav-cat").setAttribute("aria-expanded", "true"); }
   });
 }
+// --- UniFi (unifi.ui.com): sites with health, assigned to clients; devices per site -----------------------------------------
+const uView = { org: "", q: "", open: null, problems: false };
+const fmtMac = (m) => (String(m || "").match(/.{2}/g) || []).join(":").toUpperCase();
+const pct = (v) => v == null ? "—" : `${Number(v).toFixed(Number(v) >= 99.95 ? 0 : 2)}%`;
+async function unifiPage() {
+  let x;
+  try { x = await api("/api/unifi"); } catch (e) { $("main").innerHTML = `<h1>UniFi</h1><p class="status err">${esc(e.message)}</p>`; return; }
+  const tech = isTech();
+  $("main").innerHTML = `<div class="row"><div><h1>UniFi / UISP</h1><p class="muted">${tech ? "Sites and devices from your UniFi and UISP connections. Assign each site of your own accounts to a client - client users see their own sites here."
+      : "Your UniFi network: sites, devices and their health."}</p></div><span class="spacer"></span>
+      ${tech ? `<button class="btn" type="button" id="uSync" ${x.running ? "disabled" : ""}>${x.running ? "Syncing..." : "Sync now"}</button>` : ""}</div>
+    ${!x.configured && tech ? `<div class="card"><p>Add a UniFi or UISP connection on <a href="#admin">Admin &gt; Integrations &gt; UniFi &amp; UISP</a> to see sites here.</p></div>` : ""}
+    <div class="card"><div class="row">
+      ${tech ? `<select id="uOrg" aria-label="Client"><option value="">All clients</option><option value="none">Not assigned</option>${(x.orgs || []).map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
+      <input id="uQ" type="search" placeholder="Search sites, consoles, devices" value="${esc(uView.q)}" aria-label="Search">
+      <label class="chk"><input type="checkbox" id="uProb" ${uView.problems ? "checked" : ""}> Offline or updates only</label><span class="spacer"></span>
+      ${tech ? (x.accounts || []).filter((a) => a.last && !a.last.ok).map((a) => `<span class="small status err" title="${esc(a.last.detail)}">${esc(a.name)}: sync failed</span>`).join(" ") : ""}</div>
+      <div class="table-wrap"><table><thead><tr><th>Site</th>${tech ? "<th>Client</th>" : ""}<th>Source</th><th>Devices</th><th>Offline</th><th>Updates</th><th>Clients</th><th>WAN uptime</th><th>ISP</th></tr></thead>
+        <tbody id="uRows"></tbody></table></div></div>
+    ${tech && x.unplaced && x.unplaced.length ? `<div class="card"><h2>Devices not matched to a site (${x.unplaced.length})</h2>
+      <p class="small muted">These are on UniFi consoles that run several sites, and Ubiquiti's cloud API doesn't say which site each belongs to (and the console's own
+        integration API wasn't reachable through the cloud connector). They're shown here for technicians only.</p>
+      <div class="table-wrap"><table><thead><tr><th>Device</th><th>Console</th><th>Model</th><th>IP</th><th>Status</th><th>Firmware</th></tr></thead><tbody>
+      ${x.unplaced.map((d) => `<tr><td>${esc(d.name)}<div class="small muted mono">${esc(fmtMac(d.mac))}</div></td><td>${esc(d.account)}${d.console ? ` / ${esc(d.console)}` : ""}</td><td>${esc(d.model || "")}</td>
+        <td class="mono small">${esc(d.ip || "")}</td><td>${uStatus(d)}</td><td class="small">${esc(d.version || "")}${d.update_available ? ` <span class="pill up-run">→ ${esc(d.update_available)}</span>` : ""}</td></tr>`).join("")}
+      </tbody></table></div></div>` : ""}`;
+  if ($("uOrg")) $("uOrg").value = uView.org;
+  const draw = () => {
+    const q = uView.q.toLowerCase();
+    const rows = x.sites.filter((s) => (!uView.org || (uView.org === "none" ? !s.org_id : String(s.org_id) === uView.org))
+      && (!q || `${s.name} ${s.internal} ${s.console || ""} ${s.account || ""} ${s.org || ""} ${s.isp || ""} ${s.address || ""}`.toLowerCase().includes(q))
+      && (!uView.problems || s.offline || s.updates));
+    $("uRows").innerHTML = rows.map((s) => `<tr class="click" data-usite="${esc(s.id)}"><td><b>${esc(s.name)}</b>${s.type === "endpoint" ? ` <span class="pill">subscriber</span>` : ""}${s.internet_issues ? ` <span class="pill up-failed">internet issues</span>` : ""}
+        ${s.address ? `<div class="small muted">${esc(s.address)}</div>` : ""}</td>
+      ${tech ? `<td class="noclick">${canWrite() && !s.own_account ? `<select data-uassign="${esc(s.id)}" aria-label="Client for ${esc(s.name)}"><option value="">— not assigned —</option>${(x.orgs || []).map((o) =>
+        `<option value="${o.id}" ${o.id === s.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>` : `${esc(s.org || "—")}${s.own_account ? ` <span class="small muted">(their own)</span>` : ""}`}</td>` : ""}
+      <td class="small"><span class="pill">${s.kind === "uisp" ? "UISP" : "UniFi"}</span> ${esc(s.account || "")}${s.console ? `<div class="muted">${esc(s.console)}</div>` : ""}</td><td>${s.devices}</td>
+      <td>${s.offline ? `<span class="status err">${s.offline}</span>${s.offline_since ? `<div class="small muted">since ${ago(s.offline_since)}</div>` : ""}` : `<span class="status ok">0</span>`}</td>
+      <td>${s.updates ? `<span class="pill up-run">${s.updates}</span>` : "0"}</td>
+      <td class="small">${s.wifi_clients != null || s.wired_clients != null ? `${(s.wifi_clients || 0) + (s.wired_clients || 0)} <span class="muted">(${s.wifi_clients || 0} WiFi · ${s.wired_clients || 0} wired)</span>` : "—"}</td>
+      <td>${pct(s.wan_uptime)}</td><td class="small">${esc(s.isp || "—")}</td></tr>
+      ${uView.open === s.id ? `<tr class="u-detail"><td colspan="${tech ? 9 : 8}"><div id="uDev"><p class="small muted">Loading devices...</p></div></td></tr>` : ""}`).join("")
+      || `<tr><td colspan="9" class="muted">${x.sites.length ? "Nothing matches." : tech ? "No sites yet - sync, or check the API key." : "No UniFi sites are assigned to you yet."}</td></tr>`;
+    if (uView.open && $("uDev")) loadUDevices(uView.open);
+  };
+  draw();
+  $("uQ").addEventListener("input", (e) => { uView.q = e.target.value; draw(); });
+  $("uProb").addEventListener("change", (e) => { uView.problems = e.target.checked; draw(); });
+  $("uOrg")?.addEventListener("change", (e) => { uView.org = e.target.value; draw(); });
+  $("uRows").addEventListener("click", (e) => {
+    if (e.target.closest(".noclick")) return;
+    const tr = e.target.closest("[data-usite]");
+    if (tr) { uView.open = uView.open === tr.dataset.usite ? null : tr.dataset.usite; draw(); }
+  });
+  $("uRows").addEventListener("change", async (e) => {
+    const sel = e.target.closest("[data-uassign]");
+    if (!sel) return;
+    try { await post("/api/unifi/assign", { site: sel.dataset.uassign, org_id: sel.value ? +sel.value : null }); const s = x.sites.find((y) => y.id === sel.dataset.uassign); s.org_id = sel.value ? +sel.value : null; }
+    catch (err) { alert(err.message); unifiPage(); }
+  });
+  $("uSync")?.addEventListener("click", async () => {
+    $("uSync").disabled = true; $("uSync").textContent = "Syncing...";
+    try { await post("/api/unifi/sync"); } catch (err) { alert(err.message); }
+    unifiPage(); refreshNavCounts();
+  });
+}
+const uStatus = (d) => { const on = String(d.status || "").toLowerCase() === "online";
+  return `<span class="small ${on ? "status ok" : "status err"}"><span class="dot ${on ? "on" : "off"}"></span>${esc(d.status || "unknown")}</span>${!on && d.offline_since ? `<div class="small muted">since ${ago(d.offline_since)}</div>` : ""}`; };
+async function loadUDevices(key) {
+  let r;
+  try { r = await api(`/api/unifi/sites/${encodeURIComponent(key)}`); } catch (e) { if ($("uDev")) $("uDev").innerHTML = `<p class="status err small">${esc(e.message)}</p>`; return; }
+  if (!$("uDev") || uView.open !== key) return;
+  $("uDev").innerHTML = r.devices.length ? `<div class="table-wrap"><table><thead><tr><th>Device</th><th>Model</th><th>IP</th><th>Status</th><th>Firmware</th><th>Up since</th></tr></thead><tbody>
+    ${r.devices.map((d) => `<tr><td><b>${esc(d.name)}</b>${d.is_console ? ` <span class="pill">console</span>` : ""}<div class="small muted mono">${esc(fmtMac(d.mac))}</div></td>
+      <td>${esc(d.model || d.shortname || "")}</td><td class="mono small">${esc(d.ip || "")}</td><td>${uStatus(d)}</td>
+      <td class="small">${esc(d.version || "")}${d.update_available ? ` <span class="pill up-run" title="Update available">→ ${esc(d.update_available)}</span>` : ""}</td>
+      <td class="small">${d.startup_time && String(d.status).toLowerCase() === "online" ? esc(new Date(d.startup_time).toLocaleString()) : ""}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="small muted">No devices matched to this site.</p>`;
+}
+
 async function refreshNavCounts() {
   try {
     const devs = (await api("/api/devices")).filter((d) => d.state === "adopted");
     navCounts.devices = devs.length;
     for (const k of ["ap", "router", "switch"]) navCounts[k] = devs.filter((d) => d.kind === k).length;
+    if (me.unifi) { const u = await api("/api/unifi").catch(() => null); navCounts.unifi = u ? u.sites.filter((s) => s.offline).length || "" : ""; }
     if (isTech()) {
       const a = await api("/api/alerts").catch(() => null);
       navCounts.alerts = a ? a.open.length : 0;
@@ -4009,7 +4154,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

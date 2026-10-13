@@ -183,6 +183,22 @@ CREATE TABLE IF NOT EXISTS alerts (
   cw_ticket INTEGER, cw_note TEXT, teams_note TEXT
 );
 CREATE INDEX IF NOT EXISTS alerts_open ON alerts(resolved_at, key);
+CREATE TABLE IF NOT EXISTS net_accounts (                -- UniFi / UISP connections (ubnt.py); org_id set = one client's own account
+  id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('unifi', 'uisp')), name TEXT NOT NULL, url TEXT,
+  org_id INTEGER REFERENCES orgs(id) ON DELETE CASCADE, secret TEXT, last TEXT, created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS net_sites (
+  id TEXT PRIMARY KEY,                                    -- "<account id>:<site id on the platform>"
+  account_id INTEGER NOT NULL REFERENCES net_accounts(id) ON DELETE CASCADE, name TEXT, internal TEXT, console TEXT, gateway_mac TEXT,
+  type TEXT, org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, stats TEXT, seen_at REAL
+);
+CREATE TABLE IF NOT EXISTS net_devices (
+  id TEXT PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES net_accounts(id) ON DELETE CASCADE,
+  site_key TEXT,                                          -- NULL: a UniFi multi-site console's device not matched to a site
+  host TEXT, mac TEXT, name TEXT, model TEXT, ip TEXT, status TEXT, version TEXT, update_available TEXT,
+  is_console INTEGER NOT NULL DEFAULT 0, startup_time TEXT, offline_since REAL, updated_at REAL
+);
+CREATE INDEX IF NOT EXISTS net_devices_site ON net_devices(site_key);
 """
 
 

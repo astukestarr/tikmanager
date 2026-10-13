@@ -45,6 +45,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "memory": ("Router memory high (10-minute average)", False, "percent", 90),
     "temperature": ("Router too hot (3 readings in a row, 15 minutes)", False, "celsius", 70),
     "firmware": ("New RouterOS available for a router", False, None, None),
+    "unifi": ("UniFi / UISP site has offline devices (one alert per site)", True, "minutes", 10),
 }
 DEFAULTS = {"kinds": {k: {"on": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
             "cw": {"on": False, "board_id": None, "status_id": None, "closed_status_id": None, "priority_id": None, "company_id": None},
@@ -210,6 +211,12 @@ class Alerts:
             if bad:
                 out["connectivity"] = ("connectivity", None, None, f"Connectivity test: {len(bad)} problem{'s' if len(bad) != 1 else ''}",
                                        "\n".join(f"- {x}" for x in bad))
+        uni = getattr(self, "unifi", None)
+        if k.get("unifi", {}).get("on") and uni:
+            try:
+                out.update(uni.conditions(k["unifi"].get("minutes") or 10))
+            except Exception:  # noqa: BLE001 - UniFi trouble must not stop the other alerts
+                traceback.print_exc()
         off = getattr(self, "offsite", None)
         if k["offsite"]["on"] and off:
             last = off.last()
@@ -223,9 +230,9 @@ class Alerts:
         return out
 
     # --- notifying ----------------------------------------------------------------------------------------------
-    def _link(self, device_id):
+    def _link(self, device_id, kind=None):
         base = (getattr(self.s, "public_url", "") or "").rstrip("/")
-        return f"{base}/#router/{device_id}" if device_id else f"{base}/#security"
+        return f"{base}/#router/{device_id}" if device_id else f"{base}/#unifi" if kind == "unifi" else f"{base}/#security"
 
     def _card(self, title, detail, resolved, link, client=""):
         facts = [{"title": "When", "value": time.strftime("%Y-%m-%d %H:%M")}] + ([{"title": "Client", "value": client}] if client else [])
@@ -245,7 +252,7 @@ class Alerts:
     def notify_open(self, cfg, a):
         cw_note = teams_note = None
         client = (self.db.one("SELECT name FROM orgs WHERE id=?", (a["org_id"],)) or {}).get("name", "") if a["org_id"] else ""
-        link = self._link(a["device_id"])
+        link = self._link(a["device_id"], a.get("kind"))
         if cfg["cw"]["on"] and self.integ.configured("cw"):
             company = self._company(cfg, a["org_id"])
             if not company:
@@ -280,7 +287,7 @@ class Alerts:
             return
         dev = self.db.one("SELECT d.name, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.id=?", (a["device_id"],)) if a.get("device_id") else None
         wh.send_all({"status": status, "kind": a.get("kind") or "", "title": a["title"], "detail": detail or "", "router": (dev or {}).get("name", ""),
-                     "router_id": a.get("device_id"), "client": (dev or {}).get("org") or "", "link": self._link(a.get("device_id")),
+                     "router_id": a.get("device_id"), "client": (dev or {}).get("org") or "", "link": self._link(a.get("device_id"), a.get("kind")),
                      "time": time.strftime("%Y-%m-%d %H:%M")})
 
     def notify_resolved(self, cfg, a):
@@ -293,7 +300,7 @@ class Alerts:
                 self.db.run("UPDATE alerts SET cw_note=? WHERE id=?", (f"Ticket not closed: {e}", a["id"]))
         if cfg["teams"]["on"] and self.integ.configured("teams"):
             try:
-                self.integ.teams_post(self._card(a["title"], text, True, self._link(a["device_id"])))
+                self.integ.teams_post(self._card(a["title"], text, True, self._link(a["device_id"], a.get("kind"))))
             except IntegrationError:
                 pass
         mailer = getattr(self, "mailer", None)

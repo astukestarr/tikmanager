@@ -483,6 +483,31 @@ WireGuard peers). Only a tunnel found in that router's inventory can be reconnec
 tunnel, never anything else), by technicians with write access or client admins with site-to-site VPNs turned on, for
 their own routers. Every reconnect is audit-logged and recorded in the router's events.
 
+## UniFi and UISP
+
+TikManager can show your Ubiquiti networks next to the MikroTiks: **Admin > Integrations > UniFi & UISP** holds any number
+of **connections**, each one of:
+- **UniFi** - an API key from **unifi.ui.com > Settings > API** (Ubiquiti's Site Manager API: read-only, it can't change
+  UniFi settings), created while signed in as the account that owns or is super admin of the consoles.
+- **UISP** - the UISP server's address (`https://your-uisp-server`) and an API token from **UISP > Settings > Users > API
+  tokens** (a read-only token is enough). A UISP server with a self-signed certificate can be trusted with **Trust this
+  server's certificate**: TikManager records its SHA-256 fingerprint and refuses the connection if it ever changes
+  (verification is never simply switched off).
+
+Each connection either belongs to **your MSP account** - assign each of its sites to a client on **Devices > UniFi /
+UISP** (sites are matched to clients by name the first time) - or to **one client** (their own UniFi account or UISP
+server): everything in it belongs to that client. Connections are read every 10 minutes (or **Sync now**); keys and
+tokens are stored encrypted and never shown again.
+
+**Devices > UniFi / UISP** lists every site with its client, source, devices, offline devices (and since when),
+firmware updates waiting and, for UniFi, client counts, WAN uptime, ISP and internet issues; click a site for its
+devices (model, IP, status, firmware and the update available). Client users see their own sites there (read-only).
+UISP subscriber locations (endpoints) are marked as such. A UniFi console that runs several sites (a self-hosted or Cloud
+Key network server) doesn't tell the cloud API which site each device is on: TikManager asks the console through
+Ubiquiti's cloud connector where it can and matches gateways by MAC; devices it still can't place are listed for
+technicians only. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
+minutes by default.
+
 ## Tasks (scripts, groups, schedules, automatic firmware updates)
 
 **Tasks** (technicians): a **Scripts** library of RouterOS scripts (placeholders `{{identity}} {{name}} {{client}}

@@ -80,6 +80,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | RouterOS security (CVEs, security releases, What's new) | `rossec.py` (`security_items`, `releases_between`, `cves_for`), `secState/secCard/notesDialog/rosSecCard` in `app.js` |
 | Router lifecycle (age, discontinued, replacements) | `lifecycle.py` (`REPLACEMENTS`, overrides in setting `lifecycle_suggest`), `lcYears/lcMade/lcFlag/lcSuggest/lifecycleCard/lcAdminCard` in `app.js` |
 | Send email | `mailer.Mailer.send()` (`server.mailer`, `alerts.mailer`); settings in `integrations.py` FIELDS "mail" |
+| UniFi / UISP connections, sites, devices | `ubnt.py` (`UnifiClient`, `UispClient`, `Ubnt.sync_account/sites/conditions`), `/api/net/*` and `/api/unifi*` in `server.py`, `unifiPage()` / `wireNetAccounts()` in `app.js` |
 | Alerts (kinds, thresholds, tickets, Teams, email) | `alerts.py` (`KINDS`, `conditions()`, `notify_open/resolved()`), `Integrations.cw_ticket/cw_close/teams_post`, `alertsPage()` in `app.js` |
 | WireGuard port (move, relay, helper) | `wgport.py`, `deploy/wg-port.sh` + `tikmanager-wgport.*`, `RouterOS.set_controller_port`, `devices.wg_port`, `wgPortCard()` in `app.js`; installer `--wg-port` |
 | Winbox relay (sessions, ports, router Winbox fix) | `winbox.py`, `RouterOS.winbox_service/winbox_allow` (+ `SimRouter`), `winbox_allows_tikmanager()` + `/api/devices/<id>/winbox*` in `server.py`, `loadWinbox()` in `app.js`; `TM_WINBOX_PORTS` |

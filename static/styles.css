@@ -610,3 +610,6 @@ tr.pt-selrow td { background: color-mix(in srgb, var(--accent) 8%, transparent);
 .viewas-banner { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #7c3aed; color: #fff; font-weight: 600; font-size: 13px; }
 .viewas-banner.hidden { display: none; }
 .viewas-banner .btn { background: #fff; color: #5b21b6; border-color: #fff; }
+
+/* UniFi sites */
+.u-detail > td { background: color-mix(in srgb, var(--accent, #2563eb) 5%, transparent); padding: 8px 12px 12px; }

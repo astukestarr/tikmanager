@@ -39,6 +39,7 @@ from observatory import Observatory
 from reachability import Reachability
 from offsite import OffsiteBackup, OffsiteError
 from winbox import WinboxRelay
+from ubnt import NetError, Ubnt
 from wgport import WgPort
 from mailer import Mailer, MailError
 from lifecycle import Lifecycle
@@ -113,6 +114,8 @@ alerts.reach = reach
 alerts.logs = routerlogs
 offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP / WebDAV storage
 alerts.offsite = offsite
+unifi = Ubnt(db, backups.vault, settings)   # UniFi + UISP connections: sites and devices, each site assigned to a client
+alerts.unifi = unifi
 winbox = WinboxRelay(db, settings, secev, poller.client, backups)   # Winbox to routers through TikManager (on-demand, address-locked)
 secev.winbox_who = winbox.who   # label router log lines from the relay with the session's technician
 wgport = WgPort(db, settings, poller.client, sysconf)   # moving the WireGuard port without stranding routers
@@ -461,7 +464,9 @@ class Handler(BaseHTTPRequestHandler):
                               "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None,
                               "prefs": user_prefs(s["user_id"]),
                               "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1],
-                              "viewing_as": {"by": s["real_email"]} if s.get("viewing_as") else None})
+                              "viewing_as": {"by": s["real_email"]} if s.get("viewing_as") else None,
+                              "unifi": (bool(db.one("SELECT 1 FROM net_accounts")) if s["kind"] == "tech"
+                                        else bool(db.one("SELECT 1 FROM net_sites WHERE org_id=?", (s["org_id"],))))})
         if path == "/api/orgs":
             s = self.require()
             where, args = self.org_scope(s, column="o.id")
@@ -500,7 +505,25 @@ class Handler(BaseHTTPRequestHandler):
                               # set up elsewhere, shown on the Integrations page too
                               "teams": {"configured": integ.configured("teams")}, "webhooks": {"count": len(alerts.webhooks.public())},
                               "offsite": {"configured": integ.configured("offsite"), "last": offsite.last()},
-                              "entra": {"configured": bool(settings.entra_configured)}})
+                              "entra": {"configured": bool(settings.entra_configured)},
+                              "ubnt": {"configured": bool(db.one("SELECT 1 FROM net_accounts")), "accounts": unifi.accounts()}})
+        if path == "/api/unifi":   # UniFi sites with health (clients: their own), the clients to assign to, unplaced devices
+            s = self.require()
+            where, args = self.org_scope(s, column="s.org_id")
+            out = {"sites": unifi.sites(where, args), "running": unifi.state["running"],
+                   "configured": bool(db.one("SELECT 1 FROM net_accounts"))}
+            if s["kind"] == "tech":
+                out["accounts"] = [{k: a[k] for k in ("id", "kind", "name", "org", "last", "sites")} for a in unifi.accounts()]
+                out["orgs"] = db.q("SELECT id, name FROM orgs WHERE active=1 ORDER BY name")
+                out["unplaced"] = unifi.unplaced()
+            return self.json(out)
+        if m := re.fullmatch(r"/api/unifi/sites/(.+)", path):   # one site's devices
+            s = self.require()
+            key = urllib.parse.unquote(m.group(1))
+            site = db.one("SELECT * FROM net_sites WHERE id=?", (key,))
+            if not site or (s["kind"] == "client" and site["org_id"] != s["org_id"]):
+                raise HttpError(404, "Site not found.")
+            return self.json({"devices": unifi.devices(key)})
         if path == "/api/integrations/cw/companies":   # PSA companies next to the TikManager clients they are linked to
             self.require(tech=True, admin=True)
             try:
@@ -1280,6 +1303,56 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"ok": True, "detail": integ.cw_test() if m.group(1) == "cw" else integ.itg_test()})
             except IntegrationError as e:
                 return self.json({"ok": False, "detail": str(e)})
+        if path == "/api/net/accounts":   # add / change a UniFi or UISP connection {id?, kind, name, url, key, org_id, trust_cert}
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            org = db.one("SELECT id, name FROM orgs WHERE id=?", (int(b.get("org_id") or 0),)) if b.get("org_id") else None
+            if b.get("org_id") and not org:
+                raise HttpError(400, "Client not found.")
+            try:
+                aid = unifi.save(int(b["id"]) if b.get("id") else None, str(b.get("kind") or ""), b.get("name"), b.get("url"),
+                                 str(b.get("key") or "").strip(), org["id"] if org else None, bool(b.get("trust_cert")))
+            except (ValueError, NetError) as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "UniFi / UISP connection saved", str(b.get("name") or b.get("kind")), self.client_ip(), org_id=org["id"] if org else None,
+                     detail=f"{b.get('kind')}{' ' + str(b.get('url')) if b.get('url') else ''}, {'client ' + org['name'] if org else 'MSP account'}"
+                            f"{', certificate pinned' if b.get('trust_cert') else ''}")
+            threading.Thread(target=unifi.sync, args=(s["email"], aid), daemon=True, name="net-sync-now").start()
+            return self.json({"ok": True, "id": aid})
+        if m := re.fullmatch(r"/api/net/accounts/(\d+)/(test|sync|delete)", path):
+            s = self.require(tech=True, admin=m.group(2) != "sync")
+            a = db.one("SELECT * FROM net_accounts WHERE id=?", (int(m.group(1)),))
+            if not a:
+                raise HttpError(404, "Connection not found.")
+            if m.group(2) == "delete":
+                unifi.delete(a["id"])
+                db.audit(s["email"], "UniFi / UISP connection removed", a["name"], self.client_ip(), org_id=a["org_id"])
+                return self.json({"ok": True})
+            if m.group(2) == "test":
+                try:
+                    return self.json({"ok": True, "detail": unifi.test(a["id"])})
+                except NetError as e:
+                    return self.json({"ok": False, "detail": str(e)})
+            res = unifi.sync(s["email"], a["id"])
+            return self.json({"ok": True, "last": (res or [None])[0]})
+        if path == "/api/unifi/sync":   # read every connection now
+            s = self.require(tech=True)
+            return self.json({"ok": True, "results": unifi.sync(s["email"]) or []})
+        if path == "/api/unifi/assign":   # {site, org_id|null}: which client a UniFi site belongs to
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            site = db.one("SELECT s.*, a.org_id AS account_org FROM net_sites s JOIN net_accounts a ON a.id = s.account_id WHERE s.id=?", (str(b.get("site") or ""),))
+            if not site:
+                raise HttpError(404, "Site not found.")
+            if site["account_org"]:
+                raise HttpError(400, "This site comes from a client's own connection - everything in it belongs to that client.")
+            org = db.one("SELECT id, name FROM orgs WHERE id=?", (int(b.get("org_id") or 0),)) if b.get("org_id") else None
+            if b.get("org_id") and not org:
+                raise HttpError(400, "Client not found.")
+            db.run("UPDATE net_sites SET org_id=? WHERE id=?", (org["id"] if org else None, site["id"]))
+            db.audit(s["email"], "UniFi / UISP site assigned", f"{site['name']} -> {org['name'] if org else 'no client'}", self.client_ip(),
+                     org_id=org["id"] if org else site["org_id"])
+            return self.json({"ok": True})
         if path == "/api/integrations/cw/link":   # {cw_id, org_id} links; {cw_id} alone imports the company as a new client
             s = self.require(tech=True, admin=True)
             b = self.body()
@@ -2202,6 +2275,7 @@ def main():
     offsite.start()
     wgport.start_loop()
     alerts.start()
+    unifi.start()
     lifecycle.start()
     rossec.start()
     autoblock.start()
