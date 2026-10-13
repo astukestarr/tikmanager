@@ -203,6 +203,12 @@ def build(raw, device, full=True, known=None):
                 "groups": {}, "ubnt": k, "uplink": True}
         seen.add(_mac12(mac))
         n = network_for(node["ip"], d.get("iface") or "") or other
+        same = lambda i: i["port"] == port and (re.sub(r"[^a-z0-9]", "", str(i["name"]).lower()) == re.sub(r"[^a-z0-9]", "", str(node["name"]).lower())
+                                                 or (i.get("ip") and i.get("ip") == node["ip"]))
+        for net in networks + [other]:   # the switch heard by LLDP / CDP too (another of its MACs): one node, not two
+            for i in [i for i in net["infra"] if same(i)]:
+                node["via"] = f"{node['via']}, {i.get('via') or 'neighbour'}"
+                net["infra"].remove(i)
         n["infra"].append(node)
         infra_by_port[port] = node
 
@@ -222,7 +228,8 @@ def build(raw, device, full=True, known=None):
                 for k in ORDER if g.get(k)]
 
     out_nets = []
-    for n in networks + ([other] if other["groups"] or other["infra"] else []):
+    weight = lambda n: -(len(n["infra"]) * 1000 + sum(len(v) for v in n["groups"].values()) + sum(len(v) for i in n["infra"] for v in i["groups"].values()))
+    for n in sorted(networks, key=weight) + ([other] if other["groups"] or other["infra"] else []):
         out_nets.append({"name": n["name"], "interface": n["interface"], "network": n["network"], "gateway": n["gateway"], "vlan": n["vlan"],
                          "infra": [{**i, "groups": groups(i["groups"])} for i in n["infra"]], "groups": groups(n["groups"])})
 

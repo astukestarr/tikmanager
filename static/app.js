@@ -2565,14 +2565,15 @@ async function loadTopology(d, refresh = false) {
         <div class="tnode trouter"><span class="tic">${TOPO_ICONS.router}</span><span><b>${esc(d.name)}</b><small>${esc(t.internet.wan_ip || "")}${t.internet.interface ? ` · WAN ${esc(t.internet.interface)}` : ""}</small></span></div>
       </div>
       <div class="tstem"></div>
-      <div class="tnets ${t.networks.length === 1 ? "single" : ""}">${t.networks.map((n, ni) => `<div class="tcol">
+      <div class="tnets ${t.networks.filter((n) => n.infra.length || n.groups.length).length <= 1 ? "single" : ""}">${t.networks.map((n, ni) => !n.infra.length && !n.groups.length ? "" : `<div class="tcol">
         <div class="tnode tnet"><span class="tic">${TOPO_ICONS.net}</span><span><b>${esc(n.name)}</b><small class="mono">${esc(n.network)}${n.vlan ? ` · VLAN ${esc(n.vlan)}` : ""}</small></span></div>
         ${n.infra.map((i, ii) => `<div class="tbranch"><div class="tnode tinfra"><span class="tic">${isAp(i) ? TOPO_ICONS.ap : TOPO_ICONS.network}</span>
             <span><b>${esc(i.name)}</b> ${ubBadge(i.ubnt)}<small>${esc([(i.ubnt && i.ubnt.model) || i.model || i.platform, i.ip, i.port ? `port ${i.port}` : ""].filter(Boolean).join(" · "))}</small></span></div>
             ${ubChips(i.groups)}${i.groups.length ? `<div class="tgroups">${bubbles(i.groups, `${ni}.${ii}`)}</div>` : ""}</div>`).join("")}
         ${n.groups.length ? `<div class="tbranch direct">${n.infra.length ? `<div class="small muted tdirect">Directly on the router</div>` : ""}${ubChips(n.groups)}<div class="tgroups">${bubbles(n.groups, `${ni}`)}</div></div>` : ""}
-        ${!n.infra.length && !n.groups.length ? `<div class="small muted tempty">No devices seen</div>` : ""}
       </div>`).join("")}</div>
+      ${t.networks.some((n) => !n.infra.length && !n.groups.length) ? `<div class="tempty-nets small"><span class="muted">Also on this router (no devices seen):</span>
+        ${t.networks.filter((n) => !n.infra.length && !n.groups.length).map((n) => `<span class="tempty-net" title="${esc(n.interface)}"><b>${esc(n.name)}</b> <span class="mono muted">${esc(n.network)}${n.vlan ? ` · VLAN ${esc(n.vlan)}` : ""}</span></span>`).join("")}</div>` : ""}
     </div>
     ${t.routes.length ? `<div class="troutes"><div class="small muted">Routes to other networks</div>${t.routes.map((r) => `<div class="troute ${r.active ? "" : "off"}">
           <span class="pill r-${esc(r.kind)}">${esc({ vpn: "VPN", static: "Static", dynamic: "Dynamic" }[r.kind] || r.kind)}</span>

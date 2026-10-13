@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.6 - 2026-10-13
+
+- **Network map layout for routers with many networks**: only networks with something on them get a column - busiest
+  first, so the LAN with the switches and devices sits right under the router instead of off to the side. Networks with
+  nothing seen (guest / HVAC VLANs, point-to-point links, tunnels) are listed in one compact line underneath.
+- **One node per switch**: a switch that's both a UniFi / UISP device (bridge table) and an LLDP / CDP neighbour (often
+  announced from another of its MACs) is shown once, e.g. "Downstairs Spearville - UniFi (bridge table), lldp".
+
 ## 1.43.5 - 2026-10-13
 
 - **Network map: the switch behind each port, and every device**: when a UniFi / UISP switch is in the router's bridge table
