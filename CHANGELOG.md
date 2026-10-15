@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.44.0 - 2026-10-15
+
+Release of 1.44.0-beta.1 (tested), unchanged:
+- **Beta channel for updates** - Admin > Settings > Version & updates > Channel: **Stable** (default) or **Beta**. From now on
+  new features and fixes come out as betas first (1.45.0-beta.1 ...) for installations that opt in, and are released to
+  everyone once tested. Only the newest beta is ever offered, and withdrawn versions are never offered or installed.
+- **Fix: VPN Reconnect could leave a tunnel switched off and the router cut off from TikManager** - the router now runs
+  the off-and-on itself, so it always comes back on. Details under 1.44.0-beta.1.
+
 ## 1.44.0-beta.1 - 2026-10-15
 
 - **Beta channel for updates**: Admin > Settings > Version & updates > Channel - **Stable** (default) or **Beta**. Beta
