@@ -3852,21 +3852,32 @@ function tunnelRows(list, showRouter) {
       ${(t.users || []).length ? `<div class="small">${t.users.slice(0, 8).map(esc).join("<br>")}</div>` : ""}</td>
     <td class="small nowrap">${t.rx || t.tx ? `↓ ${bytes(t.rx)} ↑ ${bytes(t.tx)}` : ""}</td>
     <td class="small ${/insecure|no phase 2/.test(t.notes || "") ? "status warn" : "muted"}">${esc(t.notes || "")}</td>
-    <td>${canVpn() && t.rid && t.status !== "disabled" && r.online ? `<button class="btn small" type="button" data-recon="${r.id}" data-rid="${esc(t.rid)}" data-rname="${esc(t.name)}">Reconnect</button>` : ""}</td></tr>`).join("");
+    <td>${canVpn() && t.rid && t.status !== "disabled" && r.online ? `<button class="btn small nowrap" type="button" data-recon="${r.id}" data-rid="${esc(t.rid)}" data-rname="${esc(t.name)}"
+      title="Switches this tunnel off and straight back on (on the router itself) - for a tunnel that's stuck. Anyone using it is cut off for a few seconds.">Restart tunnel</button>` : ""}</td></tr>`).join("");
 }
-// Reconnect one existing VPN (any list of tunnelRows): confirm, ask the router, say what happened
+// Restart one existing VPN (any list of tunnelRows): click twice (no pop-up), ask the router, then show the fresh state
+let vpnHold = 0;   // auto-refresh waits while a restart is armed or running, so the button isn't redrawn under the click
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-recon]");
-  if (!b) return;
-  if (!confirm(`Reconnect "${b.dataset.rname}"?\n\nThe tunnel drops for a few seconds and comes straight back. Anyone using it (including you, if you're connected through it) is briefly cut off.`)) return;
-  b.disabled = true; b.textContent = "Reconnecting...";
+  if (!b || b.disabled) return;
+  if (b.dataset.armed !== "1") {
+    b.dataset.armed = "1"; b.textContent = "Click again to restart"; b.classList.add("danger"); vpnHold++;
+    setTimeout(() => { if (b.dataset.armed === "1") { b.dataset.armed = ""; b.textContent = "Restart tunnel"; b.classList.remove("danger"); vpnHold--; } }, 6000);
+    return;
+  }
+  b.dataset.armed = "busy"; b.disabled = true; b.classList.remove("danger"); b.textContent = "Restarting…";
   try {
     const r = await post(`/api/devices/${b.dataset.recon}/vpn-reconnect`, { rid: b.dataset.rid });
-    b.textContent = r.note ? "Not connected" : "Reconnected"; b.title = r.note || "The list updates when the routers are read again (about 15 s).";
-  } catch (err) { b.disabled = false; b.textContent = "Reconnect"; alert(err.message); }
+    b.textContent = r.note ? "Not connected" : "Restarted"; b.title = r.note || "Showing the new state in a moment.";
+  } catch (err) { b.textContent = "Didn't restart"; b.title = err.message; }
+  // the server re-reads that router about 15 s after a restart: show the fresh state, which also brings the button back
+  setTimeout(() => {
+    vpnHold--; b.disabled = false; b.dataset.armed = ""; b.textContent = "Restart tunnel";
+    if (view === "vpns" && vpnTab === "found") vpnFound().catch(() => {});
+  }, 18000);
 });
 const foundView = { org: "", kind: "", problems: false };
-async function vpnFound() {
+async function vpnFound(reading = false) {
   const rows = await api("/api/vpn-inventory");
   const all = rows.flatMap((r) => (r.tunnels || []).map((t) => ({ r, t })));
   const orgs = [...new Map(rows.map((r) => [r.org_id, r.org || "Unassigned"])).entries()];
@@ -3876,7 +3887,8 @@ async function vpnFound() {
       ${orgs.length > 1 ? `<select id="fOrg"><option value="">All clients</option>${orgs.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select>` : ""}
       <select id="fKind"><option value="">All types</option>${kinds.map((k) => `<option>${esc(k)}</option>`).join("")}</select>
       <label class="chk"><input type="checkbox" id="fProb" ${foundView.problems ? "checked" : ""}> Down or needing attention only</label>
-      <span class="spacer"></span><button class="btn" type="button" id="fRefresh">Read routers again</button></div>
+      <span class="spacer"></span><span class="small muted">updates every 30 s</span>
+      <button class="btn" type="button" id="fRefresh" ${reading ? "disabled" : ""}>${reading ? "Reading routers…" : "Read routers again"}</button></div>
     <p class="small muted" id="fMsg">${all.length} VPN connections on ${rows.length - none - unread} routers · read every 15 minutes, read-only (no passwords or keys are collected).
       ${none ? `${none} routers have no other VPNs.` : ""} ${unread ? `${unread} not read yet.` : ""} Linked names are other TikManager routers.</p>
     <div class="table-wrap"><table><thead><tr><th>Router</th><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th><th></th></tr></thead>
@@ -3892,9 +3904,15 @@ async function vpnFound() {
   $("fKind").addEventListener("change", (e) => { foundView.kind = e.target.value; draw(); });
   $("fProb").addEventListener("change", (e) => { foundView.problems = e.target.checked; draw(); });
   $("fRefresh").addEventListener("click", async () => {
-    $("fRefresh").disabled = true;
-    const x = await post("/api/vpn-inventory/refresh");
-    if (x.background) $("fMsg").textContent = `Reading ${x.count} routers in the background - reopen this tab in a minute.`; else vpnFound();
+    const b = $("fRefresh");
+    b.disabled = true; b.textContent = "Reading routers…";
+    try {
+      const x = await post("/api/vpn-inventory/refresh");
+      if (!x.background) return vpnFound();
+      $("fMsg").textContent = `Reading ${x.count} routers - the list fills in by itself as they answer (about a minute).`;
+      // redraw as answers come in; the last pass brings the button back
+      [15, 35, 60].forEach((s, i) => setTimeout(() => { if (view === "vpns" && vpnTab === "found") vpnFound(i < 2).catch(() => {}); }, s * 1000));
+    } catch (err) { b.disabled = false; b.textContent = "Read routers again"; $("fMsg").textContent = err.message; }
   });
   draw();
 }
@@ -4017,16 +4035,22 @@ async function vpnView(id) {
       ${w.sites.map((s) => `<tr><td><span class="pill ${s.role === "hub" ? "up-sched" : ""}">${s.role}</span></td><td><a href="#router/${s.device_id}">${esc(s.name)}</a> <span class="dot ${s.online ? "on" : "off"}"></span></td>
         <td class="mono">${esc(s.tunnel_ip)}</td><td class="mono small">${s.subnets.map(esc).join("<br>")}</td><td>${tunnelState(s)}</td>
         <td class="small nowrap">${s.rx != null ? `↓ ${bytes(s.rx)} ↑ ${bytes(s.tx)}` : ""}</td>
-        <td>${canVpn() && s.state === "applied" && s.online && w.status !== "applying" ? `<button class="btn small" type="button" data-vrecon="${s.device_id}" data-vname="${esc(s.name)}">Reconnect</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+        <td>${canVpn() && s.state === "applied" && s.online && w.status !== "applying" ? `<button class="btn small nowrap" type="button" data-vrecon="${s.device_id}" data-vname="${esc(s.name)}"
+          title="Switches this site's tunnel off and straight back on (on the router itself). Anyone using it is cut off for a few seconds.">Restart tunnel</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
     document.querySelectorAll("[data-vrecon]").forEach((b) => b.addEventListener("click", async () => {
-      if (!confirm(`Reconnect the VPN at ${b.dataset.vname}?\n\nIts tunnel drops for a few seconds and comes straight back.`)) return;
-      b.disabled = true; b.textContent = "Reconnecting...";
-      try { await post(`/api/vpns/${v.id}/reconnect`, { device_id: +b.dataset.vrecon }); say(`Reconnected at ${b.dataset.vname} - the handshake shows within a few seconds.`, true); }
-      catch (err) { say(err.message); b.disabled = false; b.textContent = "Reconnect"; }
+      if (b.dataset.armed !== "1") {   // click twice (no pop-up); the 5-second refresh redraws the button if it's left
+        b.dataset.armed = "1"; b.textContent = "Click again to restart"; b.classList.add("danger"); vpnHold++;
+        setTimeout(() => { if (b.dataset.armed === "1") vpnHold--; }, 6000);
+        return;
+      }
+      b.dataset.armed = ""; vpnHold--; b.disabled = true; b.classList.remove("danger"); b.textContent = "Restarting…";
+      try { await post(`/api/vpns/${v.id}/reconnect`, { device_id: +b.dataset.vrecon }); say(`Restarted the tunnel at ${b.dataset.vname} - the handshake shows within a few seconds.`, true); }
+      catch (err) { say(err.message); }
+      refresh();
     }));
     $("vReapply")?.addEventListener("click", async () => { try { await post(`/api/vpns/${v.id}/apply`); refresh(); } catch (e) { say(e.message); } });
   };
-  if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn") refresh(); }, 5000); }
+  if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn" && !vpnHold) refresh(); }, 5000); }
 }
 const NAV_ICONS = {
 "dashboard": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"5\" rx=\"1.5\"/><rect x=\"14\" y=\"12\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"3\" y=\"16\" width=\"7\" height=\"5\" rx=\"1.5\"/></svg>",
@@ -4211,6 +4235,9 @@ async function go(v, arg) {
     if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       (v === "router" ? router(arg) : dashboard()).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => { if (!$("dlg").open) upgradesView().catch(() => {}); }, 20000);
+    // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)
+    if (v === "vpns") timer = setInterval(() => { if (vpnHold || document.hidden || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
+      (vpnTab === "found" ? vpnFound() : vpnsView()).catch(() => {}); }, 30000);
   } catch (e) { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; }
 }
 

@@ -483,8 +483,9 @@ that router; PPTP and IPsec without phase 2 are flagged. The same list appears o
 with site-to-site VPNs turned on see this tab too, for their own routers only (remote ends are matched only against
 their own routers, so other clients' routers are never named).
 
-**Reconnect**: each existing VPN that is switched on has a **Reconnect** button (and each site of a TikManager VPN on its
-page) - for a tunnel that's stuck. IPsec drops its active peer so it renegotiates; WireGuard peers, L2TP / SSTP /
+**Restart tunnel**: each existing VPN that is switched on has a **Restart tunnel** button (and each site of a TikManager VPN on
+its page) - for a tunnel that's stuck; click it twice to confirm. The Site-to-site VPN page refreshes every 30 seconds, and
+**Read routers again** fills the list in as the routers answer. IPsec drops its active peer so it renegotiates; WireGuard peers, L2TP / SSTP /
 OpenVPN / PPTP clients and EoIP / GRE / IPIP tunnels are switched off and straight back on (TikManager VPNs: their
 WireGuard peers) - by the router itself, in one short script, so it comes back on even when the tunnel being switched off
 is the one TikManager's connection runs over. Only a tunnel found in that router's inventory can be reconnected (never TikManager's own management
