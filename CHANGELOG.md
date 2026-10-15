@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.45.0 - 2026-10-15
+
+Release of 1.45.0-beta.1 (tested), unchanged:
+- **Site-to-site VPN page refreshes by itself** every 30 seconds.
+- **"Reconnect" is now "Restart tunnel"** (click twice to confirm) and shows the fresh tunnel state afterwards.
+- **Read routers again** fills the list in as the routers answer; neither button stays greyed out any more.
+
 ## 1.45.0-beta.1 - 2026-10-15
 
 - **Site-to-site VPN page refreshes by itself** every 30 seconds (paused while you're using a filter or a restart is
