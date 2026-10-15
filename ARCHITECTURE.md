@@ -41,15 +41,20 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 ## Versions and updates
 
 - `version.py` holds the version (semantic: patch = fixes, minor = features, major = admin action needed);
-  `CHANGELOG.md` says what changed; each release is a `vX.Y.Z` tag on GitHub.
-- `updates.py` checks the update repository hourly (the highest `vX.Y.Z` tag; a GitHub Release for that version adds its notes) and serves
-  Admin > Settings > Version & updates and the "Update available" badge.
+  `CHANGELOG.md` says what changed; each release is a `vX.Y.Z` tag on GitHub, each beta a `vX.Y.Z-beta.N` tag
+  (sorted before its release: 1.44.0-beta.1 < 1.44.0-beta.2 < 1.44.0).
+- `updates.py` checks the update repository hourly and serves Admin > Settings > Version & updates and the "Update
+  available" badge. It offers the newest release on the installation's channel (saved setting `update_channel`):
+  **stable** = the highest `vX.Y.Z` tag; **beta** = that or the newest beta, whichever is higher - older betas are
+  never offered, even when the newest one is withdrawn. `RELEASES.json` on the default branch lists withdrawn versions,
+  which are skipped. A GitHub Release for the chosen version adds its notes.
 - The web app runs without root, so it can't install anything itself. **Upgrade now** only writes the wanted version
   number to `/var/lib/tikmanager/update-request`. The root-owned systemd unit `tikmanager-update.path` notices the file
   and starts `tikmanager-update.service`, which runs `deploy/self-update.sh` as root:
   1. reads the repository from `TM_UPDATE_REPO` in the root-owned settings file - never from anything the web app can
-     write - and accepts only a version number (digits and dots) from the request, never an older version than the
-     one installed;
+     write - and accepts only a version number (`X.Y.Z` or `X.Y.Z-beta.N`) from the request, never an older version
+     than the installed one, never one withdrawn in `RELEASES.json`, and from the web never a beta that isn't the
+     newest beta;
   2. downloads `https://github.com/<repo>/archive/refs/tags/v<version>.tar.gz`, checks it is TikManager, that its
      `version.py` matches and that its Python compiles;
   3. backs up the code to `/opt/tikmanager.prev` and the database to `/var/backups/tikmanager/backup-before-<version>.db`
