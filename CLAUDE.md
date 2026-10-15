@@ -110,6 +110,15 @@ new version** - don't push code changes without one. To release:
 4. Installations see the update within an hour (or at once with "Check for updates") and upgrade with one click
    (`updates.py` -> `deploy/self-update.sh`, which runs the new version's `deploy/update.sh`).
 
+**Beta first.** Every new change is released as a beta: version `X.Y.Z-beta.N` (e.g. `1.45.0-beta.1`, then `-beta.2`
+for the next fix), tag `vX.Y.Z-beta.N`, changelog heading `## X.Y.Z-beta.N - date`. Only installations on the Beta
+channel (Admin > Settings > Version & updates) see betas, and only the newest beta is ever offered - so a beta that a
+later beta fixes is never installed again. When the maintainer has tested a beta and says to **release it**, release the
+same code as `X.Y.Z` (stable): bump `version.py`, add a `## X.Y.Z` changelog section summing up its betas, tag `vX.Y.Z`.
+Never release a stable version without that go-ahead. To pull a broken version with no fix yet, add it to `withdrawn` in
+`RELEASES.json` and push (no new version needed - it's read from the default branch); installations skip it and the root
+updater refuses it.
+
 Never move or reuse a tag that's already on GitHub: servers only offer a version *newer* than their own, so changed
 code under an old number never reaches them - release a new patch instead. Changes to documentation only (README,
 ARCHITECTURE, CLAUDE.md) don't change what runs, so they're pushed without a new version and show up on GitHub at once;

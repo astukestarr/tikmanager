@@ -129,9 +129,16 @@ Version & updates card) checks immediately.
 4. If the new version doesn't start, the server puts the previous version back automatically and the card says
    "Last upgrade failed" with the reason. Routers are not touched by an upgrade, so monitoring carries on either way.
 
+**Stable or beta** (Admin > Settings > Version & updates > Channel): **Stable** (the default) gets releases once they've
+been tested. **Beta** gets new features and fixes first (versions like 1.45.0-beta.2), which may have rough edges. Only the
+newest beta is ever offered - a beta that a later beta fixes is never installed again - and a version listed as withdrawn
+in the repository's RELEASES.json is never offered or installed. Switching back to Stable keeps the version you have until
+the next stable release, which is then offered as usual.
+
 **Upgrading from a terminal** (same steps, same safety net), on the server:
 
-    sudo bash /opt/tikmanager/deploy/self-update.sh            # newest release
+    sudo bash /opt/tikmanager/deploy/self-update.sh            # newest stable release
+    sudo bash /opt/tikmanager/deploy/self-update.sh beta       # newest release, betas included
     sudo bash /opt/tikmanager/deploy/self-update.sh 1.2.0      # a specific version
     journalctl -u tikmanager-update                            # what the last upgrade did
 

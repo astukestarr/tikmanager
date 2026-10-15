@@ -2234,10 +2234,18 @@ async function versionCard() {
     <div class="grid2"><div class="kv"><span>This installation</span><span class="mono">${esc(u.version)}</span></div>
       <div class="kv"><span>Newest release</span><span class="mono">${esc(u.latest || "—")}</span></div>
       <div class="kv"><span>Checked</span><span>${u.checked_at ? ago(u.checked_at) : "not yet"}</span></div>
-      <div class="kv"><span>Updates from</span><span class="mono">${esc(u.repo ? `github.com/${u.repo}` : "—")}</span></div></div>
+      <div class="kv"><span>Updates from</span><span class="mono">${esc(u.repo ? `github.com/${u.repo}` : "—")}</span></div>
+      <div class="kv"><span>Channel</span><span><select id="verChannel" aria-label="Update channel">
+        <option value="stable" ${u.channel !== "beta" ? "selected" : ""}>Stable (recommended)</option>
+        <option value="beta" ${u.channel === "beta" ? "selected" : ""}>Beta - newest changes first</option></select></span></div></div>
+    ${u.channel === "beta" ? `<p class="small muted">Beta releases get new features and fixes before they're released to everyone, and may have rough
+      edges. Only the newest beta is ever offered, so a beta that a later one fixed is never installed. Switch back to Stable any time:
+      you stay on this version until the next stable release, which is offered as usual.</p>` : ""}
+    ${u.withdrawn_installed ? `<p class="small status err">This version (${esc(u.version)}) was withdrawn - upgrade when a newer version is offered.</p>` : ""}
+    ${u.beta_installed && u.channel !== "beta" ? `<p class="small muted">This is a beta version; the next stable release will be offered when it's out.</p>` : ""}
     ${u.error ? `<p class="small status err">${esc(u.error)}</p>` : ""}
     ${busy ? `<p class="status">Upgrading to ${esc(st.version)}: ${esc(st.detail || "")}…</p>` : result}
-    ${u.available && !busy ? `<div class="up-box avail"><b>TikManager ${esc(u.latest)} is available.</b>
+    ${u.available && !busy ? `<div class="up-box avail"><b>TikManager ${esc(u.latest)} is available${u.latest_beta ? " (beta)" : ""}.</b>
         ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener noreferrer">What's new</a>` : ""}
         <p class="small muted">The server backs up the current version and the database, installs ${esc(u.latest)} and restarts (about a minute).
           If the new version doesn't start, it goes back to ${esc(u.version)} automatically. The server security check below runs again afterwards.</p>
@@ -2268,6 +2276,11 @@ async function versionCard() {
     $("secRun").disabled = true;
     try { await post("/api/admin/security-check"); versionCard(); }
     catch (e) { $("secRun").disabled = false; $("secStatus").textContent = e.message; $("secStatus").className = "status err"; }
+  });
+  $("verChannel")?.addEventListener("change", async (e) => {
+    $("verStatus").textContent = "Saving…";
+    try { await post("/api/admin/update-channel", { channel: e.target.value }); versionCard(); }
+    catch (err) { $("verStatus").textContent = err.message; $("verStatus").className = "status err"; }
   });
   $("verCheckCard")?.addEventListener("click", async () => {
     $("verStatus").textContent = "Checking…";

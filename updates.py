@@ -2,6 +2,10 @@
 
 - Every hour (and on demand) the newest release of the update repository (TM_UPDATE_REPO, default the project's GitHub
   repository) is looked up: its highest vX.Y.Z tag (a GitHub Release for that version adds its notes).
+- Channels (Admin > Settings > Version & updates): **stable** (default) only sees vX.Y.Z; **beta** also sees
+  vX.Y.Z-beta.N, which come first. Only the newest release on the channel is ever offered, so a beta that a later beta
+  fixed is never installed again; RELEASES.json on the repository's default branch lists withdrawn versions (a broken
+  beta with no fix yet), which are skipped here and refused by the root updater.
 - Upgrading needs root, which the web app deliberately doesn't have. Clicking Upgrade writes the wanted version to
   <data>/update-request; the root-owned systemd unit tikmanager-update.path notices it and runs deploy/self-update.sh,
   which downloads that release, backs up code and database, installs it, restarts, rolls back if the new version doesn't
@@ -21,14 +25,23 @@ from pathlib import Path
 
 from version import __version__
 
-CHECK_EVERY = 3600   # GitHub allows 60 unauthenticated requests an hour; this uses 1-2
-SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+CHECK_EVERY = 3600   # GitHub allows 60 unauthenticated requests an hour; this uses 2-3
+SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$")
 USER_AGENT = f"TikManager/{__version__}"
+CHANNELS = ("stable", "beta")
 
 
 def vtuple(v):
+    """Sort key: 1.44.0-beta.1 < 1.44.0-beta.2 < 1.44.0 (a release comes after its betas). None if not a version."""
     m = SEMVER.match(str(v or "").strip())
-    return tuple(int(x) for x in m.groups()) if m else None
+    if not m:
+        return None
+    maj, mi, pa, beta = m.groups()
+    return (int(maj), int(mi), int(pa), 0 if beta else 1, int(beta or 0))
+
+
+def is_beta(v):
+    return "-beta." in str(v or "")
 
 
 def security_grade(fails, warns):
@@ -53,8 +66,32 @@ class Updates:
         # root-owned folder; dev mode reads data/security.json. The web app can only ask for a run (an empty file).
         self.security_files = [Path("/var/lib/tikmanager-update/security.json"), self.data / "security.json"]
         self.security_request = self.data / "security-check-request"
-        self.latest = {"version": None, "url": None, "notes": "", "checked_at": None, "error": None}
+        self.latest = {"version": None, "url": None, "notes": "", "checked_at": None, "error": None, "withdrawn": []}
         self.lock = threading.Lock()
+        self.channel_store = None   # set by the server: (get, set) for the saved channel
+
+    @property
+    def channel(self):
+        ch = self.channel_store[0]() if self.channel_store else "stable"
+        return ch if ch in CHANNELS else "stable"
+
+    def set_channel(self, ch):
+        if ch not in CHANNELS:
+            raise ValueError("The channel is stable or beta.")
+        if self.channel_store:
+            self.channel_store[1](ch)
+
+    def withdrawn(self):
+        """Versions pulled from RELEASES.json on the default branch: {"withdrawn": ["1.44.0-beta.1", ...]}. [] if none."""
+        try:
+            req = urllib.request.Request(f"https://raw.githubusercontent.com/{self.repo}/HEAD/RELEASES.json", headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                data = json.loads(r.read() or b"{}")
+            return [str(v).lstrip("v") for v in data.get("withdrawn") or [] if vtuple(v)]
+        except urllib.error.HTTPError as e:
+            if e.code == 404:   # no file = nothing withdrawn
+                return []
+            raise
 
     @property
     def repo(self):
@@ -77,19 +114,28 @@ class Updates:
             # the newest version is the highest vX.Y.Z tag (every version is tagged); a GitHub Release for that same
             # version only adds its notes - so a version pushed without a Release is never missed
             version = url = notes = None
+            pulled = set(self.withdrawn())
+            beta_ok = self.channel == "beta"
             tags = [t.get("name") for t in self._get(f"https://api.github.com/repos/{self.repo}/tags?per_page=100") or []]
-            best = max((t for t in tags if vtuple(t)), key=vtuple, default=None)
+            # only the newest beta ever counts: an older one (e.g. one a later beta fixed) is never offered - not even
+            # when the newest is withdrawn (then no beta is offered until a newer one is out)
+            betas = [t for t in tags if vtuple(t) and is_beta(t)]
+            newest_beta = max(betas, key=vtuple, default=None)
+            pick = [t for t in tags if vtuple(t) and not is_beta(t)] + ([newest_beta] if beta_ok and newest_beta else [])
+            best = max((t for t in pick if t.lstrip("v") not in pulled), key=vtuple, default=None)
             if best:
                 version = best.lstrip("v")
                 url = f"https://github.com/{self.repo}/blob/v{version}/CHANGELOG.md"
             try:
                 rel = self._get(f"https://api.github.com/repos/{self.repo}/releases/latest")
-                if vtuple(rel.get("tag_name")) and (not version or vtuple(rel["tag_name"]) >= vtuple(version)):
+                tag = str(rel.get("tag_name") or "")
+                if (vtuple(tag) and tag.lstrip("v") not in pulled and (beta_ok or not is_beta(tag))
+                        and (not version or vtuple(tag) >= vtuple(version))):
                     version, url, notes = rel["tag_name"].lstrip("v"), rel.get("html_url"), (rel.get("body") or "")[:4000]
             except urllib.error.HTTPError as e:
                 if e.code != 404:   # 404 = no Release published: the tag is enough
                     raise
-            self.latest.update(version=version, url=url, notes=notes or "", checked_at=time.time(), error=None)
+            self.latest.update(version=version, url=url, notes=notes or "", checked_at=time.time(), error=None, withdrawn=sorted(pulled))
         except Exception as e:  # noqa: BLE001 - offline, rate-limited...: try again later
             self.latest.update(checked_at=time.time(), error=f"Couldn't check for updates: {e}"[:200])
         return self.latest
@@ -97,6 +143,8 @@ class Updates:
     def info(self):
         cur, new = vtuple(__version__), vtuple(self.latest.get("version"))
         return {"version": __version__, "latest": self.latest.get("version"), "available": bool(cur and new and new > cur),
+                "channel": self.channel, "beta_installed": is_beta(__version__), "latest_beta": is_beta(self.latest.get("version")),
+                "withdrawn_installed": __version__ in (self.latest.get("withdrawn") or []),
                 "url": self.latest.get("url"), "notes": self.latest.get("notes"), "checked_at": self.latest.get("checked_at"),
                 "error": self.latest.get("error"), "repo": self.repo, "supported": self.supported(), "status": self.status(),
                 "security": self.security()}
@@ -147,7 +195,7 @@ class Updates:
         if not self.supported():
             raise ValueError("One-click upgrade needs a Linux installation made with deploy/install.sh. Upgrade manually (see README).")
         if not vtuple(version):
-            raise ValueError("Pick a version like 1.2.3.")
+            raise ValueError("Pick a version like 1.2.3 or 1.2.3-beta.1.")
         if self.latest.get("version") != version or not self.info()["available"]:
             raise ValueError("That isn't the newest released version - check for updates first.")
         if self.status().get("state") in ("requested", "running"):

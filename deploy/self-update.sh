@@ -2,8 +2,10 @@
 # Upgrade TikManager to a released version, as root.
 #   - run by tikmanager-update.service when an administrator clicks "Upgrade now" (the web app writes the wanted version
 #     to /var/lib/tikmanager/update-request; tikmanager-update.path starts this script)
-#   - or by hand:  sudo bash /opt/tikmanager/deploy/self-update.sh            (newest release)
-#                  sudo bash /opt/tikmanager/deploy/self-update.sh 1.2.3      (a specific version)
+#   - or by hand:  sudo bash /opt/tikmanager/deploy/self-update.sh            (newest stable release)
+#                  sudo bash /opt/tikmanager/deploy/self-update.sh beta       (newest release, betas included)
+#                  sudo bash /opt/tikmanager/deploy/self-update.sh 1.2.3      (a specific version; 1.2.3-beta.1 for a beta)
+# Versions listed as withdrawn in RELEASES.json on the repository's default branch are never installed.
 # Downloads the release from the repository in TM_UPDATE_REPO (root-owned settings file only), checks it, backs up the
 # current code and the database, installs it with its own deploy/update.sh, and rolls back if it doesn't start.
 #
@@ -50,20 +52,47 @@ REPO=$(sed -n 's/^TM_UPDATE_REPO=//p' "$ENV" 2>/dev/null | tail -1 | tr -d '"'"'
 REPO=${REPO:-astukestarr/tikmanager}
 [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { VER="?"; status failed "TM_UPDATE_REPO is not owner/repo"; exit 1; }
 
-# which version: argument, else the web request (a regular file only - not a link or pipe; digits and dots only),
+# which version: argument, else the web request (a regular file only - not a link or pipe; digits, letters, dots, dashes),
 # else the newest release
 VER="${1:-}"
 FROM_WEB=0
-if [[ -z "$VER" && -f "$REQ" && ! -L "$REQ" ]]; then VER=$(head -c 20 -- "$REQ" | tr -dc '0-9.'); FROM_WEB=1; fi
+if [[ -z "$VER" && -f "$REQ" && ! -L "$REQ" ]]; then VER=$(head -c 24 -- "$REQ" | tr -dc '0-9a-z.-'); FROM_WEB=1; fi
 rm -f -- "$REQ"
-if [[ -z "$VER" || "$VER" == "latest" ]]; then   # the highest vX.Y.Z tag (every version is tagged; GitHub Releases are optional notes)
+# version sort key: 1.2.3-beta.1 < 1.2.3-beta.2 < 1.2.3 (a release comes after its betas)
+VKEY='import re,sys
+def k(v):
+    m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?", v.strip())
+    return (int(m[1]), int(m[2]), int(m[3]), 0 if m[4] else 1, int(m[4] or 0)) if m else None'
+WITHDRAWN=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://raw.githubusercontent.com/$REPO/HEAD/RELEASES.json" 2>/dev/null \
+            | python3 -c 'import json,sys; print(" ".join(str(v).lstrip("v") for v in (json.load(sys.stdin).get("withdrawn") or [])))' 2>/dev/null || true)
+if [[ -z "$VER" || "$VER" == "latest" || "$VER" == "beta" ]]; then   # the highest tag (betas only when asked for), skipping withdrawn ones
   VER=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/tags?per_page=100" \
-        | python3 -c 'import json,re,sys; t=[x["name"].lstrip("v") for x in json.load(sys.stdin) if re.fullmatch(r"v?\d+\.\d+\.\d+", x["name"])]; print(max(t, key=lambda v: tuple(map(int, v.split(".")))) if t else "")')
+        | BETA=$([[ "$VER" == "beta" ]] && echo 1 || echo 0) PULLED="$WITHDRAWN" python3 -c "$VKEY"'
+import json, os
+pulled = set(os.environ["PULLED"].split())
+names = [x["name"].lstrip("v") for x in json.load(sys.stdin) if k(x["name"])]
+betas = [v for v in names if "-beta." in v]
+t = [v for v in names if "-beta." not in v] + ([max(betas, key=k)] if os.environ["BETA"] == "1" and betas else [])   # newest beta only
+t = [v for v in t if v not in pulled]
+print(max(t, key=k) if t else "")')
 fi
-[[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { status failed "No valid version to install ($VER)"; exit 1; }
+[[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || { status failed "No valid version to install ($VER)"; exit 1; }
 if [[ "$VER" == "$FROM" ]]; then status done "Already on $VER"; exit 0; fi
+if [[ " $WITHDRAWN " == *" $VER "* && "${TM_ALLOW_WITHDRAWN:-}" != 1 ]]; then
+  status failed "$VER was withdrawn (RELEASES.json) - not installed"; exit 1
+fi
+# a beta from the web must be the newest beta - an older one was superseded (often because the newer one fixes it)
+if [[ "$FROM_WEB" == 1 && "$VER" == *-beta.* ]]; then
+  NEWEST=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/tags?per_page=100"            | python3 -c "$VKEY"'
+import json
+b = [x["name"].lstrip("v") for x in json.load(sys.stdin) if k(x["name"]) and "-beta." in x["name"]]
+print(max(b, key=k) if b else "")')
+  [[ "$VER" == "$NEWEST" ]] || { status failed "$VER isn't the newest beta ($NEWEST) - not installed"; exit 1; }
+fi
 # never downgrade from the web request (an older release may have known problems); by hand, only with TM_ALLOW_DOWNGRADE=1
-if [[ "$FROM" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$(printf '%s\n%s\n' "$VER" "$FROM" | sort -V | tail -1)" == "$FROM" ]]; then
+if [[ "$FROM" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] \
+   && python3 -c "$VKEY"'
+sys.exit(0 if k(sys.argv[1]) < k(sys.argv[2]) else 1)' "$VER" "$FROM"; then
   if [[ "$FROM_WEB" == 1 || "${TM_ALLOW_DOWNGRADE:-}" != 1 ]]; then
     status failed "$VER is older than the installed $FROM - not installed"; exit 1
   fi

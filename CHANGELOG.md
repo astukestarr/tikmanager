@@ -3,8 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
-## 1.43.7 - 2026-10-15
+## 1.44.0-beta.1 - 2026-10-15
 
+- **Beta channel for updates**: Admin > Settings > Version & updates > Channel - **Stable** (default) or **Beta**. Beta
+  installations get new versions (1.45.0-beta.1 ...) before they're released to everyone. Only the newest beta is ever
+  offered, so a beta that a later beta fixed is never installed again, and versions the maintainer withdraws (listed in
+  the repository's RELEASES.json) are never offered or installed. The root updater checks the same rules, and
+  `self-update.sh beta` installs the newest beta from a terminal.
 - **Fix: VPN Reconnect could leave a tunnel switched off and the router cut off from TikManager.** Reconnect sent "off" and
   "on" as two separate requests; when the tunnel being switched off carried the router's other traffic (WireGuard tunnels
   running over an L2TP / SSTP / OpenVPN client or a GRE / EoIP link), TikManager's own connection dropped with it and the

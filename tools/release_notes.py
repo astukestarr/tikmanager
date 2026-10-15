@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 text = (Path(__file__).resolve().parent.parent / "CHANGELOG.md").read_text(encoding="utf-8")
-heads = list(re.finditer(r"^## (\d+\.\d+\.\d+) - (\S+)", text, re.M))
+heads = list(re.finditer(r"^## (\d+\.\d+\.\d+(?:-beta\.\d+)?) - (\S+)", text, re.M))
 if not heads:
     sys.exit("No versions found in CHANGELOG.md")
 want = sys.argv[1].lstrip("v") if len(sys.argv) > 1 else heads[0].group(1)

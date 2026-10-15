@@ -97,6 +97,7 @@ backups = Backups(db, settings, Vault(KEY, dev=settings.dev), poller.client)
 sysconf = AppSettings(db, backups.vault, settings)   # Admin > Settings values over the settings-file defaults
 sysconf.apply()
 updates = Updates(settings)
+updates.channel_store = (lambda: db.setting("update_channel", "stable"), lambda ch: db.set_setting("update_channel", ch))
 upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
@@ -1847,6 +1848,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({**updates.info(), "observatory": observatory.info()})
         if path == "/api/admin/update-check":
             self.require(tech=True, admin=True)
+            updates.check()
+            return self.json(updates.info())
+        if path == "/api/admin/update-channel":   # stable (default) or beta - which releases this installation is offered
+            s = self.require(tech=True, admin=True)
+            ch = str(self.body().get("channel") or "")
+            try:
+                updates.set_channel(ch)
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "update channel changed", ch, self.client_ip())
             updates.check()
             return self.json(updates.info())
         if path == "/api/admin/upgrade":   # hand the upgrade to the root updater (tikmanager-update.path)
