@@ -479,7 +479,8 @@ their own routers, so other clients' routers are never named).
 **Reconnect**: each existing VPN that is switched on has a **Reconnect** button (and each site of a TikManager VPN on its
 page) - for a tunnel that's stuck. IPsec drops its active peer so it renegotiates; WireGuard peers, L2TP / SSTP /
 OpenVPN / PPTP clients and EoIP / GRE / IPIP tunnels are switched off and straight back on (TikManager VPNs: their
-WireGuard peers). Only a tunnel found in that router's inventory can be reconnected (never TikManager's own management
+WireGuard peers) - by the router itself, in one short script, so it comes back on even when the tunnel being switched off
+is the one TikManager's connection runs over. Only a tunnel found in that router's inventory can be reconnected (never TikManager's own management
 tunnel, never anything else), by technicians with write access or client admins with site-to-site VPNs turned on, for
 their own routers. Every reconnect is audit-logged and recorded in the router's events.
 

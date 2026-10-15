@@ -443,9 +443,23 @@ class RouterOS:
             raise RouterError("The router didn't report the VPN interface's public key.")
         return key
 
+    def _toggle_on_router(self, menu, ids):
+        """Switch entries off and back on in ONE script that the router runs by itself (POST /execute without as-string = a
+        background job). Sending "off" and "on" as two requests could leave the entry off for good: when the tunnel being
+        switched off carries TikManager's own connection (the WireGuard tunnels ride over it), the "on" never arrives."""
+        ids = [i for i in ids if re.fullmatch(r"\*[0-9A-Fa-f]+", str(i))]   # internal IDs only - nothing else reaches the script
+        if not ids:
+            return 0
+        path = menu.replace("/", " ").strip()
+        refs = ",".join(ids)
+        self._req("POST", "/execute", {"script": f"/{path} disable {refs}; :delay 2s; /{path} enable {refs}"}, timeout=15)
+        time.sleep(4)   # let the router finish; if TikManager's own path went down with it, it comes back on its own
+        return len(ids)
+
     def tunnel_reconnect(self, menu, match):
         """Reconnect one VPN: IPsec drops its active peer (it renegotiates straight away); WireGuard peers, dial-out clients and
-        EoIP / GRE / IPIP are switched off and on. Only entries that are currently enabled are touched. Returns how many."""
+        EoIP / GRE / IPIP are switched off and on - by the router itself, see _toggle_on_router. Only entries that are
+        currently enabled are touched. Returns how many."""
         if menu == "/ip/ipsec/active-peers":
             n = 0
             for a in self.get(menu) or []:
@@ -457,22 +471,13 @@ class RouterOS:
                 and str(r.get("disabled")) != "true" and r.get("comment") != VPN_TAG]
         if not rows:
             raise RouterError("That VPN isn't on the router any more (or it's switched off).")
-        for r in rows:
-            self._req("PATCH", f"{menu}/{r['.id']}", {"disabled": "true"})
-        time.sleep(2)
-        for r in rows:
-            self._req("PATCH", f"{menu}/{r['.id']}", {"disabled": "false"})
-        return len(rows)
+        return self._toggle_on_router(menu, [r[".id"] for r in rows])
 
     def vpn_reconnect(self):
         """Reconnect TikManager's site-to-site VPN on this router: its peers (tagged VPN_TAG) off and on - a fresh handshake."""
-        rows = [r for r in self.get(f"/interface/wireguard/peers?comment={urllib.parse.quote(VPN_TAG)}") or [] if str(r.get("disabled")) != "true"]
-        for r in rows:
-            self._req("PATCH", f"/interface/wireguard/peers/{r['.id']}", {"disabled": "true"})
-        time.sleep(2)
-        for r in rows:
-            self._req("PATCH", f"/interface/wireguard/peers/{r['.id']}", {"disabled": "false"})
-        return len(rows)
+        rows = [r for r in self.get(f"/interface/wireguard/peers?comment={urllib.parse.quote(VPN_TAG)}") or []
+                if str(r.get("disabled")) != "true" and r.get("comment") == VPN_TAG]
+        return self._toggle_on_router("/interface/wireguard/peers", [r[".id"] for r in rows])
 
     def vpn_clear(self, name, remove_interface=False):
         """Remove every peer, route, address and firewall rule TikManager added for the VPN (and optionally the interface)."""

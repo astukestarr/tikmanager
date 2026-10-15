@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.43.7 - 2026-10-15
+
+- **Fix: VPN Reconnect could leave a tunnel switched off and the router cut off from TikManager.** Reconnect sent "off" and
+  "on" as two separate requests; when the tunnel being switched off carried the router's other traffic (WireGuard tunnels
+  running over an L2TP / SSTP / OpenVPN client or a GRE / EoIP link), TikManager's own connection dropped with it and the
+  "on" never arrived. The router now runs the whole off - 2 seconds - on itself as one background script, so it always
+  comes back on. TikManager VPN reconnects also double-check each peer's tag before touching it.
+- If a router dropped out after a Reconnect before this fix: on the router, `/interface print where disabled` and
+  `/interface wireguard peers print where disabled`, then enable what was switched off.
+
 ## 1.43.6 - 2026-10-13
 
 - **Network map layout for routers with many networks**: only networks with something on them get a column - busiest
