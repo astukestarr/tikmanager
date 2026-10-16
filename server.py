@@ -1506,6 +1506,14 @@ class Handler(BaseHTTPRequestHandler):
             if not done:
                 raise HttpError(502, "; ".join(errs))
             return self.json({"ok": True, "done": done, "errors": errs})
+        if m := re.fullmatch(r"/api/devices/(\d+)/ra/cloud", path):   # use the router's IP Cloud DNS name as the address
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            try:
+                r = remote.use_cloud(d["id"], s["email"])
+            except RaError as e:
+                raise HttpError(400, str(e)) from None
+            return self.json({"ok": True, **r})
         if m := re.fullmatch(r"/api/devices/(\d+)/ra(?:/(remove|users|users/(\d+)/revoke))?", path):   # remote access changes
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))

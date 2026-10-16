@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.4 - 2026-10-16
+
+- **Remote access: use the router's MikroTik Cloud DNS name** (<serial>.sn.mynetname.net) as the address people connect
+  to - it follows the router's public IP when the ISP changes it. The Remote access tab shows the router's Cloud DNS name
+  and status; **Use Cloud DNS** (or **Turn it on and use it**, which switches on IP Cloud DDNS on the router) makes it the
+  address. New setups pick the Cloud name by default when the router has one. Configs not downloaded yet are updated;
+  the page says how many were already handed out with the old address.
+
 ## 1.46.0-beta.3 - 2026-10-16
 
 - **Fix: router pages showed "Something went wrong on the server"** (the traffic / CPU graphs failed to load) in

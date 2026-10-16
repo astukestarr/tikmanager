@@ -561,8 +561,9 @@ An SSTP replacement: people connect to a client's router with the free **WireGua
 faster, more reliable on poor connections, no certificates. Technicians set it up per router on the router page >
 **Remote access**:
 
-1. Check the suggested settings: the **address people connect to** (the router's public IP, or a DNS name pointing at
-   it - forward the UDP port to the router if it sits behind another firewall), the **UDP port**, an **address range**
+1. Check the suggested settings: the **address people connect to** (best: the router's MikroTik **Cloud DNS** name,
+   which follows its public IP - **Use Cloud DNS** fills it in and turns IP Cloud on if needed; or a public IP / your own
+   DNS name; forward the UDP port to the router if it sits behind another firewall), the **UDP port**, an **address range**
    for the people connecting (picked so it doesn't overlap the router's networks), optional **DNS** (the office DNS
    server, so names like fileserver work) and **what goes through the tunnel**: only the office networks you tick
    (recommended), or all traffic.

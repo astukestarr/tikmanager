@@ -3910,7 +3910,11 @@ async function raTab(d, note) {
       ${srv && srv.last_error ? `<p class="status err small">${esc(srv.last_error)}</p>` : ""}
       <div class="grid2">
         <label class="field">Address people connect to <input id="raEp" value="${esc(cfg.endpoint || "")}" placeholder="public IP or DNS name" ${rw ? "" : "disabled"}>
-          <span class="small muted">The router's public IP, or a DNS name pointing at it. Behind another firewall? Forward the UDP port to this router.</span></label>
+          <span class="small muted">The router's public IP, or a DNS name pointing at it. Behind another firewall? Forward the UDP port to this router.</span>
+          <span class="small" id="raCloud">${!x.cloud ? `<span class="muted">Cloud DNS: couldn't read it${x.online ? "" : " (router offline)"}.</span>`
+            : x.cloud.name ? `Cloud DNS: <span class="mono">${esc(x.cloud.name)}</span>${x.cloud.address ? ` <span class="muted">(${esc(x.cloud.address)})</span>` : ""}
+                ${(cfg.endpoint || "") === x.cloud.name ? ` <span class="status ok">in use</span>` : rw ? ` <button class="btn small" type="button" id="raUseCloud">Use Cloud DNS</button>` : ""}`
+            : `<span class="muted">Cloud DNS is off on this router.</span> ${rw ? `<button class="btn small" type="button" id="raUseCloud">Turn it on and use it</button>` : ""}`}</span></label>
         <label class="field">UDP port <input id="raPort" inputmode="numeric" value="${esc(cfg.port)}" ${rw ? "" : "disabled"}></label>
         <label class="field">Address range for people <input id="raPool" class="mono" value="${esc(cfg.pool)}" ${rw && !(x.users || []).length ? "" : "disabled"}>
           <span class="small muted">Each person gets one address from it; must not overlap the router's networks.${(x.users || []).length ? " Remove everyone to change it." : ""}</span></label>
@@ -3943,6 +3947,20 @@ async function raTab(d, note) {
       await post(`/api/devices/${d.id}/ra`, { endpoint: $("raEp").value, port: $("raPort").value, pool: $("raPool").value, dns: $("raDns").value, split, routes });
       raTab(d, srv ? "Saved and applied." : "Remote access is set up. Add the people who'll connect below.");
     } catch (e) { $("raSave").disabled = false; say("raStatus", e.message); }
+  });
+  $("raUseCloud")?.addEventListener("click", async (e) => {
+    const b = e.target;
+    if (!srv) {   // not set up yet: just fill the field (turning Cloud DNS on first if needed)
+      if (x.cloud?.name) { $("raEp").value = x.cloud.name; b.replaceWith(Object.assign(document.createElement("span"), { className: "status ok", textContent: "filled in - save to use it" })); return; }
+    }
+    b.disabled = true; b.textContent = x.cloud?.name ? "Switching…" : "Turning on Cloud DNS…";
+    try {
+      const r = await post(`/api/devices/${d.id}/ra/cloud`);
+      if (!srv) { raTab(d); return; }
+      raTab(d, `People now connect to <span class="mono">${esc(r.cloud.name)}</span>.` + (r.stale
+        ? ` <b>${r.stale} config${r.stale === 1 ? " was" : "s were"} already handed out with the old address</b> - those people keep working while the router's IP stays the same; to move them to the Cloud name, revoke and add them again.`
+        : " Configs not downloaded yet were updated too."));
+    } catch (err) { b.disabled = false; b.textContent = x.cloud?.name ? "Use Cloud DNS" : "Turn it on and use it"; say("raStatus", err.message); }
   });
   $("raRemove")?.addEventListener("click", async (e) => {
     if (e.target.dataset.armed !== "1") { e.target.dataset.armed = "1"; const n = (x.users || []).length; e.target.textContent = n ? `Click again - ${n} ${n === 1 ? "person loses" : "people lose"} access` : "Click again to remove"; return; }

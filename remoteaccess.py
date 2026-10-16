@@ -103,6 +103,51 @@ class RemoteAccess:
         return {"port": DEFAULT_PORT, "pool": pool, "endpoint": d.get("public_ip") or d.get("wan_ip") or "", "split": True,
                 "routes": [n["network"] for n in self.networks(d)], "dns": ""}
 
+    def cloud(self, d):
+        """The router's IP Cloud DNS name (read live; None if it can't be read)."""
+        if not d["online"]:
+            return None
+        try:
+            return self.client_for(d).cloud()
+        except RouterError:
+            return None
+
+    def use_cloud(self, device_id, user):
+        """Turn on the router's IP Cloud DNS if needed and make its name the address people connect to.
+        Returns {"cloud", "stale": people whose configs still hold the old address}."""
+        d = self.device(device_id)
+        if not d["online"]:
+            raise RaError("The router is offline - try again when it's back.")
+        try:
+            cl = self.client_for(d)
+            c = cl.cloud()
+            if not c["name"]:
+                c = cl.cloud_enable()
+                self.db.event(device_id, d["org_id"], "remote access", f"IP Cloud DNS turned on by {user}")
+        except RouterError as e:
+            raise RaError(f"The router didn't take it: {e}") from None
+        if not c["name"]:
+            raise RaError("Cloud DNS is on, but the router hasn't got its name yet (it needs to reach MikroTik's cloud) - try again in a minute.")
+        stale = 0
+        srv = self.db.one("SELECT * FROM ra_servers WHERE device_id=?", (device_id,))
+        if srv and srv["endpoint"] != c["name"]:
+            stale = self.db.one("SELECT COUNT(*) AS n FROM ra_users WHERE device_id=? AND (downloaded_at IS NOT NULL OR cfg_blob IS NULL)",
+                                (device_id,))["n"]
+            # configs not downloaded yet are rebuilt with the new address below; downloaded ones keep the old one
+            self.db.run("UPDATE ra_servers SET endpoint=? WHERE device_id=?", (c["name"], device_id))
+            self.db.audit(user, "remote access address changed", d["name"], org_id=d["org_id"], detail=f"{srv['endpoint']} -> {c['name']}")
+            self._rebuild_pending(device_id)
+        return {"cloud": c, "stale": stale}
+
+    def _rebuild_pending(self, device_id):
+        """Configs nobody has downloaded yet: rewrite them with the current address (the key stays the same)."""
+        srv = self.db.one("SELECT * FROM ra_servers WHERE device_id=?", (device_id,))
+        for u in self.db.q("SELECT * FROM ra_users WHERE device_id=? AND cfg_blob IS NOT NULL AND downloaded_at IS NULL", (device_id,)):
+            conf = self.vault.open(u["cfg_blob"], u["cfg_alg"], f"ra:{u['id']}").decode()
+            conf = "\n".join(f"Endpoint = {srv['endpoint']}:{srv['port']}" if ln.startswith("Endpoint = ") else ln for ln in conf.split("\n"))
+            blob, alg = self.vault.seal(conf.encode(), f"ra:{u['id']}")
+            self.db.run("UPDATE ra_users SET cfg_blob=?, cfg_alg=? WHERE id=?", (blob, alg, u["id"]))
+
     def info(self, device_id, live=False):
         d = self.device(device_id)
         srv = self.db.one("SELECT * FROM ra_servers WHERE device_id=?", (device_id,))
@@ -122,8 +167,12 @@ class RemoteAccess:
             u.pop("pubkey", None)
         if srv:
             srv = {**srv, "routes": json.loads(srv["routes"] or "[]")}
-        return {"server": srv, "users": users, "suggest": self.suggest(d), "networks": self.networks(d), "online": bool(d["online"]),
-                "live_error": live_err}
+        cloud = self.cloud(d) if live else None
+        sug = self.suggest(d)
+        if cloud and cloud.get("name"):
+            sug["endpoint"] = cloud["name"]   # a permanent name beats an IP that the ISP may change
+        return {"server": srv, "users": users, "suggest": sug, "networks": self.networks(d), "online": bool(d["online"]),
+                "live_error": live_err, "cloud": cloud}
 
     # --- setting up -------------------------------------------------------------------------------------------------
     def _validate(self, d, b):

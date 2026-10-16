@@ -553,6 +553,24 @@ class RouterOS:
                 if r.get("comment") == RA_TAG:
                     self._req("DELETE", f"{menu}/{r['.id']}")
 
+    def cloud(self):
+        """MikroTik IP Cloud: {ddns, name, address, status} - the router's permanent <serial>.sn.mynetname.net name."""
+        c = self.optional(lambda: self.get("/ip/cloud"), {}) or {}
+        c = c[0] if isinstance(c, list) and c else c if isinstance(c, dict) else {}
+        return {"ddns": str(c.get("ddns-enabled")) in ("true", "yes", "auto"), "name": c.get("dns-name") or "",
+                "address": c.get("public-address") or "", "status": c.get("status") or ""}
+
+    def cloud_enable(self, wait=25):
+        """Turn on IP Cloud DDNS and wait for the router to get its name. Returns cloud()."""
+        self.post("/ip/cloud/set", {"ddns-enabled": "yes"})
+        end = time.time() + wait
+        while time.time() < end:
+            c = self.cloud()
+            if c["name"]:
+                return c
+            time.sleep(2)
+        return self.cloud()
+
     def ra_peer_add(self, name, pubkey, ip, label):
         self._req("PUT", "/interface/wireguard/peers", {"interface": name, "public-key": pubkey, "allowed-address": f"{ip}/32",
                                                         "comment": f"{RA_TAG}: {label}"[:200]})
@@ -1104,6 +1122,16 @@ class SimRouter:
 
     def ra_peer_add(self, name, pubkey, ip, label):
         self._sim().setdefault("ra", {"peers": {}})["peers"][pubkey] = ip
+
+    def cloud(self):
+        on = self._sim().get("cloud", self.id % 2 == 1)   # some simulated routers start with Cloud DNS on
+        return {"ddns": on, "name": f"{hashlib.sha256(str(self.id).encode()).hexdigest()[:12]}.sn.mynetname.net" if on else "",
+                "address": f"203.0.113.{self.id % 250 + 2}" if on else "", "status": "updated" if on else ""}
+
+    def cloud_enable(self, wait=25):
+        time.sleep(0.5)
+        self._sim()["cloud"] = True
+        return self.cloud()
 
     def ra_peer_remove(self, name, pubkey):
         (self._sim().get("ra") or {}).get("peers", {}).pop(pubkey, None)
