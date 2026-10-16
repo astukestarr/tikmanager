@@ -4129,7 +4129,7 @@ function navActive() {
   });
 }
 // --- UniFi (unifi.ui.com): sites with health, assigned to clients; devices per site -----------------------------------------
-const uView = { org: "", q: "", open: null, problems: false };
+const uView = { org: "", q: "", open: null, problems: false, match: "" };
 const fmtMac = (m) => (String(m || "").match(/.{2}/g) || []).join(":").toUpperCase();
 const pct = (v) => v == null ? "—" : `${Number(v).toFixed(Number(v) >= 99.95 ? 0 : 2)}%`;
 async function unifiPage() {
@@ -4142,6 +4142,8 @@ async function unifiPage() {
     ${!x.configured && tech ? `<div class="card"><p>Add a UniFi or UISP connection on <a href="#admin">Admin &gt; Integrations &gt; UniFi &amp; UISP</a> to see sites here.</p></div>` : ""}
     <div class="card"><div class="row">
       ${tech ? `<select id="uOrg" aria-label="Client"><option value="">All clients</option><option value="none">Not assigned</option>${(x.orgs || []).map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
+      ${tech ? `<select id="uMatch" aria-label="Match"><option value="">All sites</option><option value="matched">Matched to a client</option>
+        <option value="auto">Matched automatically</option><option value="manual">Chosen by hand</option><option value="none">Not matched</option></select>` : ""}
       <input id="uQ" type="search" placeholder="Search sites, consoles, devices" value="${esc(uView.q)}" aria-label="Search">
       <label class="chk"><input type="checkbox" id="uProb" ${uView.problems ? "checked" : ""}> Offline or updates only</label><span class="spacer"></span>
       ${tech ? (x.accounts || []).filter((a) => a.last && !a.last.ok).map((a) => `<span class="small status err" title="${esc(a.last.detail)}">${esc(a.name)}: sync failed</span>`).join(" ") : ""}</div>
@@ -4155,11 +4157,15 @@ async function unifiPage() {
         <td class="mono small">${esc(d.ip || "")}</td><td>${uStatus(d)}</td><td class="small">${esc(d.version || "")}${d.update_available ? ` <span class="pill up-run">→ ${esc(d.update_available)}</span>` : ""}</td></tr>`).join("")}
       </tbody></table></div></div>` : ""}`;
   if ($("uOrg")) $("uOrg").value = uView.org;
+  if ($("uMatch")) $("uMatch").value = uView.match;
+  // matched = the site is linked to a client: automatically (by name ...) or chosen by hand on this page
+  const byMatch = (s) => !uView.match || (uView.match === "none" ? !s.org_id : uView.match === "matched" ? !!s.org_id
+    : uView.match === "manual" ? !!s.org_id && !!s.manual : !!s.org_id && !s.manual);
   const draw = () => {
     const q = uView.q.toLowerCase();
     const rows = x.sites.filter((s) => (!uView.org || (uView.org === "none" ? !s.org_id : String(s.org_id) === uView.org))
       && (!q || `${s.name} ${s.internal} ${s.console || ""} ${s.account || ""} ${s.org || ""} ${s.isp || ""} ${s.address || ""}`.toLowerCase().includes(q))
-      && (!uView.problems || s.offline || s.updates));
+      && (!uView.problems || s.offline || s.updates) && byMatch(s));
     $("uRows").innerHTML = rows.map((s) => `<tr class="click" data-usite="${esc(s.id)}"><td><b>${esc(s.name)}</b>${s.type === "endpoint" ? ` <span class="pill">subscriber</span>` : ""}${s.internet_issues ? ` <span class="pill up-failed">internet issues</span>` : ""}
         ${s.address ? `<div class="small muted">${esc(s.address)}</div>` : ""}${s.wan_ip ? `<div class="small muted mono" title="Public IP">${esc(s.wan_ip)}</div>` : ""}</td>
       ${tech ? `<td class="noclick">${canWrite() && !s.own_account ? `<select data-uassign="${esc(s.id)}" aria-label="Client for ${esc(s.name)}">
@@ -4180,6 +4186,7 @@ async function unifiPage() {
   $("uQ").addEventListener("input", (e) => { uView.q = e.target.value; draw(); });
   $("uProb").addEventListener("change", (e) => { uView.problems = e.target.checked; draw(); });
   $("uOrg")?.addEventListener("change", (e) => { uView.org = e.target.value; draw(); });
+  $("uMatch")?.addEventListener("change", (e) => { uView.match = e.target.value; draw(); });
   $("uRows").addEventListener("click", (e) => {
     if (e.target.closest(".noclick")) return;
     const tr = e.target.closest("[data-usite]");

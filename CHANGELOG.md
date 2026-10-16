@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.1 - 2026-10-16
+
+- **UniFi / UISP page: Match filter** (technicians) - All sites, Matched to a client, Matched automatically, Chosen by
+  hand, or Not matched, alongside the client, search and "Offline or updates only" filters.
+
 ## 1.45.1 - 2026-10-16
 
 - **Site-to-site VPNs managed by TikManager are turned off for now**, until they've been tested further. The "Managed by
