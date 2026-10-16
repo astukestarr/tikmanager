@@ -3900,8 +3900,12 @@ function fixJobBox() {
 }
 async function followFixJob() {
   clearTimeout(hView.poll);
-  if (!hView.job) return;
-  try { hView.jobData = await api(`/api/health-dash/fix/${hView.job}`); } catch (e) { hView.job = hView.jobData = null; hView.busy = false; return; }
+  const id = hView.job;
+  if (!id) return;
+  let data;
+  try { data = await api(`/api/health-dash/fix/${id}`); } catch (e) { if (hView.job === id) { hView.job = hView.jobData = null; hView.busy = false; } return; }
+  if (hView.job !== id) return;   // dismissed (or another job started) while this was loading
+  hView.jobData = data;
   hView.busy = !hView.jobData.finished;
   if (view !== "health") return;
   if ($("hJob")) { $("hJob").innerHTML = fixJobBox(); setBars($("hJob")); $("hJobClose")?.addEventListener("click", closeFixJob); }
@@ -3933,7 +3937,12 @@ document.addEventListener("click", async (e) => {
   b.textContent = ok ? `Copied ${rows.length} line${rows.length === 1 ? "" : "s"}` : "Couldn't copy - select the list and press Ctrl+C";
   setTimeout(() => { if (b.isConnected) b.textContent = was; }, 2500);
 });
-function closeFixJob() { hView.dismissed = hView.job; hView.job = hView.jobData = null; hView.busy = false; if ($("hJob")) $("hJob").innerHTML = ""; }
+function closeFixJob() {
+  const id = hView.job;
+  hView.dismissed = id; hView.job = hView.jobData = null; hView.busy = false; clearTimeout(hView.poll);
+  if ($("hJob")) $("hJob").innerHTML = "";
+  if (id) post(`/api/health-dash/fix/${id}/dismiss`).catch(() => {});   // stays closed after a reload too
+}
 const SEV_PILL = { critical: "up-failed", high: "up-failed", medium: "up-run", low: "" };
 async function healthPage() {
   const x = await api("/api/health-dash");
@@ -4034,6 +4043,50 @@ async function healthPage() {
   // a fix job still running (or just finished) - also after a reload or coming back to the page
   if (!hView.job && x.fix_job && x.fix_job !== hView.dismissed) { hView.job = x.fix_job; hView.shownDone = true; }
   if (hView.job && !hView.poll_on) { hView.poll_on = true; followFixJob().finally(() => { hView.poll_on = false; }); }
+}
+
+// --- What's new: a tour of everything since the last full release (whatsnew.py) ---------------------------------------
+// On load it shows the slides this person hasn't acknowledged; "Got it - don't show again" acknowledges them until the
+// next full release. Closing (x, Esc, Remind me later) shows them again next time. The top bar's "What's new" shows all.
+async function whatsNew(all) {
+  let x;
+  try { x = await api("/api/whats-new"); } catch (e) { return; }
+  $("wnOpen")?.classList.toggle("hidden", !x.slides.length);
+  if ($("wnOpen") && !$("wnOpen").dataset.wired) { $("wnOpen").dataset.wired = "1"; $("wnOpen").addEventListener("click", () => whatsNew(true)); }
+  const slides = all ? x.slides : x.slides.filter((s) => x.unseen.includes(s.id));
+  if (!slides.length || (!all && me.viewing_as)) return;
+  const dlg = $("wnDlg");
+  let i = 0;
+  const ack = async () => { try { await post("/api/whats-new/seen", { ids: x.slides.map((s) => s.id) }); } catch (e) { /* view-as is read-only */ } dlg.close(); };
+  const draw = () => {
+    const s = slides[i], last = i === slides.length - 1;
+    dlg.innerHTML = `<div class="wn-head"><div><b id="wnTitle">What's new in TikManager ${esc(x.release.replace(/\.0$/, ""))}</b>
+        <div class="small muted">everything since ${esc(x.since)} · ${i + 1} of ${slides.length}</div></div>
+        <button class="icon-btn" type="button" id="wnX" aria-label="Close" title="Close - show me again next time">✕</button></div>
+      <div class="wn-body">${s.img ? `<img class="wn-img" src="/whatsnew/${esc(s.img)}.jpg" alt="${esc(s.title)}">` : ""}
+        <h2>${esc(s.title)}</h2><p>${esc(s.text)}</p>
+        ${s.view ? `<a href="#${esc(s.view)}" id="wnShow" class="small">Show me →</a>` : ""}</div>
+      <div class="wn-dots">${slides.map((_, k) => `<button type="button" class="${k === i ? "on" : ""}" data-wnk="${k}" aria-label="Slide ${k + 1}"></button>`).join("")}</div>
+      <div class="wn-foot">
+        <button class="btn" type="button" id="wnBack" ${i ? "" : "disabled"}>← Back</button>
+        <span class="spacer"></span>
+        ${last ? `<button class="btn" type="button" id="wnLater">Remind me later</button>
+          <button class="btn primary" type="button" id="wnAck">Got it - don't show again</button>`
+          : `<button class="linkish small" type="button" id="wnAck">Don't show again</button><button class="btn primary" type="button" id="wnNext">Next →</button>`}</div>`;
+    $("wnX").addEventListener("click", () => dlg.close());
+    $("wnBack").addEventListener("click", () => { i--; draw(); });
+    $("wnNext")?.addEventListener("click", () => { i++; draw(); });
+    $("wnLater")?.addEventListener("click", () => dlg.close());
+    $("wnAck").addEventListener("click", ack);
+    $("wnShow")?.addEventListener("click", () => dlg.close());
+    dlg.querySelectorAll("[data-wnk]").forEach((b) => b.addEventListener("click", () => { i = +b.dataset.wnk; draw(); }));
+  };
+  dlg.onkeydown = (e) => {
+    if (e.key === "ArrowRight" && i < slides.length - 1) { i++; draw(); }
+    if (e.key === "ArrowLeft" && i > 0) { i--; draw(); }
+  };
+  draw();
+  if (!dlg.open) dlg.showModal();
 }
 
 // --- compliance: routers against CIS v8 / NIST 800-171 / PCI DSS 4.0 / HIPAA, and a client report (compliance.py) ------
@@ -4798,6 +4851,7 @@ async function init() {
   });
   refreshNavCounts();
   setInterval(refreshNavCounts, 60000);
+  whatsNew(false);
   $("logout").addEventListener("click", async () => {
     const r = await post("/api/logout");
     location.href = r.entra_logout || "/login";

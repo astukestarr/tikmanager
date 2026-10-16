@@ -57,10 +57,29 @@ class Entra:
              "prompt": "select_account"}
         return f"{self.authority}/authorize?{urllib.parse.urlencode(q)}", state
 
+    def hint(self, detail: str) -> str:
+        """Plain-English fix for the Microsoft errors people hit while setting TikManager up (shown under the error)."""
+        env = "ENTRA_CLIENT_SECRET in /etc/tikmanager/tikmanager.env, then sudo systemctl restart tikmanager"
+        for code, text in (
+                ("AADSTS7000215", "TikManager has the wrong client secret - usually the secret's ID instead of its Value. In Entra > "
+                                  "App registrations > (TikManager's app) > Certificates & secrets, add a new client secret and copy "
+                                  f"its Value (it's shown only once), put it in {env}."),
+                ("AADSTS7000222", f"The client secret has expired. Add a new one in Entra (Certificates & secrets), put its Value in {env}."),
+                ("AADSTS50011", f"The app's redirect URI doesn't match. In Entra > App registrations > Authentication, add a Web "
+                                f"redirect URI of exactly {self.redirect_uri}"),
+                ("AADSTS700016", "Entra can't find the app in this tenant - check ENTRA_CLIENT_ID (the Application (client) ID) and "
+                                 "ENTRA_TENANT_ID (the Directory (tenant) ID) in /etc/tikmanager/tikmanager.env."),
+                ("AADSTS90002", "Entra doesn't know that tenant - check ENTRA_TENANT_ID (the Directory (tenant) ID)."),
+                ("AADSTS65001", "The app hasn't been granted consent - an Entra administrator grants it under API permissions.")):
+            if code in detail:
+                return " How to fix: " + text
+        return ""
+
     def complete(self, query: dict, cookie_state: str | None) -> tuple[dict, str]:
         """Returns ({email, name, oid}, return path)."""
         if query.get("error"):
-            raise AuthError(query.get("error_description") or query["error"])
+            msg = query.get("error_description") or query["error"]
+            raise AuthError(msg + self.hint(msg))
         state = query.get("state", "")
         with self._lock:
             pending = self._pending.pop(state, None)
@@ -79,7 +98,7 @@ class Entra:
                 tokens = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             detail = json.loads(e.read() or b"{}").get("error_description", "")
-            raise AuthError(f"Microsoft rejected the sign-in: {detail.splitlines()[0] if detail else e.code}") from None
+            raise AuthError(f"Microsoft rejected the sign-in: {detail.splitlines()[0] if detail else e.code}.{self.hint(detail)}") from None
         except urllib.error.URLError as e:
             raise AuthError(f"Couldn't reach Microsoft: {e.reason}") from None
         c = _claims(tokens.get("id_token", ""))

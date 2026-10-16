@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.17 - 2026-10-16
+
+- **What's new tour**: when you open TikManager after an update, a short tour shows everything since the last full release
+  (1.45.1) - one feature per slide with a screenshot, **Next** / **Back** (or the arrow keys), and **Show me** to open
+  the page. **Got it - don't show again** hides it until the next full release; closing it (or **Remind me later**)
+  shows it again next time. Slides added by a later beta show up on their own. **What's new** in the top bar opens the
+  whole tour any time. Technicians only.
+- **Fix: a finished fix job's box kept coming back** after Dismiss (on a reload, or when returning to the page within
+  10 minutes). Dismiss is now remembered by the server, and a refresh that was already loading can't redraw it.
+- **Fix: router pages scrolled sideways on narrow screens** - a wide table (the VPNs tab, for one) widened the whole page.
+  Tables now scroll inside their own box.
+- **Sign-in errors explain the fix**: when Microsoft rejects a sign-in during setup, the message now says what to do -
+  e.g. AADSTS7000215 (the client secret's ID was used instead of its Value), an expired secret, a redirect URI that
+  doesn't match (with the exact value to add), or a wrong client / tenant ID.
+
 ## 1.46.0-beta.16 - 2026-10-16
 
 - **Fix: Switch to HTTPS still failed with "failure: CA not found"**. The real cause: the certificate TikManager made

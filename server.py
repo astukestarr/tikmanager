@@ -54,6 +54,7 @@ import vpninv
 import healthdash
 healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManager" uses it
 import compliance
+import whatsnew
 from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -86,8 +87,11 @@ def user_prefs(user_id) -> dict:
         p = json.loads((row or {}).get("prefs") or "{}")
     except ValueError:
         p = {}
-    return {"theme": p.get("theme") if p.get("theme") in THEMES else "company",
-            "mode": p.get("mode") if p.get("mode") in MODES else "system"}
+    out = {"theme": p.get("theme") if p.get("theme") in THEMES else "company",
+           "mode": p.get("mode") if p.get("mode") in MODES else "system"}
+    if isinstance(p.get("whatsnew"), dict):   # kept when the appearance is saved (the What's new tour's "seen" record)
+        out["whatsnew"] = p["whatsnew"]
+    return out
 
 db = DB(settings.data_dir / "tikmanager.db")
 KEY = master_key()
@@ -456,6 +460,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.static(f"map/{m.group(1)}.json")
         if re.fullmatch(r"/[a-z]+\.(js|css|svg)", path):
             return self.static(path[1:])
+        if m := re.fullmatch(r"/whatsnew/([a-z0-9-]+)\.jpg", path):   # What's new screenshots (dev-mode data only)
+            return self.static(f"whatsnew/{m.group(1)}.jpg")
         if path == "/auth/login":
             if not settings.entra_configured:
                 raise HttpError(503, "Microsoft sign-in isn't configured yet.")
@@ -680,13 +686,16 @@ class Handler(BaseHTTPRequestHandler):
                               "fixes": {k: {"label": v[0], "effect": v[3]} for k, v in healthdash.FIXES.items()},
                               # this person's newest fix job (running, or finished in the last 10 minutes) - the page shows its progress
                               "fix_job": next((j["id"] for j in sorted(FIX_JOBS.values(), key=lambda j: -j["started"]) if j["user"] == s["email"]
-                                               and (not j["finished"] or t_now - j["finished"] < 600)), None)})
+                                               and not j.get("dismissed") and (not j["finished"] or t_now - j["finished"] < 600)), None)})
         if m := re.fullmatch(r"/api/health-dash/fix/([\w-]+)", path):   # one fix job's per-router progress
             s = self.require(tech=True)
             j = FIX_JOBS.get(m.group(1))
             if not j or j["user"] != s["email"]:
                 raise HttpError(404, "That fix job has finished and was cleared.")
             return self.json({"id": j["id"], "label": j["label"], "started": j["started"], "finished": j["finished"], "items": j["items"], "now": time.time()})
+        if path == "/api/whats-new":   # the tour of what's new since the last full release (whatsnew.py)
+            s = self.require()
+            return self.json(whatsnew.for_person(s["kind"], user_prefs(s["user_id"]).get("whatsnew")))
         if path in ("/api/compliance", "/api/compliance/report"):   # framework scorecard; ?fw=cis8|nist171|pci4|hipaa &org=<id>
             s = self.require(tech=True)
             fw = q.get("fw") if q.get("fw") in compliance.FRAMEWORKS else "cis8"
@@ -1172,6 +1181,11 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "That user is disabled.")
             db.run("UPDATE sessions SET as_user_id = ? WHERE id_hash = ?", (u["id"], token_hash(read_cookie(self.headers.get("Cookie"), SESSION_COOKIE))))
             db.audit(s["email"], "viewing as", u["email"], self.client_ip(), org_id=u["org_id"], detail="read-only")
+            return self.json({"ok": True})
+        if path == "/api/whats-new/seen":   # {ids: [...]} - "Got it, don't show again" (until the next full release)
+            prefs = user_prefs(s["user_id"])
+            prefs["whatsnew"] = whatsnew.mark_seen(prefs.get("whatsnew"), [str(x) for x in (self.body().get("ids") or [])][:100])
+            db.run("UPDATE users SET prefs=? WHERE id=?", (json.dumps(prefs), s["user_id"]))
             return self.json({"ok": True})
         if path == "/api/me/prefs":   # the signed-in person's own appearance (theme + light/dark mode)
             b = self.body()
@@ -1721,6 +1735,12 @@ class Handler(BaseHTTPRequestHandler):
             d = self.device_for(s, e["device_id"])
             db.run("DELETE FROM exceptions WHERE id=?", (e["id"],))
             db.audit(s["email"], "finding acceptance removed", f"{d['name']}: {e['key'][3:]}", self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/health-dash/fix/([\w-]+)/dismiss", path):   # Dismiss: the finished job's box stays closed
+            s = self.require(tech=True)
+            j = FIX_JOBS.get(m.group(1))
+            if j and j["user"] == s["email"]:
+                j["dismissed"] = True
             return self.json({"ok": True})
         if path == "/api/health-dash/fix":   # one-click fixes: [{device_id, fix}] -> a background job the page follows
             s = self.require(tech=True, write=True)

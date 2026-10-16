@@ -27,6 +27,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
           <span class="ver-chip hidden" id="verChip" title="The TikManager version this server is running"></span>
           <button class="ver-check hidden" type="button" id="verCheck" title="Check GitHub for a newer TikManager now">Check for updates</button>
+          <button class="ver-check hidden" type="button" id="wnOpen" title="What's new since the last full release">What's new</button>
           <span class="pill hidden" id="devBadge">DEV · simulated routers</span>
           <span class="spacer"></span>
           <button class="icon-btn" type="button" id="appearanceBtn" title="Appearance: colours and light / dark mode" aria-label="Appearance">
@@ -52,6 +53,7 @@
   </div>
 
   <dialog id="dlg"><div id="dlgBody"></div></dialog>
+  <dialog id="wnDlg" class="wn" aria-labelledby="wnTitle"></dialog>
   <script src="/brand.js"></script>
   <script src="/geomap.js"></script>
   <script src="/app.js"></script>

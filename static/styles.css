@@ -669,3 +669,16 @@ tr.ra-new td { background: var(--accent-soft); }
 @keyframes secFlash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
 .sec-flash { animation: secFlash 1.6s ease-out; }
 .offscreen { position: fixed; left: -9999px; top: 0; opacity: 0; }
+/* grid items default to min-width:auto, so a wide table widened the whole router page; let it scroll in its .table-wrap */
+.dev-layout > * { min-width: 0; }
+/* What's new tour */
+dialog.wn { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); }
+dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
+.wn-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 18px 8px; }
+.wn-body { padding: 0 18px; overflow: auto; max-height: calc(100vh - 220px); }
+.wn-img { display: block; width: 100%; height: auto; max-height: 42vh; object-fit: contain; object-position: top; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.wn-body h2 { margin: 14px 0 6px; } .wn-body p { margin: 0 0 8px; line-height: 1.5; }
+.wn-dots { display: flex; justify-content: center; gap: 6px; padding: 10px 0 0; flex-wrap: wrap; }
+.wn-dots button { width: 9px; height: 9px; border-radius: 50%; border: 0; padding: 0; background: var(--border); cursor: pointer; }
+.wn-dots button.on { background: var(--accent); }
+.wn-foot { display: flex; align-items: center; gap: 8px; padding: 12px 18px 16px; flex-wrap: wrap; }

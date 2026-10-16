@@ -80,6 +80,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | RouterOS security (CVEs, security releases, What's new) | `rossec.py` (`security_items`, `releases_between`, `cves_for`), `secState/secCard/notesDialog/rosSecCard` in `app.js` |
 | Router lifecycle (age, discontinued, replacements) | `lifecycle.py` (`REPLACEMENTS`, overrides in setting `lifecycle_suggest`), `lcYears/lcMade/lcFlag/lcSuggest/lifecycleCard/lcAdminCard` in `app.js` |
 | Performance & Security dashboard | `healthdash.py` (`build`, `exposure`, `CATEGORIES`), extra fields in `RouterOS.INVENTORY`, `/api/health-dash`, `healthPage()` in `app.js` |
+| What's new tour (slides, screenshots, acknowledgement) | `whatsnew.py`, `static/whatsnew/*.jpg`, `/api/whats-new` (+ `/seen`), `whatsNew()` in `app.js`; stored in `users.prefs.whatsnew` |
 | Compliance (frameworks, client report) | `compliance.py` (`CHECKS`, `FRAMEWORKS`, `evaluate`, `scorecard`, `report_html/csv`), `/api/compliance*`, `compliancePage()` in `app.js`, `static/report.css` + `report.js` |
 | Accepted findings (exceptions) | `exceptions` table, `exceptions_map()` + `/api/exceptions` in `server.py`; keys `hd:<dashboard title>` / `cc:<check id>`; `compliance.HD` / `ITEM_HD` map them onto checks |
 | HTTPS management connection | `RouterOS(tls_port=...)` + `_req` fallback (`NoConnection` only), `https_setup/test/revert` (+ `SimRouter`), `Poller.client/_tls_fallback`, `switch_https()` + `/api/devices/<id>/mgmt-https` in `server.py`, `devices.api_tls_port/api_tls_fp` |
@@ -115,6 +116,11 @@ new version** - don't push code changes without one. To release:
 3. Check GitHub has it: `git ls-remote --tags origin`, `git show origin/main:version.py`.
 4. Installations see the update within an hour (or at once with "Check for updates") and upgrade with one click
    (`updates.py` -> `deploy/self-update.sh`, which runs the new version's `deploy/update.sh`).
+
+**What's new tour.** `whatsnew.py` describes the current release (`RELEASE`, `SINCE` = the full release before it, and
+`SLIDES`, with screenshots in `static/whatsnew/` taken from dev mode - never real client data). When a feature worth
+showing lands, add a slide; when a new release line starts (e.g. 1.47.0-beta.1), set `RELEASE`/`SINCE` and replace the
+slides - if `RELEASE` doesn't match the running version, no tour is shown.
 
 **Beta first.** Every new change is released as a beta: version `X.Y.Z-beta.N` (e.g. `1.45.0-beta.1`, then `-beta.2`
 for the next fix), tag `vX.Y.Z-beta.N`, changelog heading `## X.Y.Z-beta.N - date`. Only installations on the Beta

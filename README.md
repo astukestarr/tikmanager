@@ -560,6 +560,12 @@ inventory (a field whitelist: no passwords, keys or SNMP community names are rea
 
 Findings that aren't a problem on a router can be **accepted** with a reason (see [Compliance](#compliance)).
 
+## What's new tour
+
+After an update, technicians see a short tour of everything since the last full release - one feature per slide with a
+screenshot, Next / Back, and **Show me**. **Got it - don't show again** hides it until the next full release (a later
+beta's new slides still show once); **What's new** in the top bar opens it any time.
+
 ## Compliance
 
 **Monitoring > Compliance** (technicians) scores the routers against the network-device controls of **CIS Controls v8**,
