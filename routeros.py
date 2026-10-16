@@ -132,7 +132,7 @@ class RouterOS:
         SSTP or another service holds 443), and make sure it isn't open to the world - TikManager's tunnel address only if
         the service was off, the private ranges + TikManager if it was open to everyone, else the existing list + TikManager.
         Returns what to connect to and what to put back (https_revert)."""
-        svcs = self.get("/ip/service") or []
+        svcs = [x for x in self.get("/ip/service") or [] if not _yes(x.get("dynamic")) and not _yes(x.get("connection"))]   # 7.20+: no connection rows
         s = next((x for x in svcs if x.get("name") == "www-ssl"), None)
         if not s:
             raise RouterError("This router has no www-ssl service.")
@@ -468,7 +468,7 @@ class RouterOS:
 
     def winbox_service(self):
         """The router's Winbox service: {disabled, port, address (who may connect; "" = anyone)}."""
-        s = (self.get("/ip/service?name=winbox") or [{}])[0]
+        s = next((x for x in self.get("/ip/service?name=winbox") or [] if not _yes(x.get("dynamic")) and not _yes(x.get("connection"))), {})
         return {"id": s.get(".id"), "disabled": s.get("disabled") == "true", "port": int(s.get("port") or 8291), "address": s.get("address") or ""}
 
     def winbox_allow(self, ip, enable=False):
@@ -581,7 +581,8 @@ class RouterOS:
         # for the Performance & Security dashboard (healthdash.py) - settings only, never secrets
         "/ip/ipsec/proposal": ("name", "auth-algorithms", "enc-algorithms", "pfs-group", "disabled"),
         "/ip/ipsec/profile": ("name", "hash-algorithm", "enc-algorithm", "dh-group"),
-        "/ip/service": ("name", "port", "disabled", "address", "available-from", "certificate"),   # 7.20+ renamed address
+        "/ip/service": ("name", "port", "disabled", "address", "available-from", "certificate", "dynamic", "connection"),   # 7.20+ renamed address
+                                                                    # and lists open connections as dynamic entries
         "/ip/firewall/filter": ("chain", "action", "disabled", "protocol", "dst-port", "src-address", "src-address-list", "dst-address",
                                 "dst-address-list", "in-interface", "in-interface-list", "connection-state", "connection-nat-state"),
         "/ip/dns": ("allow-remote-requests",),
@@ -1299,7 +1300,8 @@ class SimRouter:
         # dashboard settings: mostly MikroTik defaults, with a few common mistakes on some routers
         inv["/ip/service"] = [{"name": n, "port": str(p), "disabled": "true" if n in ("telnet", "ftp", "api", "api-ssl") and self.id % 3 else "false", "address": ""}
                               for n, p in (("telnet", 23), ("ftp", 21), ("www", 80), ("ssh", 22), ("winbox", 8291), ("api", 8728), ("api-ssl", 8729))] + \
-            [{"name": "www-ssl", "port": "443", "disabled": "true", "address": "", "certificate": "none"}]
+            [{"name": "www-ssl", "port": "443", "disabled": "true", "address": "", "certificate": "none"},
+             {"name": "www-ssl", "port": "8443", "disabled": "false", "dynamic": "true", "connection": "true"}]
         inv["/ip/firewall/filter"] = [{"chain": "input", "action": "accept", "connection-state": "established,related,untracked"},
                                       {"chain": "input", "action": "accept", "protocol": "tcp", "dst-port": "8291"} if self.id % 4 == 3 else
                                       {"chain": "input", "action": "accept", "protocol": "icmp"}] + \

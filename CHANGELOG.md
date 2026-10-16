@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.23 - 2026-10-16
+
+- **Fix: services already limited kept showing as open** (e.g. "Limit WebFig over HTTPS" listed a router whose www-ssl
+  was already limited to the LAN and TikManager). RouterOS 7.20+ also lists each open connection in /ip service as a
+  dynamic entry - TikManager's own HTTPS session shows up as a second "www-ssl" with no address list - and that entry
+  was read as the service. Dynamic and connection entries are now ignored everywhere (Performance & security,
+  Compliance, the WebFig fixes, Switch to HTTPS and the Winbox relay check). Routers read before this update are
+  right straight away; the next settings read (15 minutes) also records which entries are dynamic.
+
 ## 1.46.0-beta.22 - 2026-10-16
 
 - **One-click fixes: see and pick the routers** - each kind of fix has **Show routers - pick which**, listing the

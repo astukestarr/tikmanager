@@ -61,13 +61,27 @@ GUARDED = {"www_tm", "www_off", "wwwssl_lan"}   # fixes that touch how TikManage
 PRIVATE = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 
 
+def services(inv):
+    """The router's real services, one per name. RouterOS 7.20+ also lists dynamic entries in /ip/service - one per open
+    connection (TikManager's own REST session over www-ssl shows up as a second "www-ssl" with no address list) and
+    things like dhcp / log / route_BGP; those aren't settings and must not be read as an unrestricted service.
+    Older inventories (before the dynamic flag was read) keep the first entry per name - the static one comes first."""
+    out, seen = [], set()
+    for s in inv.get("/ip/service", []):
+        if yes(s.get("dynamic")) or yes(s.get("connection")) or s.get("name") in seen:
+            continue
+        seen.add(s.get("name"))
+        out.append(s)
+    return out
+
+
 def svc_addr(s):
     """A service's "available from" list (RouterOS 7.20+ calls it available-from, older versions address)."""
     return s.get("available-from") or s.get("address") or ""
 
 
 def svc_prop(inv):
-    return "available-from" if any("available-from" in s for s in inv.get("/ip/service", [])) else "address"
+    return "available-from" if any("available-from" in s for s in services(inv)) else "address"
 
 
 def _svc_restore(name, old):
@@ -100,7 +114,7 @@ def fix_undo(fix_id, inv):
     """RouterOS script that puts a guarded fix back (run by a scheduler unless TikManager cancels it), else None."""
     if fix_id in ("www_tm", "wwwssl_lan"):
         name = "www" if fix_id == "www_tm" else "www-ssl"
-        return _svc_restore(name, next((svc_addr(s) for s in inv.get("/ip/service", []) if s.get("name") == name), ""))
+        return _svc_restore(name, next((svc_addr(s) for s in services(inv) if s.get("name") == name), ""))
     if fix_id == "www_off":
         return "/ip service set [find name=www] disabled=no"
     return None
@@ -153,7 +167,7 @@ def exposure(inv):
     catch_all = next((i for i, r in enumerate(rules) if r.get("action") in ("drop", "reject")
                       and not any(r.get(m) for m in matchers)), None)
     open_svc = {}
-    for s in inv.get("/ip/service", []):
+    for s in services(inv):
         name = s.get("name")
         if name not in MGMT or yes(s.get("disabled")) or svc_addr(s):   # off, or limited to some addresses on the router
             continue
@@ -241,7 +255,7 @@ def build(rows, metrics, flaps, now=None):
                 add(d, "critical" if open_svc else "high", "Exposure", "Input firewall has no catch-all drop",
                     "Anything the router itself offers is reachable from the internet.",
                     "Add a final input rule: drop everything not from the LAN (like MikroTik's default 'drop all not coming from LAN').")
-            for s in inv.get("/ip/service", []):
+            for s in services(inv):
                 if s.get("name") in PLAINTEXT and not yes(s.get("disabled")) and s.get("name") not in open_svc:
                     if s["name"] == "www":   # TikManager's own way in (REST) - never disable it; limit who can reach it
                         if d.get("api_tls_port"):   # TikManager is on HTTPS: plain HTTP can go

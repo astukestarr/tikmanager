@@ -96,7 +96,7 @@ def c_forward_drop(d, inv, ex=None):
 
 
 def c_plaintext(d, inv, ex=None):
-    svc = {s.get("name"): s for s in inv.get("/ip/service", [])}
+    svc = {s.get("name"): s for s in healthdash.services(inv)}
     if not svc:
         return "unknown", ""
     bad = [n for n in ("telnet", "ftp", "api") if n in svc and not yes(svc[n].get("disabled"))]
@@ -116,7 +116,7 @@ def c_plaintext(d, inv, ex=None):
 
 
 def c_ssh(d, inv, ex=None):
-    svc = {s.get("name"): s for s in inv.get("/ip/service", [])}
+    svc = {s.get("name"): s for s in healthdash.services(inv)}
     ssh = _first(inv, "/ip/ssh")
     if not ssh and not svc:
         return "unknown", ""
