@@ -18,6 +18,8 @@ import urllib.request
 
 VPN_TAG = "TikManager VPN"   # comment on every object the site-to-site VPN adds, so it can be removed exactly
 VPN_IFACE = "tikmanager-vpn"
+RA_IFACE = "tikmanager-ra"   # remote access (remoteaccess.py): people connecting in with WireGuard for Windows etc.
+RA_TAG = "TikManager remote access"   # comment on everything remote access adds (peers: "TikManager remote access: <name>")
 
 
 class RouterError(Exception):
@@ -422,14 +424,14 @@ class RouterOS:
         return out
 
     # --- site-to-site VPN (vpn.py drives these) - everything TikManager adds carries the comment VPN_TAG ------------
-    def wg_ensure(self, name, port):
+    def wg_ensure(self, name, port, tag=VPN_TAG):
         """Create (or keep) the WireGuard interface; the router makes and keeps the private key. Returns its public key."""
         rows = self.get(f"/interface/wireguard?name={urllib.parse.quote(name)}") or []
         if rows:
             if str(rows[0].get("listen-port")) != str(port):
                 self._req("PATCH", f"/interface/wireguard/{rows[0]['.id']}", {"listen-port": str(port)})
         else:
-            self._req("PUT", "/interface/wireguard", {"name": name, "listen-port": str(port), "mtu": "1420", "comment": VPN_TAG})
+            self._req("PUT", "/interface/wireguard", {"name": name, "listen-port": str(port), "mtu": "1420", "comment": tag})
             rows = self.get(f"/interface/wireguard?name={urllib.parse.quote(name)}") or []
         iface = rows[0] if rows else {}
         if str(iface.get("disabled")) == "true":   # RouterOS disables it when another interface already uses the port
@@ -508,6 +510,52 @@ class RouterOS:
             {"chain": "forward", "in-interface": name}, {"chain": "forward", "out-interface": name}]
         for r in rules:
             self._req("PUT", "/ip/firewall/filter", {**r, "action": "accept", "comment": VPN_TAG, **({"place-before": first} if first else {})})
+
+    # --- remote access (remoteaccess.py) - everything carries RA_TAG, so it can be removed exactly -----------------------
+    def ra_setup(self, name, cfg):
+        """cfg: {port, address (gateway/prefix), dns_to_router}. Interface, gateway address and firewall rules - peers (the
+        people) are left alone. Returns the interface's public key."""
+        pub = self.wg_ensure(name, cfg["port"], tag=RA_TAG)
+        self._ra_clear_rules()
+        self._req("PUT", "/ip/address", {"address": cfg["address"], "interface": name, "comment": RA_TAG})
+        # firewall: accept rules at the top, before whatever drop rules the router already has
+        first = next((r.get(".id") for r in self.get("/ip/firewall/filter") or [] if r.get("dynamic") != "true"), None)
+        rules = [{"chain": "input", "protocol": "udp", "dst-port": str(cfg["port"])},
+                 {"chain": "input", "in-interface": name, "protocol": "icmp"},
+                 {"chain": "forward", "in-interface": name}]
+        if cfg.get("dns_to_router"):
+            rules += [{"chain": "input", "in-interface": name, "protocol": "udp", "dst-port": "53"},
+                      {"chain": "input", "in-interface": name, "protocol": "tcp", "dst-port": "53"}]
+        for r in rules:
+            self._req("PUT", "/ip/firewall/filter", {**r, "action": "accept", "comment": RA_TAG, **({"place-before": first} if first else {})})
+        return pub
+
+    def _ra_clear_rules(self):
+        tag = urllib.parse.quote(RA_TAG)
+        for menu in ("/ip/firewall/filter", "/ip/address"):
+            for r in self.optional(lambda menu=menu: self.get(f"{menu}?comment={tag}"), []) or []:
+                if r.get("comment") == RA_TAG:
+                    self._req("DELETE", f"{menu}/{r['.id']}")
+
+    def ra_peer_add(self, name, pubkey, ip, label):
+        self._req("PUT", "/interface/wireguard/peers", {"interface": name, "public-key": pubkey, "allowed-address": f"{ip}/32",
+                                                        "comment": f"{RA_TAG}: {label}"[:200]})
+
+    def ra_peer_remove(self, name, pubkey):
+        for p in self.optional(lambda: self.get(f"/interface/wireguard/peers?interface={urllib.parse.quote(name)}"), []) or []:
+            if p.get("public-key") == pubkey and str(p.get("comment") or "").startswith(RA_TAG):
+                self._req("DELETE", f"/interface/wireguard/peers/{p['.id']}")
+
+    def ra_clear(self, name, remove_interface=False):
+        """Remove every peer, address and firewall rule remote access added (and optionally its interface)."""
+        self._ra_clear_rules()
+        for p in self.optional(lambda: self.get(f"/interface/wireguard/peers?interface={urllib.parse.quote(name)}"), []) or []:
+            if str(p.get("comment") or "").startswith(RA_TAG):
+                self._req("DELETE", f"/interface/wireguard/peers/{p['.id']}")
+        if remove_interface:
+            for r in self.get(f"/interface/wireguard?name={urllib.parse.quote(name)}") or []:
+                if r.get("comment") == RA_TAG:   # never delete an interface someone made by hand
+                    self._req("DELETE", f"/interface/wireguard/{r['.id']}")
 
     def wg_peers(self, name):
         """[{public_key, handshake_age (seconds or None), rx, tx}] for the VPN interface's peers."""
@@ -1012,7 +1060,27 @@ class SimRouter:
         time.sleep(0.5)
         self._sim()["vpn_cfg"] = cfg
 
+    def ra_setup(self, name, cfg):
+        time.sleep(0.3)
+        sim = self._sim()
+        sim["ra"] = {**cfg, "peers": (sim.get("ra") or {}).get("peers", {})}
+        sim.setdefault("ra_pub", __import__("remoteaccess").keypair()[1])
+        return sim["ra_pub"]
+
+    def ra_peer_add(self, name, pubkey, ip, label):
+        self._sim().setdefault("ra", {"peers": {}})["peers"][pubkey] = ip
+
+    def ra_peer_remove(self, name, pubkey):
+        (self._sim().get("ra") or {}).get("peers", {}).pop(pubkey, None)
+
+    def ra_clear(self, name, remove_interface=False):
+        self._sim().pop("ra", None)
+
     def wg_peers(self, name):
+        if name == RA_IFACE:   # remote access: a few people "connected"
+            peers = (self._sim().get("ra") or {}).get("peers", {})
+            return [{"public_key": k, "handshake_age": random.choice([None, 12, 40, 3600]), "rx": random.randint(0, 10 ** 8), "tx": random.randint(0, 10 ** 8)}
+                    for k in peers]
         cfg = self._sim().get("vpn_cfg") or {}
         mine = self.wg_ensure(name, 0)
         out = []

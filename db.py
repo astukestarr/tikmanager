@@ -116,6 +116,18 @@ CREATE TABLE IF NOT EXISTS vpn_sites (
   state TEXT NOT NULL DEFAULT 'pending',            -- pending / applied / failed / removing
   last_error TEXT, applied_at REAL, handshake_age INTEGER, ping_ms REAL, rx INTEGER, tx INTEGER, checked_at REAL
 );
+CREATE TABLE IF NOT EXISTS ra_servers (               -- remote access (WireGuard for Windows ...) into one router
+  device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE, port INTEGER NOT NULL, pool TEXT NOT NULL,
+  endpoint TEXT NOT NULL, split INTEGER NOT NULL DEFAULT 1, routes TEXT NOT NULL DEFAULT '[]', dns TEXT NOT NULL DEFAULT '',
+  pubkey TEXT, state TEXT NOT NULL DEFAULT 'pending',   -- applying / applied / failed
+  last_error TEXT, applied_at REAL, created_by TEXT, created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ra_users (                 -- one person (device) per row; the private key only until the config is downloaded
+  id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES ra_servers(device_id) ON DELETE CASCADE,
+  name TEXT NOT NULL, ip TEXT NOT NULL, pubkey TEXT NOT NULL, created_by TEXT, created_at REAL NOT NULL,
+  state TEXT NOT NULL DEFAULT 'applying', last_error TEXT,
+  cfg_blob BLOB, cfg_alg TEXT, cfg_token TEXT, cfg_expires REAL, downloaded_at REAL
+);
 CREATE TABLE IF NOT EXISTS scripts (                  -- script library
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', body TEXT NOT NULL,
   created_by TEXT, created_at REAL NOT NULL, updated_by TEXT, updated_at REAL

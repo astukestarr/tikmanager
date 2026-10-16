@@ -51,6 +51,7 @@ from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHO
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
+from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
                       check_totp, cookie, derive, hash_password, new_totp_secret, password_problem, read_cookie, token,
@@ -103,6 +104,7 @@ upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
+remote = RemoteAccess(db, poller.client, backups)   # Router page > Remote access (WireGuard for Windows into a router)
 vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
 firewall = Firewall(db, poller.client, backups)
 ports = Ports(db, poller.client, backups)   # port diagram, VLAN grids, VLAN changes with automatic undo
@@ -568,6 +570,21 @@ class Handler(BaseHTTPRequestHandler):
                 o["suggest"] = m["id"] if m else None
             errors = db.q("SELECT d.name, d.itg_error FROM devices d WHERE d.itg_error IS NOT NULL LIMIT 20")
             return self.json({**lk, "clients": orgs, "errors": errors})
+        if m := re.fullmatch(r"/api/devices/(\d+)/ra", path):   # remote access: settings, people, live handshakes
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            remote.prune()
+            return self.json(remote.info(d["id"], live=q.get("live") == "1"))
+        if m := re.fullmatch(r"/api/devices/(\d+)/ra/users/(\d+)/config", path):   # one person's WireGuard config - once
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            try:
+                name, conf = remote.download(d["id"], int(m.group(2)), q.get("t") or "", s["email"])
+            except RaError as e:
+                return self.send(410, str(e).encode(), "text/plain; charset=utf-8")
+            fname = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9._-]+", "-", f"{d['name']}-{name}")).strip("-")[:60] or "remote-access"
+            return self.send(200, conf.encode(), "text/plain; charset=utf-8",
+                             headers=[("Content-Disposition", f'attachment; filename="{fname}.conf"'), ("Cache-Control", "no-store")])
         if path == "/api/vpn-inventory":   # VPNs found on the routers (configured outside TikManager); a client admin: their own
             s = self.require_vpn()
             where, args = self.org_scope(s, column="d.org_id")
@@ -1472,6 +1489,23 @@ class Handler(BaseHTTPRequestHandler):
             if not done:
                 raise HttpError(502, "; ".join(errs))
             return self.json({"ok": True, "done": done, "errors": errs})
+        if m := re.fullmatch(r"/api/devices/(\d+)/ra(?:/(remove|users|users/(\d+)/revoke))?", path):   # remote access changes
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            if not router_act_limit.allow(s["email"]):
+                raise HttpError(429, "That's a lot of router changes - wait a few minutes.")
+            try:
+                if m.group(2) == "remove":
+                    remote.remove(d["id"], s["email"])
+                elif m.group(2) == "users":
+                    return self.json({"ok": True, **remote.add_user(d["id"], self.body().get("name"), s["email"])})
+                elif m.group(3):
+                    remote.revoke(d["id"], int(m.group(3)), s["email"])
+                else:
+                    remote.setup(d["id"], self.body(), s["email"])
+            except RaError as e:
+                raise HttpError(400, str(e)) from None
+            return self.json({"ok": True, **remote.info(d["id"])})
         if path == "/api/vpn-inventory/refresh":   # re-read the VPNs on some routers (or every online one) now
             s = self.require_vpn()
             if s["kind"] == "client" and not router_act_limit.allow(s["email"]):

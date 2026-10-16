@@ -343,7 +343,7 @@ async function router(id) {
   const adopted = d.state === "adopted";
   const radios = (d.interfaces || []).some(isRadio);
   const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["ports", "Ports"]] : []), ...(radios ? [["wireless", "Wireless"]] : []),
-    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []),
+    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
     ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
@@ -441,6 +441,7 @@ async function router(id) {
       ${adopted && tab === "logs" ? `<div class="card" id="rLogs"></div>` : ""}
       ${adopted && tab === "ports" ? `<div id="ptRoot"><div class="card"><h2>Ports</h2><p class="muted small">Reading the ports…</p></div></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
+      ${adopted && tab === "remote" ? `<div id="raRoot"><div class="card"><h2>Remote access</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Tags, notes &amp; type</h2>
         <label class="field">Tags (comma-separated - e.g. core, poe-switch, tower-north) <input id="mTags" value="${esc((d.tags || []).join(", "))}" list="mTagList" spellcheck="false"></label>
@@ -530,6 +531,7 @@ async function router(id) {
   $("ispAuto")?.addEventListener("change", (e) => document.querySelectorAll("[data-isp]").forEach((c) => { c.disabled = e.target.checked; }));
   if ($("topoCard")) loadTopology(d);
   if ($("fwCard")) loadFirewall(d);
+  if ($("raRoot")) raTab(d);
   if ($("wbBox")) loadWinbox(d);
   loadLocation(d);
   api(`/api/devices/${d.id}/series?range=1h`).then((s) => sparkline($("spark"), s.traffic)).catch(() => {});
@@ -3830,6 +3832,94 @@ async function subnetsPage() {
   });
   draw();
 }
+// --- remote access: WireGuard for Windows (etc.) into this router (remoteaccess.py) ------------------------------------
+async function raTab(d, note) {
+  const root = $("raRoot");
+  if (!root) return;
+  rView.hold = !!(note && note.includes('id="raDl"'));   // pause the page refresh only while a one-time download link is shown
+  let x;
+  try { x = await api(`/api/devices/${d.id}/ra?live=1`); }
+  catch (e) { root.innerHTML = `<div class="card"><h2>Remote access</h2><p class="status err">${esc(e.message)}</p></div>`; return; }
+  if (!$("raRoot")) return;
+  const srv = x.server, cfg = srv || x.suggest, rw = canWrite();
+  const nets = [...new Set([...(x.networks || []).map((n) => n.network), ...(cfg.routes || [])])];
+  const netName = (n) => (x.networks.find((y) => y.network === n) || {}).name || "";
+  const userRows = (x.users || []).map((u) => `<tr><td><b>${esc(u.name)}</b><div class="small muted">added ${ago(u.created_at)} by ${esc(u.created_by || "?")}</div></td>
+      <td class="mono">${esc(u.ip)}</td>
+      <td>${u.handshake_age == null ? `<span class="small muted">${u.on_router === false ? "missing on the router" : "never connected"}</span>`
+        : `<span class="small ${u.handshake_age < 180 ? "status ok" : "muted"}"><span class="dot ${u.handshake_age < 180 ? "on" : "off"}"></span>${u.handshake_age < 180 ? "Connected" : `last ${uptime(`${u.handshake_age}s`, true)} ago`}</span>`}</td>
+      <td class="small nowrap">${u.rx != null ? `↓ ${bytes(u.tx)} ↑ ${bytes(u.rx)}` : ""}</td>
+      <td class="nowrap">${u.download && rw ? `<span class="small muted">config not downloaded yet</span>` : u.downloaded_at ? `<span class="small muted">config handed out ${ago(u.downloaded_at)}</span>` : `<span class="small muted">config expired</span>`}</td>
+      <td>${rw ? `<button class="btn small danger" type="button" data-rarevoke="${u.id}" data-name="${esc(u.name)}">Revoke</button>` : ""}</td></tr>`).join("");
+  root.innerHTML = `
+    ${note ? `<div class="card up-box avail">${note}</div>` : ""}
+    <div class="card"><div class="row"><h2>Remote access</h2><span class="spacer"></span>
+        ${srv ? `<span class="pill ${srv.state === "applied" ? "up-done" : srv.state === "failed" ? "up-failed" : "up-run"}">${esc({ applied: "On", failed: "Needs attention", applying: "Applying…" }[srv.state] || srv.state)}</span>` : `<span class="pill">Not set up</span>`}</div>
+      <p class="small muted">People connect to this router with the free <b>WireGuard</b> app (Windows: wireguard.com/install) - faster and simpler than SSTP, no certificates.
+        Each person gets their own key; revoke one without touching the others. ${x.online ? "" : "<b>The router is offline</b> - changes wait until it's back."}</p>
+      ${srv && srv.last_error ? `<p class="status err small">${esc(srv.last_error)}</p>` : ""}
+      <div class="grid2">
+        <label class="field">Address people connect to <input id="raEp" value="${esc(cfg.endpoint || "")}" placeholder="public IP or DNS name" ${rw ? "" : "disabled"}>
+          <span class="small muted">The router's public IP, or a DNS name pointing at it. Behind another firewall? Forward the UDP port to this router.</span></label>
+        <label class="field">UDP port <input id="raPort" inputmode="numeric" value="${esc(cfg.port)}" ${rw ? "" : "disabled"}></label>
+        <label class="field">Address range for people <input id="raPool" class="mono" value="${esc(cfg.pool)}" ${rw && !(x.users || []).length ? "" : "disabled"}>
+          <span class="small muted">Each person gets one address from it; must not overlap the router's networks.${(x.users || []).length ? " Remove everyone to change it." : ""}</span></label>
+        <label class="field">DNS for people (optional) <input id="raDns" value="${esc(cfg.dns || "")}" placeholder="e.g. 192.168.1.10 (the office DNS server)" ${rw ? "" : "disabled"}>
+          <span class="small muted">Leave blank to keep their own DNS. Use the office DNS server so names like fileserver work.</span></label>
+      </div>
+      <div class="field"><span>What goes through the tunnel</span>
+        <label class="chk"><input type="radio" name="raSplit" value="1" ${cfg.split !== 0 && cfg.split !== false ? "checked" : ""} ${rw ? "" : "disabled"}> Only the office networks (recommended)</label>
+        <div id="raNets" class="small" style="margin:4px 0 0 22px">${nets.map((n) => `<label class="chk"><input type="checkbox" class="raNet" value="${esc(n)}" ${(cfg.routes || []).includes(n) ? "checked" : ""} ${rw ? "" : "disabled"}>
+          <span class="mono">${esc(n)}</span> ${netName(n) ? `<span class="muted">${esc(netName(n))}</span>` : ""}</label>`).join("<br>")}
+          ${rw ? `<br><input id="raExtra" placeholder="add another network, e.g. 10.10.0.0/16" style="max-width:260px">` : ""}</div>
+        <label class="chk"><input type="radio" name="raSplit" value="0" ${cfg.split === 0 || cfg.split === false ? "checked" : ""} ${rw ? "" : "disabled"}> All traffic (their internet goes through the office too)</label></div>
+      ${rw ? `<div class="actions"><button class="btn primary" type="button" id="raSave">${srv ? "Save and apply" : "Set up remote access"}</button>
+        ${srv ? `<button class="btn danger" type="button" id="raRemove">Remove remote access</button>` : ""}<span class="status" id="raStatus"></span></div>
+        <p class="small muted">${srv ? "Saving re-applies the router side (people stay connected)." : "TikManager backs the router up first, then adds a WireGuard interface, its address and the firewall rules - all tagged so they can be removed exactly."}</p>` : ""}
+      ${x.live_error ? `<p class="small status err">Couldn't read live status: ${esc(x.live_error)}</p>` : ""}</div>
+    ${srv ? `<div class="card"><div class="row"><h2>People (${(x.users || []).length})</h2></div>
+      ${rw && srv.state === "applied" ? `<div class="row"><input id="raName" placeholder="Name - e.g. Jane Smith - Laptop" maxlength="60" style="max-width:320px">
+        <button class="btn primary" type="button" id="raAdd">Add person</button><span class="status" id="raUStatus"></span></div>` : ""}
+      ${(x.users || []).length ? `<div class="table-wrap"><table><thead><tr><th>Person</th><th>Address</th><th>Status</th><th>Traffic</th><th>Config</th><th></th></tr></thead><tbody>${userRows}</tbody></table></div>`
+        : `<p class="muted small">Nobody yet - add a person to get their WireGuard config.</p>`}
+      <p class="small muted">Windows: install WireGuard, then <b>Import tunnel(s) from file</b> and pick the downloaded .conf, and click Activate. People without admin rights need
+        a one-time setting to switch tunnels on - or push the install and tunnel with your RMM (<span class="mono">wireguard /installtunnelservice &lt;file&gt;.conf</span> keeps it always on).</p></div>` : ""}`;
+  const say = (id, m, ok) => { const el = $(id); if (el) { el.textContent = m; el.className = `status ${ok ? "ok" : "err"}`; } };
+  $("raSave")?.addEventListener("click", async () => {
+    const split = document.querySelector('input[name="raSplit"]:checked')?.value !== "0";
+    const routes = [...document.querySelectorAll(".raNet:checked")].map((c) => c.value).concat(($("raExtra")?.value || "").split(",").map((s) => s.trim()).filter(Boolean));
+    $("raSave").disabled = true; say("raStatus", "Backing up the router and applying…", true);
+    try {
+      await post(`/api/devices/${d.id}/ra`, { endpoint: $("raEp").value, port: $("raPort").value, pool: $("raPool").value, dns: $("raDns").value, split, routes });
+      raTab(d, srv ? "Saved and applied." : "Remote access is set up. Add the people who'll connect below.");
+    } catch (e) { $("raSave").disabled = false; say("raStatus", e.message); }
+  });
+  $("raRemove")?.addEventListener("click", async (e) => {
+    if (e.target.dataset.armed !== "1") { e.target.dataset.armed = "1"; const n = (x.users || []).length; e.target.textContent = n ? `Click again - ${n} ${n === 1 ? "person loses" : "people lose"} access` : "Click again to remove"; return; }
+    e.target.disabled = true; say("raStatus", "Backing up and removing…", true);
+    try { await post(`/api/devices/${d.id}/ra/remove`); raTab(d, "Remote access was removed from the router."); }
+    catch (err) { e.target.disabled = false; say("raStatus", err.message); }
+  });
+  $("raAdd")?.addEventListener("click", async () => {
+    const name = $("raName").value.trim();
+    if (!name) return say("raUStatus", "Type the person's name first.");
+    $("raAdd").disabled = true; say("raUStatus", "Adding…", true);
+    try {
+      const r = await post(`/api/devices/${d.id}/ra/users`, { name });
+      const url = `/api/devices/${d.id}/ra/users/${r.id}/config?t=${encodeURIComponent(r.token)}`;
+      raTab(d, `<b>${esc(name)}</b> was added. <a class="btn primary" href="${url}" download id="raDl">Download their WireGuard config</a>
+        <span class="small muted">One download only - it holds their private key, which TikManager then deletes. Send it to them securely (not by plain email if you can avoid it).</span>`);
+      setTimeout(() => $("raDl")?.addEventListener("click", () => setTimeout(() => { raTab(d, "Config downloaded - TikManager has deleted its copy of the key."); }, 1500)), 0);
+    } catch (e) { $("raAdd").disabled = false; say("raUStatus", e.message); }
+  });
+  document.querySelectorAll("[data-rarevoke]").forEach((b) => b.addEventListener("click", async () => {
+    if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "Click again to revoke"; return; }
+    b.disabled = true;
+    try { await post(`/api/devices/${d.id}/ra/users/${b.dataset.rarevoke}/revoke`); raTab(d, `${esc(b.dataset.name)} can no longer connect.`); }
+    catch (e) { b.disabled = false; b.textContent = "Revoke"; say("raUStatus", e.message); }
+  }));
+}
+
 // --- site-to-site VPN (WireGuard, hub and spoke) ----------------------------------------------------------------------
 const vpnPill = (st) => `<span class="pill ${{ active: "up-done", failed: "up-failed", applying: "up-run", disabled: "up-cancelled" }[st] || ""}">${esc({ draft: "Draft", applying: "Applying...", active: "Active", failed: "Needs attention", disabled: "Disabled" }[st] || st)}</span>`;
 function tunnelState(s) {

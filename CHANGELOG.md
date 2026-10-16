@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.2 - 2026-10-16
+
+- **Remote access with WireGuard for Windows** (router page > Remote access, technicians) - an SSTP replacement. Set it
+  up per router (address people connect to, UDP port, an address range picked to avoid the router's networks, optional
+  DNS, office networks only or all traffic); TikManager backs the router up and adds a tagged WireGuard interface, its
+  address and firewall rules. **Add person** makes a key pair, adds only that peer, and offers ONE download of the
+  WireGuard config - the private key is then deleted (or after 7 days). **Revoke** removes one person; **Remove remote
+  access** takes off exactly what was added. Live last-handshake and traffic per person.
+- Includes 1.46.0-beta.1 (UniFi / UISP Match filter).
+
 ## 1.46.0-beta.1 - 2026-10-16
 
 - **UniFi / UISP page: Match filter** (technicians) - All sites, Matched to a client, Matched automatically, Chosen by

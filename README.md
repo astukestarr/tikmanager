@@ -25,7 +25,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
 - Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
-  [Site-to-site VPN](#site-to-site-vpn) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
+  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
 - Running it: [Keeping it secure](#keeping-it-secure) · [Where things live](#where-things-live-on-the-server) ·
   [Troubleshooting adoption](#if-a-router-registers-but-never-comes-online)
@@ -530,6 +530,32 @@ switch is behind a router port, it's shown as that port's switch and everything 
 device in the router's bridge host table is shown (not only those with an IP in ARP / DHCP). Only devices at that
 router's location (in its tables) are shown, not the client's other locations. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
 minutes by default.
+
+## Remote access (WireGuard for Windows)
+
+An SSTP replacement: people connect to a client's router with the free **WireGuard** app (Windows, macOS, phones) -
+faster, more reliable on poor connections, no certificates. Technicians set it up per router on the router page >
+**Remote access**:
+
+1. Check the suggested settings: the **address people connect to** (the router's public IP, or a DNS name pointing at
+   it - forward the UDP port to the router if it sits behind another firewall), the **UDP port**, an **address range**
+   for the people connecting (picked so it doesn't overlap the router's networks), optional **DNS** (the office DNS
+   server, so names like fileserver work) and **what goes through the tunnel**: only the office networks you tick
+   (recommended), or all traffic.
+2. **Set up remote access**. TikManager backs the router up, then adds a WireGuard interface, its gateway address and
+   firewall rules (the UDP port open, people let through to the networks, ping - and DNS when it points at the router)
+   at the top of the firewall. Everything carries the comment "TikManager remote access", so **Remove remote access**
+   takes off exactly that (after another backup).
+3. **Add person** for each laptop: TikManager makes its key pair, adds only that peer on the router (nobody else drops)
+   and offers **one download** of the WireGuard config. The config holds the private key: TikManager keeps it encrypted
+   only until it's downloaded (or 7 days) and then deletes it - send it to the person securely. **Revoke** removes just
+   that person.
+4. On the laptop: install WireGuard (wireguard.com/install), **Import tunnel(s) from file**, pick the .conf, **Activate**.
+   Without admin rights a one-time Windows setting is needed to switch tunnels on; or push the install with your RMM -
+   `wireguard /installtunnelservice <file>.conf` installs the tunnel as an always-on service.
+
+The tab shows each person's last handshake and traffic, read live from the router when you open it. WireGuard has no
+second factor: a lost laptop means **Revoke** for that person.
 
 ## Tasks (scripts, groups, schedules, automatic firmware updates)
 
