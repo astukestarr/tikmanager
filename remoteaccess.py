@@ -12,6 +12,7 @@ WireGuard config can be downloaded ONCE - the private key is kept encrypted only
 Revoke removes that one peer. Status (last handshake, traffic) is read live when the tab is opened.
 """
 import base64
+import datetime
 import hashlib
 import ipaddress
 import json
@@ -20,11 +21,74 @@ import secrets
 import threading
 import time
 
-from routeros import RouterError, RA_IFACE
+from routeros import RouterError, RA_IFACE, RA_TAG as RA_TAG_LABEL
 
 DEFAULT_PORT = 13251
 POOL_SPACE = ipaddress.ip_network("10.250.0.0/16")   # each router's range: a /24 from here that it doesn't already use
 KEEP_CONFIG = 7 * 86400
+REMIND = 3 * 86400   # reminder event this long before an expiry
+SERVICES = {   # what a person may reach on a server: service -> (protocol, ports)
+    "smb": ("tcp", "445"), "http": ("tcp", "80"), "https": ("tcp", "443"), "rdp": ("tcp", "3389"), "ssh": ("tcp", "22"),
+    "ping": ("icmp", ""), "any": ("", ""),
+}
+SERVICE_NAMES = {"smb": "SMB file shares", "http": "HTTP", "https": "HTTPS", "rdp": "Remote Desktop", "ssh": "SSH", "ping": "Ping",
+                 "any": "Everything on it", "custom": "Custom port"}
+
+
+def clean_access(raw):
+    """None (everything the setup allows) or [{host, service, proto, ports}] - validated."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not raw:
+        raise RaError("Add at least one server, or allow everything.")
+    out = []
+    for e in raw[:50]:
+        host = str((e or {}).get("host") or "").strip()
+        try:
+            net = ipaddress.ip_network(host, strict=False)
+        except ValueError:
+            raise RaError(f"Not an IP address or network: {host or '(empty)'}") from None
+        if net.version != 4:
+            raise RaError("Remote access rules are IPv4.")
+        svc = str(e.get("service") or "any")
+        if svc == "custom":
+            proto = str(e.get("proto") or "tcp").lower()
+            if proto not in ("tcp", "udp"):
+                raise RaError("A custom port is TCP or UDP.")
+            ports = str(e.get("ports") or "").replace(" ", "")
+            if not ports or not all(p.isdigit() and 1 <= int(p) <= 65535 for part in ports.split(",") for p in part.split("-")):
+                raise RaError(f"Ports for {host}: numbers or ranges like 8080 or 5000-5010.")
+        elif svc in SERVICES:
+            proto, ports = SERVICES[svc]
+        else:
+            raise RaError(f"Unknown service: {svc}")
+        out.append({"host": str(net) if net.prefixlen < 32 else str(net.network_address), "service": svc, "proto": proto, "ports": ports})
+    return out
+
+
+def access_text(acc):
+    if acc is None:
+        return "Everything"
+    return "; ".join(f"{e['host']} {SERVICE_NAMES.get(e['service'], e['service'])}"
+                     + (f" ({e['proto'].upper()} {e['ports']})" if e["service"] == "custom" else "") for e in acc)
+
+
+def parse_day(v):
+    """'2026-12-31' -> the end of that day (server time) as a timestamp; '' / None -> None."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):   # the browser's own end of day (its time zone)
+        ts = float(v)
+    else:
+        v = str(v or "").strip()
+        if not v:
+            return None
+        try:
+            day = datetime.date.fromisoformat(v)
+        except ValueError:
+            raise RaError("Give the expiry as a date (YYYY-MM-DD).") from None
+        ts = datetime.datetime.combine(day, datetime.time(23, 59, 59)).timestamp()
+    if ts < time.time():
+        raise RaError("The expiry date is in the past.")
+    return ts
 
 
 class RaError(ValueError):
@@ -151,7 +215,7 @@ class RemoteAccess:
     def info(self, device_id, live=False):
         d = self.device(device_id)
         srv = self.db.one("SELECT * FROM ra_servers WHERE device_id=?", (device_id,))
-        users = self.db.q("SELECT id, name, ip, pubkey, created_by, created_at, cfg_expires, downloaded_at, state, last_error FROM ra_users "
+        users = self.db.q("SELECT id, name, ip, pubkey, created_by, created_at, cfg_expires, downloaded_at, state, last_error, disabled, expires_at, access FROM ra_users "
                           "WHERE device_id=? ORDER BY name COLLATE NOCASE", (device_id,))
         live_err = None
         if srv and live and d["online"] and srv["state"] == "applied":
@@ -163,6 +227,8 @@ class RemoteAccess:
             except RouterError as e:
                 live_err = str(e)
         for u in users:
+            u["access"] = json.loads(u["access"]) if u.get("access") else None
+            u["access_text"] = access_text(u["access"])
             u["download"] = bool(u["cfg_expires"] and u["cfg_expires"] > time.time() and not u["downloaded_at"])
             u.pop("pubkey", None)
         if srv:
@@ -172,7 +238,52 @@ class RemoteAccess:
         if cloud and cloud.get("name"):
             sug["endpoint"] = cloud["name"]   # a permanent name beats an IP that the ISP may change
         return {"server": srv, "users": users, "suggest": sug, "networks": self.networks(d), "online": bool(d["online"]),
-                "live_error": live_err, "cloud": cloud}
+                "live_error": live_err, "cloud": cloud, "services": SERVICE_NAMES}
+
+    def _rules(self, device_id):
+        """The router's forward rules for remote access, from each person's access."""
+        srv = self.db.one("SELECT * FROM ra_servers WHERE device_id=?", (device_id,))
+        reach = json.loads(srv["routes"] or "[]") if srv and srv["split"] else []
+        rules = []
+        for u in self.db.q("SELECT name, ip, access FROM ra_users WHERE device_id=? ORDER BY id", (device_id,)):
+            label = f"{RA_TAG_LABEL}: {u['name']}"[:200]
+            acc = json.loads(u["access"]) if u["access"] else None
+            if acc is None:   # everything the setup allows: its networks (split tunnel) or anywhere (all traffic)
+                rules += [{"comment": label, "src-address": u["ip"], "dst-address": n} for n in reach] or [{"comment": label, "src-address": u["ip"]}]
+                continue
+            for e in acc:
+                r = {"comment": label, "src-address": u["ip"], "dst-address": e["host"]}
+                if e["proto"]:
+                    r["protocol"] = e["proto"]
+                if e["ports"]:
+                    r["dst-port"] = e["ports"]
+                rules.append(r)
+        return rules
+
+    def sync_rules(self, device_id):
+        d = self.device(device_id)
+        try:
+            self.client_for(d).ra_access(RA_IFACE, self._rules(device_id))
+        except RouterError as e:
+            raise RaError(f"The router didn't take the access rules: {e}") from None
+
+    def set_access(self, device_id, uid, raw, user):
+        d = self.device(device_id)
+        u = self.db.one("SELECT * FROM ra_users WHERE id=? AND device_id=?", (uid, device_id))
+        if not u:
+            raise RaError("No such user.")
+        if not d["online"]:
+            raise RaError("The router is offline - try again when it's back.")
+        acc = clean_access(raw)
+        old = u["access"]
+        self.db.run("UPDATE ra_users SET access=? WHERE id=?", (json.dumps(acc) if acc is not None else None, uid))
+        try:
+            self.sync_rules(device_id)
+        except RaError:
+            self.db.run("UPDATE ra_users SET access=? WHERE id=?", (old, uid))
+            raise
+        self.db.event(device_id, d["org_id"], "remote access", f"user \"{u['name']}\" may now reach: {access_text(acc)} (set by {user})")
+        self.db.audit(user, "remote access user access changed", d["name"], org_id=d["org_id"], detail=f"{u['name']}: {access_text(acc)}")
 
     # --- setting up -------------------------------------------------------------------------------------------------
     def _validate(self, d, b):
@@ -243,6 +354,11 @@ class RemoteAccess:
                 self.db.run("UPDATE ra_servers SET state='failed', last_error=? WHERE device_id=?", (str(e)[:400], device_id))
                 raise RaError(f"The router didn't take it: {e}") from None
             self.db.run("UPDATE ra_servers SET state='applied', pubkey=?, applied_at=?, last_error=NULL WHERE device_id=?", (pub, now, device_id))
+            try:
+                self.sync_rules(device_id)
+            except RaError as e:
+                self.db.run("UPDATE ra_servers SET state='failed', last_error=? WHERE device_id=?", (str(e)[:400], device_id))
+                raise
         self.db.event(device_id, d["org_id"], "remote access", f"set up by {user}: UDP {cfg['port']}, {cfg['pool']}")
         self.db.audit(user, "remote access set up", d["name"], org_id=d["org_id"], detail=f"UDP {cfg['port']}, {cfg['pool']}")
 
@@ -266,7 +382,7 @@ class RemoteAccess:
         self.db.audit(user, "remote access removed", d["name"], org_id=d["org_id"])
 
     # --- people -----------------------------------------------------------------------------------------------------
-    def add_user(self, device_id, name, user):
+    def add_user(self, device_id, name, user, expires=None, access=None):
         d = self.device(device_id)
         srv = self.db.one("SELECT * FROM ra_servers WHERE device_id=?", (device_id,))
         if not srv or srv["state"] != "applied":
@@ -278,6 +394,8 @@ class RemoteAccess:
             raise RaError("There's already a user with that name on this router.")
         if not d["online"]:
             raise RaError("The router is offline - try again when it's back.")
+        expires_at = parse_day(expires)
+        acc = clean_access(access)
         net = ipaddress.ip_network(srv["pool"])
         used = {r["ip"] for r in self.db.q("SELECT ip FROM ra_users WHERE device_id=?", (device_id,))}
         hosts = list(net.hosts())
@@ -285,25 +403,35 @@ class RemoteAccess:
         if not ip:
             raise RaError("The address range is full - remove someone, or set up a bigger range.")
         priv, pub = keypair()
-        conf = self._config(srv, priv, ip)
+        conf = self._config(srv, priv, ip, acc)
         token = secrets.token_urlsafe(24)
-        uid = self.db.run("INSERT INTO ra_users (device_id, name, ip, pubkey, created_by, created_at, state) VALUES (?, ?, ?, ?, ?, ?, 'applying')",
-                          (device_id, name, ip, pub, user, time.time()))
+        uid = self.db.run("INSERT INTO ra_users (device_id, name, ip, pubkey, created_by, created_at, state, expires_at, access) VALUES (?, ?, ?, ?, ?, ?, 'applying', ?, ?)",
+                          (device_id, name, ip, pub, user, time.time(), expires_at, json.dumps(acc) if acc is not None else None))
         blob, alg = self.vault.seal(conf.encode(), f"ra:{uid}")
         self.db.run("UPDATE ra_users SET cfg_blob=?, cfg_alg=?, cfg_token=?, cfg_expires=? WHERE id=?",
                     (blob, alg, hashlib.sha256(token.encode()).hexdigest(), time.time() + KEEP_CONFIG, uid))
         try:
             self.client_for(d).ra_peer_add(RA_IFACE, pub, ip, name)
+            self.sync_rules(device_id)   # their access rules (before they can connect, nothing lets their traffic through)
             self.db.run("UPDATE ra_users SET state='applied', last_error=NULL WHERE id=?", (uid,))
-        except RouterError as e:
+        except (RouterError, RaError) as e:
             self.db.run("DELETE FROM ra_users WHERE id=?", (uid,))
+            try:
+                self.client_for(d).ra_peer_remove(RA_IFACE, pub)
+            except RouterError:
+                pass
             raise RaError(f"The router didn't take it, so the user wasn't added: {e}") from None
-        self.db.event(device_id, d["org_id"], "remote access", f"user \"{name}\" ({ip}) added by {user}")
+        self.db.event(device_id, d["org_id"], "remote access", f"user \"{name}\" ({ip}) added by {user}"
+                      + (f", expires {datetime.date.fromtimestamp(expires_at)}" if expires_at else ""))
         self.db.audit(user, "remote access user added", d["name"], org_id=d["org_id"], detail=f"{name} {ip}")
         return {"id": uid, "token": token}
 
-    def _config(self, srv, priv, ip):
-        allowed = "0.0.0.0/0" if srv["split"] in (0, False) else ", ".join(json.loads(srv["routes"] or "[]") + [srv["pool"]])
+    def _config(self, srv, priv, ip, acc=None):
+        # what the laptop sends through the tunnel - the router decides what's actually allowed (ra_access)
+        if acc is not None:
+            allowed = ", ".join(sorted({e["host"] if "/" in e["host"] else f"{e['host']}/32" for e in acc}))
+        else:
+            allowed = "0.0.0.0/0" if srv["split"] in (0, False) else ", ".join(json.loads(srv["routes"] or "[]") + [srv["pool"]])
         lines = ["[Interface]", f"PrivateKey = {priv}", f"Address = {ip}/32"]
         if srv["dns"]:
             lines.append(f"DNS = {srv['dns']}")
@@ -336,8 +464,67 @@ class RemoteAccess:
         except RouterError as e:
             raise RaError(f"The router didn't take it: {e}") from None
         self.db.run("DELETE FROM ra_users WHERE id=?", (uid,))
+        try:
+            self.sync_rules(device_id)
+        except RaError:
+            pass   # their peer is gone already, so the leftover rule can't be used; tidied on the next change
         self.db.event(device_id, d["org_id"], "remote access", f"user \"{u['name']}\" revoked by {user}")
         self.db.audit(user, "remote access user revoked", d["name"], org_id=d["org_id"], detail=u["name"])
+
+    def set_disabled(self, device_id, uid, off, user):
+        """Switch one person off (or back on) on the router - their config stays the same."""
+        d = self.device(device_id)
+        u = self.db.one("SELECT * FROM ra_users WHERE id=? AND device_id=?", (uid, device_id))
+        if not u:
+            raise RaError("No such user.")
+        if not d["online"]:
+            raise RaError("The router is offline - try again when it's back.")
+        try:
+            self.client_for(d).ra_peer_disable(RA_IFACE, u["pubkey"], off)
+        except RouterError as e:
+            raise RaError(f"The router didn't take it: {e}") from None
+        self.db.run("UPDATE ra_users SET disabled=? WHERE id=?", (1 if off else 0, uid))
+        what = "disabled" if off else "enabled again"
+        self.db.event(device_id, d["org_id"], "remote access", f"user \"{u['name']}\" {what} by {user}")
+        self.db.audit(user, f"remote access user {'disabled' if off else 'enabled'}", d["name"], org_id=d["org_id"], detail=u["name"])
+
+    def set_expiry(self, device_id, uid, day, user):
+        d = self.device(device_id)
+        u = self.db.one("SELECT * FROM ra_users WHERE id=? AND device_id=?", (uid, device_id))
+        if not u:
+            raise RaError("No such user.")
+        ts = parse_day(day)
+        self.db.run("UPDATE ra_users SET expires_at=?, reminded=0 WHERE id=?", (ts, uid))
+        when = f"expires {datetime.date.fromtimestamp(ts)}" if ts else "no longer expires"
+        self.db.event(device_id, d["org_id"], "remote access", f"user \"{u['name']}\" {when} (set by {user})")
+        self.db.audit(user, "remote access expiry set", d["name"], org_id=d["org_id"], detail=f"{u['name']}: {when}")
+
+    def expire_due(self):
+        """Revoke people whose expiry has passed (routers that are offline: next time); remind 3 days before."""
+        now = time.time()
+        for u in self.db.q("SELECT u.*, d.name AS router, d.org_id FROM ra_users u JOIN devices d ON d.id = u.device_id "
+                           "WHERE u.expires_at IS NOT NULL AND u.expires_at - ? < ? AND u.reminded = 0 AND u.expires_at > ?", (now, REMIND, now)):
+            self.db.event(u["device_id"], u["org_id"], "remote access",
+                          f"user \"{u['name']}\" expires {datetime.date.fromtimestamp(u['expires_at'])} - access is revoked then")
+            self.db.run("UPDATE ra_users SET reminded=1 WHERE id=?", (u["id"],))
+        for u in self.db.q("SELECT id, device_id FROM ra_users WHERE expires_at IS NOT NULL AND expires_at < ?", (now,)):
+            try:
+                self.revoke(u["device_id"], u["id"], "expiry (automatic)")
+            except RaError:
+                pass   # router offline: tried again on the next pass
+
+    def loop(self):
+        while True:
+            time.sleep(600)
+            try:
+                self.expire_due()
+                self.prune()
+            except Exception:  # noqa: BLE001 - keep going
+                import traceback
+                traceback.print_exc()
+
+    def start(self):
+        threading.Thread(target=self.loop, daemon=True, name="remote-access").start()
 
     def prune(self):
         """Configs nobody downloaded within 7 days: delete the encrypted private key."""

@@ -106,6 +106,7 @@ tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 remote = RemoteAccess(db, poller.client, backups)   # Router page > Remote access (WireGuard for Windows into a router)
+remote.start()   # automatic revoke at each person's expiry date
 vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
 firewall = Firewall(db, poller.client, backups)
 ports = Ports(db, poller.client, backups)   # port diagram, VLAN grids, VLAN changes with automatic undo
@@ -598,6 +599,18 @@ class Handler(BaseHTTPRequestHandler):
             flaps = {r["device_id"]: r["n"] for r in db.q("SELECT device_id, COUNT(*) AS n FROM events WHERE kind='link down' AND ts > ? GROUP BY device_id",
                                                           (t_now - 86400,))}
             found = healthdash.build(rows, metrics, flaps, t_now)
+            ids = {r["id"]: r for r in rows}   # remote-access people: ending soon, or past their expiry (router offline)
+            for u in db.q("SELECT name, device_id, expires_at FROM ra_users WHERE expires_at IS NOT NULL AND expires_at < ?", (t_now + 3 * 86400,)):
+                r = ids.get(u["device_id"])
+                if not r:
+                    continue
+                past = u["expires_at"] < t_now
+                found.append({"device_id": r["id"], "router": r["name"], "org": r.get("org") or "", "severity": "high" if past else "low",
+                              "category": "Hygiene", "title": "Remote access past its expiry" if past else "Remote access ending soon",
+                              "detail": f"{u['name']}: " + ("still on the router (it was offline) - revoked as soon as it's back" if past
+                                                            else f"access ends {time.strftime('%Y-%m-%d', time.localtime(u['expires_at']))}"),
+                              "fix": "Router page > Remote access: extend the date if they still need it." if not past else "Bring the router online, or revoke by hand."})
+            found.sort(key=lambda f: (healthdash.SEV_ORDER[f["severity"]], healthdash.CATEGORIES.index(f["category"]), f["org"], f["router"]))
             unread = sum(1 for r in rows if r["online"] and not r.get("vpn_inv"))
             return self.json({"findings": found, "routers": len(rows), "online": sum(1 for r in rows if r["online"]),
                               "clean": len({r["id"] for r in rows} - {f["device_id"] for f in found}), "unread": unread,
@@ -1514,6 +1527,19 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **r})
+        if m := re.fullmatch(r"/api/devices/(\d+)/ra/users/(\d+)/(disable|enable|expiry|access)", path):   # off / on, expiry, access
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            try:
+                if m.group(3) == "expiry":
+                    remote.set_expiry(d["id"], int(m.group(2)), self.body().get("date"), s["email"])
+                elif m.group(3) == "access":
+                    remote.set_access(d["id"], int(m.group(2)), self.body().get("access"), s["email"])
+                else:
+                    remote.set_disabled(d["id"], int(m.group(2)), m.group(3) == "disable", s["email"])
+            except RaError as e:
+                raise HttpError(400, str(e)) from None
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/ra(?:/(remove|users|users/(\d+)/revoke))?", path):   # remote access changes
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))
@@ -1523,7 +1549,8 @@ class Handler(BaseHTTPRequestHandler):
                 if m.group(2) == "remove":
                     remote.remove(d["id"], s["email"])
                 elif m.group(2) == "users":
-                    return self.json({"ok": True, **remote.add_user(d["id"], self.body().get("name"), s["email"])})
+                    b = self.body()
+                    return self.json({"ok": True, **remote.add_user(d["id"], b.get("name"), s["email"], b.get("expires"), b.get("access"))})
                 elif m.group(3):
                     remote.revoke(d["id"], int(m.group(3)), s["email"])
                 else:

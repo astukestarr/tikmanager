@@ -537,8 +537,7 @@ class RouterOS:
         # firewall: accept rules at the top, before whatever drop rules the router already has
         first = next((r.get(".id") for r in self.get("/ip/firewall/filter") or [] if r.get("dynamic") != "true"), None)
         rules = [{"chain": "input", "protocol": "udp", "dst-port": str(cfg["port"])},
-                 {"chain": "input", "in-interface": name, "protocol": "icmp"},
-                 {"chain": "forward", "in-interface": name}]
+                 {"chain": "input", "in-interface": name, "protocol": "icmp"}]   # (forward rules: ra_access, per person)
         if cfg.get("dns_to_router"):
             rules += [{"chain": "input", "in-interface": name, "protocol": "udp", "dst-port": "53"},
                       {"chain": "input", "in-interface": name, "protocol": "tcp", "dst-port": "53"}]
@@ -546,12 +545,29 @@ class RouterOS:
             self._req("PUT", "/ip/firewall/filter", {**r, "action": "accept", "comment": RA_TAG, **({"place-before": first} if first else {})})
         return pub
 
-    def _ra_clear_rules(self):
-        tag = urllib.parse.quote(RA_TAG)
-        for menu in ("/ip/firewall/filter", "/ip/address"):
-            for r in self.optional(lambda menu=menu: self.get(f"{menu}?comment={tag}"), []) or []:
+    def _ra_clear_rules(self, chain=None):
+        """Remote access's firewall rules (all, or one chain) and gateway address. Per-person rules are commented
+        "TikManager remote access: <name>", so they're matched by prefix."""
+        for r in self.get("/ip/firewall/filter") or []:
+            if str(r.get("comment") or "").startswith(RA_TAG) and (chain is None or r.get("chain") == chain):
+                self._req("DELETE", f"/ip/firewall/filter/{r['.id']}")
+        if chain is None:
+            for r in self.optional(lambda: self.get(f"/ip/address?comment={urllib.parse.quote(RA_TAG)}"), []) or []:
                 if r.get("comment") == RA_TAG:
-                    self._req("DELETE", f"{menu}/{r['.id']}")
+                    self._req("DELETE", f"/ip/address/{r['.id']}")
+
+    def ra_access(self, name, rules):
+        """Who may reach what through the tunnel: replaces remote access's forward rules with
+        [replies back to people] + rules (each {comment, src-address, dst-address?, protocol?, dst-port?}) + [drop the rest],
+        all at the top of the forward chain, in that order."""
+        self._ra_clear_rules(chain="forward")
+        first = next((r.get(".id") for r in self.get("/ip/firewall/filter") or [] if r.get("dynamic") != "true"), None)
+        place = {"place-before": first} if first else {}
+        allr = [{"chain": "forward", "out-interface": name, "connection-state": "established,related", "action": "accept", "comment": RA_TAG}]
+        allr += [{"chain": "forward", "in-interface": name, "action": "accept", **r} for r in rules]
+        allr += [{"chain": "forward", "in-interface": name, "action": "drop", "comment": f"{RA_TAG}: everything else"}]
+        for r in allr:
+            self._req("PUT", "/ip/firewall/filter", {**r, **place})
 
     def cloud(self):
         """MikroTik IP Cloud: {ddns, name, address, status} - the router's permanent <serial>.sn.mynetname.net name."""
@@ -574,6 +590,13 @@ class RouterOS:
     def ra_peer_add(self, name, pubkey, ip, label):
         self._req("PUT", "/interface/wireguard/peers", {"interface": name, "public-key": pubkey, "allowed-address": f"{ip}/32",
                                                         "comment": f"{RA_TAG}: {label}"[:200]})
+
+    def ra_peer_disable(self, name, pubkey, off):
+        for p in self.optional(lambda: self.get(f"/interface/wireguard/peers?interface={urllib.parse.quote(name)}"), []) or []:
+            if p.get("public-key") == pubkey and str(p.get("comment") or "").startswith(RA_TAG):
+                self._req("PATCH", f"/interface/wireguard/peers/{p['.id']}", {"disabled": "true" if off else "false"})
+                return
+        raise RouterError("That person's peer isn't on the router any more.")
 
     def ra_peer_remove(self, name, pubkey):
         for p in self.optional(lambda: self.get(f"/interface/wireguard/peers?interface={urllib.parse.quote(name)}"), []) or []:
@@ -1135,6 +1158,12 @@ class SimRouter:
 
     def ra_peer_remove(self, name, pubkey):
         (self._sim().get("ra") or {}).get("peers", {}).pop(pubkey, None)
+
+    def ra_peer_disable(self, name, pubkey, off):
+        time.sleep(0.2)
+
+    def ra_access(self, name, rules):
+        self._sim().setdefault("ra", {"peers": {}})["rules"] = rules
 
     def ra_clear(self, name, remove_interface=False):
         self._sim().pop("ra", None)

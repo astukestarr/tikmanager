@@ -571,10 +571,13 @@ faster, more reliable on poor connections, no certificates. Technicians set it u
    firewall rules (the UDP port open, people let through to the networks, ping - and DNS when it points at the router)
    at the top of the firewall. Everything carries the comment "TikManager remote access", so **Remove remote access**
    takes off exactly that (after another backup).
-3. **Add person** for each laptop: TikManager makes its key pair, adds only that peer on the router (nobody else drops)
+3. **Add person** for each laptop - optionally with an **expiry date** (revoked automatically at the end of that day) and
+   **what they may reach**: everything, or only some servers and services (e.g. one file server over SMB, one web app
+   over HTTP). The router enforces it with one firewall rule per allowed destination and a final drop for the rest of
+   the tunnel. TikManager makes the key pair, adds only that peer on the router (nobody else drops)
    and offers **one download** of the WireGuard config. The config holds the private key: TikManager keeps it encrypted
    only until it's downloaded (or 7 days) and then deletes it - send it to the person securely. **Revoke** removes just
-   that person.
+   that person; **Disable** switches them off for now (same config when enabled again).
 4. On the laptop: install WireGuard (wireguard.com/install), **Import tunnel(s) from file**, pick the .conf, **Activate**.
    Without admin rights a one-time Windows setting is needed to switch tunnels on; or push the install with your RMM -
    `wireguard /installtunnelservice <file>.conf` installs the tunnel as an always-on service.

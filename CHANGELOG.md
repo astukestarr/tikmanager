@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.5 - 2026-10-16
+
+- **Remote access: per-person access.** Each person can reach **Everything** the setup allows, or **Only these servers** -
+  a server IP plus a service (SMB, HTTP, HTTPS, Remote Desktop, SSH, Ping, everything on it, or a custom TCP / UDP port).
+  The router enforces it: remote access's single forward rule is replaced by one accept rule per allowed destination
+  and a final drop for everything else from the tunnel, so editing the config on the laptop gains nothing. Restricted
+  people's configs only route their servers. Set it when adding the person, or **change** it any time.
+  Routers set up with an earlier beta keep the old "everyone reaches everything" rule until the next change on the tab
+  (adding / revoking someone, saving access, or Save and apply).
+- **Disable / Enable** a person (their peer is switched off on the router; same config when enabled again) - for leave
+  or a lost laptop.
+- **Expiry dates**: optional when adding a person, editable later. Access is revoked automatically at the end of that day
+  (your time zone); a reminder event 3 days before, and the Performance & security dashboard lists access ending soon
+  or past its expiry on an offline router.
+
 ## 1.46.0-beta.4 - 2026-10-16
 
 - **Remote access: use the router's MikroTik Cloud DNS name** (<serial>.sn.mynetname.net) as the address people connect

@@ -126,7 +126,10 @@ CREATE TABLE IF NOT EXISTS ra_users (                 -- one person (device) per
   id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES ra_servers(device_id) ON DELETE CASCADE,
   name TEXT NOT NULL, ip TEXT NOT NULL, pubkey TEXT NOT NULL, created_by TEXT, created_at REAL NOT NULL,
   state TEXT NOT NULL DEFAULT 'applying', last_error TEXT,
-  cfg_blob BLOB, cfg_alg TEXT, cfg_token TEXT, cfg_expires REAL, downloaded_at REAL
+  cfg_blob BLOB, cfg_alg TEXT, cfg_token TEXT, cfg_expires REAL, downloaded_at REAL,
+  disabled INTEGER NOT NULL DEFAULT 0,               -- switched off for now (peer disabled on the router), same config
+  expires_at REAL, reminded INTEGER NOT NULL DEFAULT 0,   -- revoked automatically then; a reminder event 3 days before
+  access TEXT                                          -- NULL = everything the setup allows; else JSON [{host, service, proto, ports}]
 );
 CREATE TABLE IF NOT EXISTS scripts (                  -- script library
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', body TEXT NOT NULL,
@@ -248,6 +251,11 @@ class DB:
             for col, ddl in (("wan_ip", "TEXT"), ("matched", "TEXT"), ("org_manual", "INTEGER NOT NULL DEFAULT 0")):
                 if col not in cols:
                     c.execute(f"ALTER TABLE net_sites ADD COLUMN {col} {ddl}")
+        if "ra_users" in tables:
+            rcols = {r[1] for r in c.execute("PRAGMA table_info(ra_users)")}
+            for col, ddl in (("disabled", "INTEGER NOT NULL DEFAULT 0"), ("expires_at", "REAL"), ("reminded", "INTEGER NOT NULL DEFAULT 0"), ("access", "TEXT")):
+                if col not in rcols:
+                    c.execute(f"ALTER TABLE ra_users ADD COLUMN {col} {ddl}")
         if "sessions" in tables and "as_user_id" not in {r[1] for r in c.execute("PRAGMA table_info(sessions)")}:
             c.execute("ALTER TABLE sessions ADD COLUMN as_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
         if "upgrades" in tables:
