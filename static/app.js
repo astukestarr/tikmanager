@@ -374,8 +374,10 @@ async function router(id) {
         ${d.lc_suggest ? `<br><b>Suggested replacement:</b> ${lcSuggest(d)} <span class="muted">- ${esc(d.lc_suggest_why || "")}</span>` : ""}</p>` : ""}
       ${d.state === "adopted" && isTech() ? upgradeBox(d) : ""}
       ${d.state === "adopted" && canWinbox() ? `<div class="up-box" id="wbBox"><div class="row small"><b>Winbox</b></div><p class="small muted">Loading…</p></div>` : ""}
-      ${d.vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b><span class="spacer"></span><a href="#vpn/${d.vpn.id}">${esc(d.vpn.name)}</a></div>
-        <div class="small">${d.vpn.role === "hub" ? "Hub" : "Spoke"} · <span class="mono">${esc(d.vpn.tunnel_ip)}</span></div>${tunnelState(d.vpn)}</div>` : ""}
+      ${d.vpn && me.managed_vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b><span class="spacer"></span><a href="#vpn/${d.vpn.id}">${esc(d.vpn.name)}</a></div>
+        <div class="small">${d.vpn.role === "hub" ? "Hub" : "Spoke"} · <span class="mono">${esc(d.vpn.tunnel_ip)}</span></div>${tunnelState(d.vpn)}</div>`
+      : d.vpn ? `<div class="up-box"><div class="row small"><b>Site-to-site VPN</b></div><div class="small muted">${d.vpn.role === "hub" ? "Hub" : "Spoke"} of "${esc(d.vpn.name)}",
+        built by TikManager. Managed VPNs are turned off for now - the tunnel is left running as it is (see Site-to-site VPN for its state).</div></div>` : ""}
       ${d.state === "adopted" ? `
       ${meter("CPU", d.cpu, d.cpu != null ? `${d.cpu}%` : "—")}
       ${meter("Memory", memPct, d.mem_total ? `${bytes(d.mem_used)} / ${bytes(d.mem_total)}` : "—")}
@@ -3919,10 +3921,11 @@ async function vpnFound(reading = false) {
 
 let vpnTab = "managed";
 async function vpnsView() {
+  if (!me.managed_vpn) vpnTab = "found";   // VPNs managed by TikManager are turned off for now (TM_MANAGED_VPN)
   $("main").innerHTML = `<div class="row"><h1>Site-to-site VPN</h1><span class="spacer"></span>
-      ${canVpn() ? `<button class="btn primary" type="button" id="vpnNew">New VPN</button>` : ""}</div>
-    <div class="tabs" role="tablist">${[["managed", "Managed by TikManager"], ["found", "Existing VPNs on routers"]].map(([k, l]) =>
-      `<button type="button" role="tab" data-vtab="${k}" class="${k === vpnTab ? "active" : ""}">${l}</button>`).join("")}</div>
+      ${canVpn() && me.managed_vpn ? `<button class="btn primary" type="button" id="vpnNew">New VPN</button>` : ""}</div>
+    ${me.managed_vpn ? `<div class="tabs" role="tablist">${[["managed", "Managed by TikManager"], ["found", "Existing VPNs on routers"]].map(([k, l]) =>
+      `<button type="button" role="tab" data-vtab="${k}" class="${k === vpnTab ? "active" : ""}">${l}</button>`).join("")}</div>` : ""}
     <div id="vpnBody"></div>`;
   document.querySelectorAll("[data-vtab]").forEach((b) => b.addEventListener("click", () => { vpnTab = b.dataset.vtab; vpnsView(); }));
   $("vpnNew")?.addEventListener("click", () => go("vpn", "new"));
@@ -3939,6 +3942,7 @@ async function vpnsView() {
 }
 
 async function vpnView(id) {
+  if (!me.managed_vpn) return go("vpns");   // turned off for now - the list of existing VPNs instead
   const isNew = id === "new";
   const orgs = isNew ? await api("/api/orgs") : [];
   let v = null, cands = [];

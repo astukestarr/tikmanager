@@ -460,6 +460,10 @@ be cancelled until they start; every step is shown on the router's page, in its 
 
 ## Site-to-site VPN
 
+> **Turned off for now (1.45.1):** VPNs built and managed by TikManager are switched off until they've been tested
+> further - the page shows only **Existing VPNs on routers**, and tunnels TikManager already built keep running and show
+> there read-only. `TM_MANAGED_VPN=1` in `/etc/tikmanager/tikmanager.env` (then restart the service) turns it on for testing.
+
 **Site-to-site VPN** (technicians) connects a client's routers with WireGuard, hub and spoke. Pick the client, tick its
 routers, choose the hub and the subnets each site shares (pre-filled from the site map, guest networks unticked), then
 **Save and apply**. The hub needs a public address: its WAN IP is used automatically; if it sits behind NAT, enter its

@@ -63,7 +63,11 @@ class Settings:
     winbox_ports: str = field(default_factory=lambda: env("TM_WINBOX_PORTS", "40000-40049"))   # Winbox relay port pool (winbox.py)   # weekly Mozilla Observatory scan of the public URL
     # one-time first-run link (/setup/<token>), written by the installer; dead once an admin account exists
     setup_token: str = field(default_factory=lambda: env("TM_SETUP_TOKEN"))
-    ping_target: str = field(default_factory=lambda: env("TM_PING_TARGET", "1.1.1.1"))   # routers ping this each minute (WAN latency/loss)
+    ping_target: str = field(default_factory=lambda: env("TM_PING_TARGET", "1.1.1.1"))
+    # site-to-site VPNs built and managed by TikManager (vpn.py): turned off until they've been tested further. Off = no
+    # menu, no way to create / change / apply / remove one, no background checks; tunnels already on routers keep running
+    # untouched and show read-only under Existing VPNs. TM_MANAGED_VPN=1 in the settings file turns it on (for testing).
+    managed_vpn: bool = field(default_factory=lambda: env("TM_MANAGED_VPN", "0").lower() in ("1", "true", "yes"))   # routers ping this each minute (WAN latency/loss)
     # nightly configuration backups
     backup_hour: int = field(default_factory=lambda: int(env("TM_BACKUP_HOUR", "2")))          # server local time
     backup_keep_versions: int = field(default_factory=lambda: int(env("TM_BACKUP_KEEP", "10")))   # versions per router

@@ -58,6 +58,7 @@ from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, 
 from branding import Branding
 from appsettings import AppSettings
 from updates import Updates
+MANAGED_VPN_OFF = "Site-to-site VPNs managed by TikManager are turned off for now (TM_MANAGED_VPN). VPNs already on the routers keep running."
 from version import __version__
 import urllib.request
 from integrations import IntegrationError, Integrations, norm
@@ -102,6 +103,7 @@ upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
+vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
 firewall = Firewall(db, poller.client, backups)
 ports = Ports(db, poller.client, backups)   # port diagram, VLAN grids, VLAN changes with automatic undo
 observatory = Observatory(db, settings)   # Mozilla Observatory grade of the public URL
@@ -465,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
                               # admins see when a newer release is out (the banner with "Upgrade now")
                               "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None,
                               "prefs": user_prefs(s["user_id"]),
-                              "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1],
+                              "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1], "managed_vpn": settings.managed_vpn,
                               "viewing_as": {"by": s["real_email"]} if s.get("viewing_as") else None,
                               "unifi": (bool(db.one("SELECT 1 FROM net_accounts")) if s["kind"] == "tech"
                                         else bool(db.one("SELECT 1 FROM net_sites WHERE org_id=?", (s["org_id"],))))})
@@ -578,6 +580,8 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"id": r["id"], "org_id": r["org_id"], "org": r["org"], "name": r["name"], "online": r["online"],
                             "collected_at": r["vpn_inv_at"], "tunnels": t})
             return self.json(out)
+        if (path in ("/api/vpns", "/api/vpn-candidates") or re.fullmatch(r"/api/vpns/\d+", path)) and not settings.managed_vpn:
+            raise HttpError(404, MANAGED_VPN_OFF)
         if path == "/api/vpns":   # every site-to-site VPN with its sites' live state (a client admin: their own)
             s = self.require_vpn()
             where, args = self.org_scope(s, column="v.org_id")
@@ -1443,6 +1447,8 @@ class Handler(BaseHTTPRequestHandler):
             db.event(d["id"], d["org_id"], "vpn", f"{t['kind']} \"{t['name']}\" reconnected by {s['email']}")
             threading.Timer(15, lambda: poller.collect_vpns(d)).start()   # re-read once it has had time to come back
             return self.json({"ok": True, "count": n, "note": "" if n else "It wasn't connected - the router keeps trying on its own."})
+        if (path == "/api/vpns" or path.startswith("/api/vpns/")) and not settings.managed_vpn:   # every managed-VPN change
+            raise HttpError(404, MANAGED_VPN_OFF)
         if m := re.fullmatch(r"/api/vpns/(\d+)/reconnect", path):   # reconnect a TikManager VPN at one site (or every site)
             s = self.require_vpn(write=True)
             if not router_act_limit.allow(s["email"]):
@@ -2294,7 +2300,8 @@ def main():
     tasks.start()
     updates.start()
     integ.start(settings.public_url)
-    vpns.start()
+    if settings.managed_vpn:   # off: no background checks of managed VPNs either (nothing touches those routers)
+        vpns.start()
     secev.start()
     routerlogs.start()
     observatory.start()

@@ -19,6 +19,7 @@ def rid(menu, match):
 from routeros import VPN_IFACE, _dur_s
 
 OWN = {"tikmanager", VPN_IFACE}
+SHOW_TM_VPN = False   # set by the server while managed VPNs are turned off: their tunnels are listed here, read-only
 UP_SECONDS = 180
 CLIENTS = {"/interface/l2tp-client": "L2TP client", "/interface/sstp-client": "SSTP client", "/interface/ovpn-client": "OpenVPN client",
            "/interface/pptp-client": "PPTP client"}
@@ -53,7 +54,8 @@ def normalize(raw):
     ifaces = {i.get("name"): i for i in raw.get("/interface/wireguard", [])}
     for p in raw.get("/interface/wireguard/peers", []):
         iface = p.get("interface")
-        if iface in OWN:
+        built = SHOW_TM_VPN and iface == VPN_IFACE
+        if iface in OWN and not built:
             continue
         age = _dur_s(p.get("last-handshake"))
         state = "disabled" if yes(p.get("disabled")) or yes((ifaces.get(iface) or {}).get("disabled")) else \
@@ -63,8 +65,9 @@ def normalize(raw):
                     "remote": host(p.get("endpoint-address") or p.get("current-endpoint-address")),
                     "status": state, "since": f"handshake {age}s ago" if age is not None else "never connected",
                     "networks": nets, "rx": int(p.get("rx") or 0), "tx": int(p.get("tx") or 0),
-                    "notes": "" if p.get("endpoint-address") else "remote end connects in", "iface": iface,
-                    "rid": rid("/interface/wireguard/peers", {"interface": iface, "allowed-address": p.get("allowed-address") or ""})})
+                    "notes": "Built by TikManager (managed VPNs are turned off for now - left running as it is)" if built
+                             else "" if p.get("endpoint-address") else "remote end connects in", "iface": iface,
+                    "rid": None if built else rid("/interface/wireguard/peers", {"interface": iface, "allowed-address": p.get("allowed-address") or ""})})
 
     # IPsec: one row per peer, with its policies (the subnets it carries) and whether phase 1/2 are up
     active = {host(a.get("remote-address")): a for a in raw.get("/ip/ipsec/active-peers", [])}

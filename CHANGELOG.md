@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.45.1 - 2026-10-16
+
+- **Site-to-site VPNs managed by TikManager are turned off for now**, until they've been tested further. The "Managed by
+  TikManager" tab, New VPN and the VPN pages are gone, nothing can create, change, apply, remove or restart a managed VPN,
+  and TikManager no longer checks them in the background. **VPNs already built on routers keep running untouched**; they
+  show read-only under Site-to-site VPN ("Built by TikManager"), and on the router page. Existing VPNs and Restart tunnel
+  for them work as before. To try the feature on a test server: `TM_MANAGED_VPN=1` in /etc/tikmanager/tikmanager.env,
+  then `sudo systemctl restart tikmanager`.
+
 ## 1.45.0 - 2026-10-15
 
 Release of 1.45.0-beta.1 (tested), unchanged:
