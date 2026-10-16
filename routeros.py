@@ -51,6 +51,11 @@ class RouterOS:
     def get(self, path):
         return self._req("GET", path)
 
+    def reachable(self):
+        """Raises RouterError unless the router answers over the tunnel now (strict - unlike optional() reads)."""
+        self._req("GET", "/system/identity", timeout=10)
+        return True
+
     def post(self, path, body):
         return self._req("POST", path, body, timeout=15)
 
@@ -856,6 +861,9 @@ def _duration_ms(t: str):
 class SimRouter:
     """A pretend router: stable identity per device, drifting CPU/traffic, and ~5% of devices offline at any time."""
     MODELS = [("RB5009UG+S+", "rb5009"), ("hAP ax3", "hap-ax3"), ("CCR2004-16G-2S+", "ccr2004"), ("hEX S", "hex-s"), ("CHR", "chr")]
+
+    def reachable(self):
+        return True
 
     def ping(self, target="1.1.1.1", count=3):
         r = random.Random(int(time.time() // 60) * 7 + self.id)

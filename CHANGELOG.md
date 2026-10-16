@@ -5,6 +5,14 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
 
 ## 1.46.0-beta.12 - 2026-10-16
 
+- **Fix: the dashboard told you to disable WebFig (www)** for "WebFig over plain HTTP enabled" - that would cut
+  TikManager off, because it manages routers through REST on that service. The advice now says not to, and there's a
+  new one-click fix, **Limit WebFig (HTTP) to TikManager**: www's "available from" becomes TikManager's tunnel address
+  plus any addresses / networks you also allow (asked when you click Fix - e.g. the client's admin PC or LAN). WebFig
+  over HTTPS (www-ssl, on whatever port) and Winbox are separate services and aren't touched. It's guarded: an undo is
+  armed on the router first, TikManager checks it can still reach the router, and only then cancels the undo -
+  otherwise the router puts the old setting back by itself within 2 minutes. The finding now only appears when
+  WebFig over HTTP is open to every address, and "www reachable from the internet" offers the same fix.
 - Faster pages (code checkup): the dashboard's recent events (every 30 s) and event pruning use a new time index
   instead of sorting up to 180 days of events; Performance & security's latency / loss / CPU and link-flap figures read
   each router's last hour through its index instead of scanning a week of metrics, every minute the page is open.

@@ -38,7 +38,14 @@ FIXES = {
     "bwtest_off": ("Turn off the bandwidth test server", "/tool/bandwidth-server/set", {"enabled": "no"}, "Bandwidth tests against this router stop working."),
     "macsrv_lan": ("Limit MAC Telnet to the LAN", "/tool/mac-server/set", {"allowed-interface-list": "LAN"}, "Where there's no interface list called LAN (switches, custom setups) MAC Telnet is turned off instead; MAC Winbox is a separate setting and stays as it is."),
     "ntp_on": ("Turn on NTP", "/system/ntp/client/set", {"enabled": "yes"}, "Uses time.cloudflare.com if no time server is set."),
+    "www_tm": ("Limit WebFig (HTTP) to TikManager", "/ip/service/set", {"numbers": "www"},
+               "TikManager keeps managing the router (it connects over its own encrypted tunnel). WebFig over plain HTTP stops "
+               "working for addresses you don't also allow; WebFig over HTTPS (www-ssl) and Winbox are separate and not touched. "
+               "If TikManager can't reach the router afterwards, the router puts the old setting back by itself within 2 minutes."),
 }
+TM_IP = "10.77.0.1"   # TikManager's tunnel address (server.py sets it from WG_SERVER_IP) - the source of every REST call
+GUARDED = {"www_tm"}   # fixes that touch how TikManager reaches the router: armed undo on the router, kept only if still reachable
+SAFE_ADDR = re.compile(r"^[0-9A-Fa-f.:/,]*$")
 
 
 def fix_retry(fix_id, error):
@@ -51,10 +58,32 @@ def fix_retry(fix_id, error):
     return None
 
 
-def fix_request(fix_id, inv):
+def fix_undo(fix_id, inv):
+    """RouterOS script that puts a guarded fix back (run by a scheduler unless TikManager cancels it), else None."""
+    if fix_id == "www_tm":
+        old = next((s.get("address") or "" for s in inv.get("/ip/service", []) if s.get("name") == "www"), "")
+        if not SAFE_ADDR.match(old):
+            raise ValueError("unexpected address list on the www service")
+        return f'/ip service set [find name=www] address="{old}"'
+    return None
+
+
+def clean_extra(raw):
+    """Optional extra addresses for "Limit WebFig to TikManager" ("192.168.10.0/24, 10.0.0.5") -> list, or ValueError."""
+    import ipaddress
+    out = []
+    for x in str(raw or "").replace(";", ",").replace(" ", ",").split(","):
+        if x.strip():
+            out.append(str(ipaddress.ip_network(x.strip(), strict=False)))
+    return out[:20]
+
+
+def fix_request(fix_id, inv, extra=None):
     """(REST path, body) for a one-click fix on a router with this inventory."""
     _, path, body, _ = FIXES[fix_id]
     body = dict(body)
+    if fix_id == "www_tm":   # TikManager's tunnel address first, then any addresses the technician also allows
+        body["address"] = ",".join(dict.fromkeys([f"{TM_IP}/32"] + list(extra or [])))
     if fix_id == "ntp_on" and not ((inv.get("/system/ntp/client") or [{}])[0].get("servers")):
         body["servers"] = "time.cloudflare.com"
     return path, body
@@ -163,14 +192,23 @@ def build(rows, metrics, flaps, now=None):
             caught, open_svc = exposure(inv)
             for name, why in open_svc.items():
                 add(d, "critical" if name in ("telnet", "ftp", "www", "api") else "high", "Exposure", f"{name} reachable from the internet",
-                    why, f"Limit /ip service {name} to your management addresses (address=...), or drop it on the WAN in the input chain.",
-                    f"svc_{name}" if f"svc_{name}" in FIXES else None)
+                    why, (f"Don't disable it - TikManager manages the router through it. Limit it to TikManager's tunnel address ({TM_IP}) "
+                          "with the one-click fix (or add your management network too: /ip service set www address=...)." if name == "www" else
+                          f"Limit /ip service {name} to your management addresses (address=...), or drop it on the WAN in the input chain."),
+                    "www_tm" if name == "www" else f"svc_{name}" if f"svc_{name}" in FIXES else None)
             if not caught:
                 add(d, "critical" if open_svc else "high", "Exposure", "Input firewall has no catch-all drop",
                     "Anything the router itself offers is reachable from the internet.",
                     "Add a final input rule: drop everything not from the LAN (like MikroTik's default 'drop all not coming from LAN').")
             for s in inv.get("/ip/service", []):
                 if s.get("name") in PLAINTEXT and not yes(s.get("disabled")) and s.get("name") not in open_svc:
+                    if s["name"] == "www":   # TikManager's own way in (REST) - never disable it; limit who can reach it
+                        if not s.get("address"):
+                            add(d, "medium", "Exposure", "WebFig over plain HTTP enabled",
+                                "Anyone on the LAN can open WebFig over plain HTTP, so passwords cross the network unencrypted.",
+                                f"Don't disable www - TikManager manages the router through it. Limit it to TikManager's tunnel address ({TM_IP}) "
+                                "with the one-click fix; add your management network if people use WebFig over HTTP from there.", "www_tm")
+                        continue
                     add(d, "medium", "Exposure", f"{PLAINTEXT[s['name']]} enabled", "Passwords cross the network in plain text.",
                         f"/ip service disable {s['name']} (use {'SSH' if s['name'] in ('telnet', 'ftp') else 'HTTPS / api-ssl'} instead).",
                         f"svc_{s['name']}" if f"svc_{s['name']}" in FIXES else None)

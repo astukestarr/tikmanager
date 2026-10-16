@@ -104,7 +104,7 @@ def c_plaintext(d, inv, ex=None):
     notes = []
     if www and not yes(www.get("disabled")):
         if www.get("address"):
-            notes.append(f"WebFig over HTTP is limited to {www['address']} (TikManager's management channel, inside its encrypted tunnel)")
+            notes.append(f"WebFig over HTTP is limited to {www['address']} (management addresses; TikManager's own access runs inside its encrypted tunnel)")
         else:
             bad.append("www (HTTP, from any address)")
     bad, ok = _split_accepted(bad, ex or {}, "plaintext")

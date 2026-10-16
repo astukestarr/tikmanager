@@ -52,6 +52,7 @@ from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
 import healthdash
+healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManager" uses it
 import compliance
 from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
@@ -150,7 +151,8 @@ def exceptions_map(device_ids=None):
     return out
 
 
-FIX_JOBS, FIX_LOCK = {}, threading.Lock()   # Performance & security one-click fixes in progress (and the last hour's)
+FIX_JOBS, FIX_LOCK = {}, threading.Lock()
+GUARD_UNDO = "tikmanager-fix-undo"   # router script + scheduler that undo a guarded one-click fix unless TikManager cancels them   # Performance & security one-click fixes in progress (and the last hour's)
 router_act_limit = RateLimiter(20, 300)   # VPN reconnects / re-reads per person (each one works a router)     # release-note lookups per technician (each may fetch from MikroTik)
 pending_logins: dict = {}              # ticket -> {user_id, created, enroll_secret}
 pending_lock = threading.Lock()
@@ -1690,7 +1692,11 @@ class Handler(BaseHTTPRequestHandler):
                     items.append({"device_id": it.get("device_id"), "router": "?", "org": "", "fix": fix, "state": "failed", "detail": str(e)})
                     continue
                 rows[d["id"]] = d
-                items.append({"device_id": d["id"], "router": d["name"], "org": "", "fix": fix, "state": "queued", "detail": ""})
+                try:
+                    extra = healthdash.clean_extra(it.get("extra")) if fix == "www_tm" else []
+                except ValueError:
+                    raise HttpError(400, f"Not an address or network: {it.get('extra')}") from None
+                items.append({"device_id": d["id"], "router": d["name"], "org": "", "fix": fix, "state": "queued", "detail": "", "extra": extra})
             job = {"id": secrets.token_urlsafe(8), "user": s["email"], "started": time.time(), "finished": None, "items": items,
                    "label": healthdash.FIXES[items[0]["fix"]][0] if items and items[0]["fix"] in healthdash.FIXES else "Fix"}
             with FIX_LOCK:
@@ -1721,7 +1727,10 @@ class Handler(BaseHTTPRequestHandler):
                     st("applying", "Changing the setting…")
                     inv = json.loads(d.get("vpn_inv") or "null") or {}
                     cl = poller.client(d)
-                    path_, body = healthdash.fix_request(fix, inv)
+                    path_, body = healthdash.fix_request(fix, inv, it.get("extra"))
+                    undo = healthdash.fix_undo(fix, inv) if fix in healthdash.GUARDED else None
+                    if undo:   # it touches how TikManager reaches the router: arm an undo on the router first
+                        cl.undo_arm(GUARD_UNDO, undo + f'\n/system scheduler remove [find name="{GUARD_UNDO}"]\n/system script remove [find name="{GUARD_UNDO}"]', delay="2m")
                     try:
                         cl.post(path_, body)
                     except RouterError as e:   # a known refusal with a known way round it (healthdash.fix_retry), else give up
@@ -1731,6 +1740,13 @@ class Handler(BaseHTTPRequestHandler):
                         st("applying", "Changing the setting (second try)…")
                         cl.post(*alt)
                     st("checking", "Re-checking…")
+                    if undo:
+                        try:
+                            cl.reachable()   # still reachable over the tunnel?
+                        except RouterError:
+                            return st("failed", "TikManager couldn't reach the router after the change - the router puts the old setting back "
+                                                "by itself within 2 minutes. Nothing else to do.")
+                        cl.undo_cancel(GUARD_UNDO)
                     poller.collect_vpns(d, cl)   # re-read, so the dashboard shows the result straight away
                 except (RouterError, ValueError) as e:
                     return st("failed", f"The router refused it: {e}")

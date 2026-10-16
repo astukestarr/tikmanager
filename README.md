@@ -580,8 +580,9 @@ cryptography, which MikroTik can't provide (CUI needs a FIPS-validated VPN on to
 
 TikManager manages routers over REST on the WebFig (www) service, inside its WireGuard tunnel. Unless that service is
 limited to management addresses (/ip service set www address=...), "Management traffic is encrypted" isn't met - WebFig
-answers plain HTTP on the LAN. Limit it to TikManager's tunnel address and your management network, or accept it with
-the reason.
+answers plain HTTP on the LAN. **Never disable www** - TikManager would lose the router. Use the one-click **Limit WebFig
+(HTTP) to TikManager** on Performance & security (you can also allow the client's admin addresses; www-ssl and Winbox
+aren't touched, and the router undoes it by itself if TikManager loses contact), or accept it with the reason.
 
 ## Remote access (WireGuard for Windows)
 

@@ -3950,11 +3950,16 @@ async function healthPage() {
   };
   const runFix = async (fix, routers) => {
     const label = x.fixes[fix].label;
-    if (!confirm(`${label} on ${routers.length === 1 ? routers[0][1] : `${routers.length} routers`}?\n\nEach router is backed up first. ${x.fixes[fix].effect}`)) return;
+    let extra = "";
+    if (fix === "www_tm") {   // who else may still use WebFig over plain HTTP (e.g. the client's admin PC or LAN)
+      extra = prompt(`${label} on ${routers.length === 1 ? routers[0][1] : `${routers.length} routers`}?\n\n${x.fixes[fix].effect}\n\n`
+        + "Also allow these addresses / networks to use WebFig over HTTP (optional, comma-separated - e.g. 192.168.10.0/24). Leave blank for TikManager only:", "");
+      if (extra == null) return;
+    } else if (!confirm(`${label} on ${routers.length === 1 ? routers[0][1] : `${routers.length} routers`}?\n\nEach router is backed up first. ${x.fixes[fix].effect}`)) return;
     hView.busy = true;
     document.querySelectorAll("[data-hfixall], [data-hfix]").forEach((b) => { b.disabled = true; });
     try {
-      const r = await post("/api/health-dash/fix", { items: routers.map(([id]) => ({ device_id: id, fix })) });
+      const r = await post("/api/health-dash/fix", { items: routers.map(([id]) => ({ device_id: id, fix, extra })) });
       hView.job = r.job; hView.shownDone = false;
       hView.jobData = { label, finished: null, items: routers.map(([id, name]) => ({ device_id: id, router: name, state: "queued", detail: "" })) };
       $("hJob").innerHTML = fixJobBox(); setBars($("hJob"));
