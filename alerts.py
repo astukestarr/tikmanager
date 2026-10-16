@@ -46,6 +46,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "temperature": ("Router too hot (3 readings in a row, 15 minutes)", False, "celsius", 70),
     "firmware": ("New RouterOS available for a router", False, None, None),
     "unifi": ("UniFi / UISP site has offline devices (one alert per site)", True, "minutes", 10),
+    "remote_access": ("Remote access: someone connected from a new address, or their key was used from two places (clears after an hour)", True, None, None),
 }
 DEFAULTS = {"kinds": {k: {"on": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
             "cw": {"on": False, "board_id": None, "status_id": None, "closed_status_id": None, "priority_id": None, "company_id": None},
@@ -120,6 +121,17 @@ class Alerts:
                     out[f"offline:{d['id']}"] = ("offline", d["id"], d["org_id"], f"{label(d)} is offline",
                                                  f"Not reachable over its tunnel since {time.strftime('%Y-%m-%d %H:%M', time.localtime(d['last_seen'] or now))}. "
                                                  f"Last error: {d['last_error'] or 'none'}")
+        remote = getattr(self, "remote", None)
+        if k.get("remote_access", {}).get("on") and remote:
+            for f in remote.flagged(now - 3600):
+                shared = f["flag"] == "shared"
+                out[f"ra:{f['id']}"] = ("remote_access", f["device_id"], f["org_id"],
+                    short(f"{f['user_name']} on {f['router']}: " + ("VPN key used from two places" if shared else f"VPN connection from a new address ({f['public_ip']})")),
+                    (f"{f['user_name']}'s remote-access key was used from two different internet addresses within minutes - the config may have been "
+                     "copied. Check with them; if it isn't them, Revoke them on the router's Remote access tab and give them a new config."
+                     if shared else f"{f['user_name']} connected from {f['public_ip']}, an address they haven't used before. Fine if they're travelling or on a "
+                     "new network; otherwise Disable or Revoke them on the router's Remote access tab.")
+                    + f" Started {time.strftime('%Y-%m-%d %H:%M', time.localtime(f['started_at']))}.")
         logs = getattr(self, "logs", None)
         if k["log"]["on"] and logs:
             out.update(logs.conditions(devs, label))

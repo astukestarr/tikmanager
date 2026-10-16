@@ -119,6 +119,7 @@ library = ScriptLibrary(db, integ)   # community RouterOS script library on GitH
 alerts = Alerts(db, settings, integ, updates, observatory, secev)   # ConnectWise tickets / Teams when something's wrong
 alerts.reach = reach
 alerts.logs = routerlogs
+alerts.remote = remote   # unusual remote-access connections (new address, a key used from two places)
 offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP / WebDAV storage
 alerts.offsite = offsite
 unifi = Ubnt(db, backups.vault, settings)   # UniFi + UISP connections: sites and devices, each site assigned to a client
@@ -602,6 +603,9 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 return self.send(410, str(e).encode(), "text/plain; charset=utf-8")
             fname = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9._-]+", "-", f"{d['name']}-{name}")).strip("-")[:60] or "remote-access"
+            if q.get("format") == "ps1":   # for an RMM: installs WireGuard and the tunnel as a service (the same one download)
+                return self.send(200, remote.rmm_script(name, conf).encode(), "text/plain; charset=utf-8",
+                                 headers=[("Content-Disposition", f'attachment; filename="{fname}-install.ps1"'), ("Cache-Control", "no-store")])
             return self.send(200, conf.encode(), "text/plain; charset=utf-8",
                              headers=[("Content-Disposition", f'attachment; filename="{fname}.conf"'), ("Cache-Control", "no-store")])
         if path == "/api/health-dash":   # Performance & Security dashboard: every router's findings (healthdash.py)

@@ -134,7 +134,8 @@ CREATE TABLE IF NOT EXISTS ra_users (                 -- one person (device) per
 CREATE TABLE IF NOT EXISTS ra_sessions (              -- remote access connection log: who was connected, when, from where
   id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   user_id INTEGER REFERENCES ra_users(id) ON DELETE SET NULL, user_name TEXT NOT NULL, tunnel_ip TEXT, public_ip TEXT,
-  started_at REAL NOT NULL, last_seen REAL NOT NULL, ended_at REAL, rx0 INTEGER, tx0 INTEGER, rx INTEGER, tx INTEGER
+  started_at REAL NOT NULL, last_seen REAL NOT NULL, ended_at REAL, rx0 INTEGER, tx0 INTEGER, rx INTEGER, tx INTEGER,
+  flag TEXT                                            -- new_ip (an address this person never used) / shared (the key used from two places)
 );
 CREATE INDEX IF NOT EXISTS ra_sessions_dev ON ra_sessions(device_id, started_at);
 CREATE TABLE IF NOT EXISTS scripts (                  -- script library
@@ -262,6 +263,8 @@ class DB:
             for col, ddl in (("disabled", "INTEGER NOT NULL DEFAULT 0"), ("expires_at", "REAL"), ("reminded", "INTEGER NOT NULL DEFAULT 0"), ("access", "TEXT")):
                 if col not in rcols:
                     c.execute(f"ALTER TABLE ra_users ADD COLUMN {col} {ddl}")
+        if "ra_sessions" in tables and "flag" not in {r[1] for r in c.execute("PRAGMA table_info(ra_sessions)")}:
+            c.execute("ALTER TABLE ra_sessions ADD COLUMN flag TEXT")
         if "sessions" in tables and "as_user_id" not in {r[1] for r in c.execute("PRAGMA table_info(sessions)")}:
             c.execute("ALTER TABLE sessions ADD COLUMN as_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
         if "upgrades" in tables:

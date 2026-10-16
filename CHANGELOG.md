@@ -11,6 +11,20 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
 - **Download config sits next to the person** (no more scrolling up): right after adding someone their row is
   highlighted with **Download config**; if the page was reloaded before downloading, **Get download link** makes a fresh
   one-time link (the old one stops working; the key stays encrypted until that one download).
+- **RMM install script**: next to the person, alongside the .conf file (one download - pick one). PowerShell to run as
+  SYSTEM from Syncro or any RMM: installs WireGuard if missing (newest MSI from download.wireguard.com, signature
+  checked), saves the config readable by SYSTEM / Administrators only, and installs the tunnel as an always-on Windows
+  service. The person never handles the config file.
+- **Unusual-connection alerts** (new alert type, on by default): someone connecting from an address they've never used,
+  or their key used from two internet addresses within minutes (a copied config). Flagged in the connection log too,
+  and recorded as router events.
+- **Warnings on the Remote access tab**: a config is a key, don't email it, least access and expiry dates, BitLocker
+  and MFA on what's behind the VPN, and the compliance limits (not FIPS-validated - not for NIST 800-171 / CMMC).
+- **Office DNS for Windows domains**: the DNS setting now takes the domain too (e.g. `192.168.1.10, corp.local`) - it
+  becomes the tunnel's search domain, and the RMM script adds a Windows name-resolution rule (NRPT) so that domain
+  always goes to the office DNS server; on a split tunnel Windows otherwise keeps asking the laptop's own DNS. People
+  limited to some servers now get the DNS server routed and allowed (port 53). Configs made before a change don't
+  pick it up - give those people a new config.
 
 ## 1.46.0-beta.5 - 2026-10-16
 

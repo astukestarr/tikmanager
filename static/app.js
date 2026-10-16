@@ -3938,7 +3938,9 @@ async function raTab(d, note) {
         : `<span class="small ${u.handshake_age < 180 ? "status ok" : "muted"}"><span class="dot ${u.handshake_age < 180 ? "on" : "off"}"></span>${u.handshake_age < 180 ? "Connected" : `last ${uptime(`${u.handshake_age}s`, true)} ago`}</span>`}</td>
       <td class="small nowrap">${u.rx != null ? `↓ ${bytes(u.tx)} ↑ ${bytes(u.rx)}` : ""}</td>
       <td class="nowrap">${u.download && rw ? (raLinks[`${d.id}:${u.id}`]
-          ? `<a class="btn small primary" href="${raLinks[`${d.id}:${u.id}`]}" download data-radl="${u.id}" title="One download only - it holds their private key, which TikManager then deletes">Download config</a>`
+          ? `<a class="btn small primary" href="${raLinks[`${d.id}:${u.id}`]}&format=ps1" download data-radl="${u.id}" title="PowerShell for your RMM (run as SYSTEM): installs WireGuard and this tunnel as an always-on service - the person never handles a file. One download only.">RMM install script</a>
+             <a class="btn small" href="${raLinks[`${d.id}:${u.id}`]}" download data-radl="${u.id}" title="The .conf file to import by hand. One download only - it holds their private key, which TikManager then deletes">.conf file</a>
+             <div class="small muted">one download - pick one</div>`
           : `<button class="btn small" type="button" data-ralink="${u.id}" title="Makes a new one-time download link">Get download link</button>`)
         : u.downloaded_at ? `<span class="small muted">config handed out ${ago(u.downloaded_at)}</span>` : u.download ? `<span class="small muted">config not downloaded yet</span>` : `<span class="small muted">config expired</span>`}</td>
       <td class="nowrap">${rw ? `<button class="btn small" type="button" data-raoff="${u.id}" data-on="${u.disabled ? 1 : 0}" title="${u.disabled ? "Let them connect again with the same config" : "Stop them connecting for now - same config when you enable them again"}">${u.disabled ? "Enable" : "Disable"}</button>
@@ -3949,6 +3951,13 @@ async function raTab(d, note) {
         ${srv ? `<span class="pill ${srv.state === "applied" ? "up-done" : srv.state === "failed" ? "up-failed" : "up-run"}">${esc({ applied: "On", failed: "Needs attention", applying: "Applying…" }[srv.state] || srv.state)}</span>` : `<span class="pill">Not set up</span>`}</div>
       <p class="small muted">People connect to this router with the free <b>WireGuard</b> app (Windows: wireguard.com/install) - faster and simpler than SSTP, no certificates.
         Each person gets their own key; revoke one without touching the others. ${x.online ? "" : "<b>The router is offline</b> - changes wait until it's back."}</p>
+      <div class="ra-warn small"><b>⚠ Before you hand out access</b><ul>
+        <li><b>A config is a key.</b> Anyone who has the file can connect from anywhere until you <b>Revoke</b> it - there's no password or second factor in it.</li>
+        <li><b>Don't email configs.</b> Use the <b>RMM install script</b> (the person never handles a file), or a one-time secret link. After importing a .conf by hand, delete the file.</li>
+        <li><b>Give each person only what they need</b> (their servers and services), and an <b>expiry date</b> for temps and contractors.</li>
+        <li><b>Laptops need BitLocker</b>, and put <b>MFA on what's behind the VPN</b> (Windows / RDP sign-in, the app, Microsoft 365) - then a stolen config only reaches a login prompt.</li>
+        <li><b>Watch the connection log and alerts</b>: a new address or a key used from two places is flagged.</li>
+        <li><b>Compliance:</b> WireGuard on MikroTik isn't FIPS-validated - not for NIST 800-171 / CMMC (CUI). For HIPAA it fits with MFA on the systems behind it, BitLocker and the connection log.</li></ul></div>
       ${srv && srv.last_error ? `<p class="status err small">${esc(srv.last_error)}</p>` : ""}
       <div class="grid2">
         <label class="field">Address people connect to <input id="raEp" value="${esc(cfg.endpoint || "")}" placeholder="public IP or DNS name" ${rw ? "" : "disabled"}>
@@ -3960,8 +3969,10 @@ async function raTab(d, note) {
         <label class="field">UDP port <input id="raPort" inputmode="numeric" value="${esc(cfg.port)}" ${rw ? "" : "disabled"}></label>
         <label class="field">Address range for people <input id="raPool" class="mono" value="${esc(cfg.pool)}" ${rw && !(x.users || []).length ? "" : "disabled"}>
           <span class="small muted">Each person gets one address from it; must not overlap the router's networks.${(x.users || []).length ? " Remove everyone to change it." : ""}</span></label>
-        <label class="field">DNS for people (optional) <input id="raDns" value="${esc(cfg.dns || "")}" placeholder="e.g. 192.168.1.10 (the office DNS server)" ${rw ? "" : "disabled"}>
-          <span class="small muted">Leave blank to keep their own DNS. Use the office DNS server so names like fileserver work.</span></label>
+        <label class="field">DNS for people <input id="raDns" value="${esc(cfg.dns || "")}" placeholder="e.g. 192.168.1.10, corp.local" ${rw ? "" : "disabled"}>
+          <span class="small muted">The office DNS server${cfg.dns ? "" : " - <b>set this on a Windows domain</b>, or names like fileserver and corp.local go to the laptop's own DNS"}.
+            Add the <b>domain</b> too (e.g. <span class="mono">192.168.1.10, corp.local</span>): it becomes the search domain, and the RMM install script pins that
+            domain to the office DNS server. Only configs made after a change get it - give existing people a new config.</span></label>
       </div>
       <div class="field"><span>What goes through the tunnel</span>
         <label class="chk"><input type="radio" name="raSplit" value="1" ${cfg.split !== 0 && cfg.split !== false ? "checked" : ""} ${rw ? "" : "disabled"}> Only the office networks (recommended)</label>
@@ -4015,7 +4026,8 @@ async function raTab(d, note) {
         <a class="btn small" href="/api/devices/${d.id}/ra/sessions.csv" download>Export CSV</a></div>
       <p class="small muted">Who connected, when and from where - read from the router every 2 minutes, kept 400 days.</p>
       ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Person</th><th>From</th><th>Connected</th><th>Disconnected</th><th>Duration</th><th>Data</th></tr></thead><tbody>
-        ${rows.slice(0, 100).map((r) => `<tr><td>${esc(r.user_name)}</td><td class="mono small">${esc(r.public_ip || "")}</td><td class="small">${when(r.started_at)}</td>
+        ${rows.slice(0, 100).map((r) => `<tr><td>${esc(r.user_name)}${r.flag === "shared" ? ' <span class="pill up-failed" title="Their key was used from two internet addresses within minutes - the config may have been copied">two places</span>'
+            : r.flag === "new_ip" ? ' <span class="pill up-run" title="An address this person has not used before">new address</span>' : ""}</td><td class="mono small">${esc(r.public_ip || "")}</td><td class="small">${when(r.started_at)}</td>
           <td class="small">${r.active ? '<span class="status ok">connected now</span>' : when(r.ended_at)}</td><td class="small">${uptime(`${Math.round(r.duration)}s`, true)}</td>
           <td class="small nowrap">↓ ${bytes(r.down)} ↑ ${bytes(r.up)}</td></tr>`).join("")}</tbody></table></div>`
         : `<p class="small muted">No connections logged yet.</p>`}`;
@@ -4047,8 +4059,8 @@ async function raTab(d, note) {
     try {
       const r = await post(`/api/devices/${d.id}/ra/users`, { name, expires: endOfDay($("raNewExp")?.value), access: newAcc ? newAcc() : null });
       raLinks[`${d.id}:${r.id}`] = `/api/devices/${d.id}/ra/users/${r.id}/config?t=${encodeURIComponent(r.token)}`;
-      await raTab(d, `<b>${esc(name)}</b> was added - <b>Download config</b> is next to them below. One download only: it holds their private key, which
-        TikManager then deletes. Send it to them securely (not by plain email if you can avoid it).`);
+      await raTab(d, `<b>${esc(name)}</b> was added - the <b>RMM install script</b> (best) or the <b>.conf file</b> is next to them below. One download only: it holds their
+        private key, which TikManager then deletes. Don't email it.`);
       const row = $(`raU${r.id}`);
       if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("ra-new"); }
     } catch (e) { $("raAdd").disabled = false; say("raUStatus", e.message); }

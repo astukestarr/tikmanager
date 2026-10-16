@@ -17,6 +17,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -243,17 +244,32 @@ class RemoteAccess:
         return {"server": srv, "users": users, "suggest": sug, "networks": self.networks(d), "online": bool(d["online"]),
                 "live_error": live_err, "cloud": cloud, "services": SERVICE_NAMES}
 
+    @staticmethod
+    def dns_parts(dns):
+        """The DNS setting -> (server IPs, domains). Domains (e.g. corp.local) become the tunnel's search domains, and the
+        RMM script pins them to the office DNS servers (Windows otherwise keeps asking the laptop's own DNS)."""
+        ips, doms = [], []
+        for x in [s for s in str(dns or "").replace(" ", "").split(",") if s]:
+            try:
+                ips.append(str(ipaddress.ip_address(x)))
+            except ValueError:
+                doms.append(x.strip(".").lower())
+        return ips, doms
+
     def _rules(self, device_id):
         """The router's forward rules for remote access, from each person's access."""
         srv = self.db.one("SELECT * FROM ra_servers WHERE device_id=?", (device_id,))
         reach = json.loads(srv["routes"] or "[]") if srv and srv["split"] else []
         rules = []
+        dns_ips = self.dns_parts(srv["dns"] if srv else "")[0]
         for u in self.db.q("SELECT name, ip, access FROM ra_users WHERE device_id=? ORDER BY id", (device_id,)):
             label = f"{RA_TAG_LABEL}: {u['name']}"[:200]
             acc = json.loads(u["access"]) if u["access"] else None
             if acc is None:   # everything the setup allows: its networks (split tunnel) or anywhere (all traffic)
                 rules += [{"comment": label, "src-address": u["ip"], "dst-address": n} for n in reach] or [{"comment": label, "src-address": u["ip"]}]
                 continue
+            for ip in dns_ips:   # people limited to some servers still need the office DNS to find them by name
+                rules += [{"comment": label, "src-address": u["ip"], "dst-address": ip, "protocol": pr, "dst-port": "53"} for pr in ("udp", "tcp")]
             for e in acc:
                 r = {"comment": label, "src-address": u["ip"], "dst-address": e["host"]}
                 if e["proto"]:
@@ -317,12 +333,13 @@ class RemoteAccess:
                 raise RaError(f"Not a network: {r}") from None
         if split and not routes:
             raise RaError("Pick at least one network to reach, or send all traffic through the tunnel.")
-        dns = str(b.get("dns") or "").strip()
-        for x in [s for s in dns.replace(" ", "").split(",") if s]:
-            try:
-                ipaddress.ip_address(x)
-            except ValueError:
-                raise RaError(f"Not an IP address for DNS: {x}") from None
+        ips, doms = self.dns_parts(b.get("dns"))
+        for x in doms:
+            if not re.fullmatch(r"(?=.{1,200}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", x):
+                raise RaError(f"Not an IP address or a domain name for DNS: {x}")
+        if doms and not ips:
+            raise RaError("Give the office DNS server's IP as well as the domain, e.g. 192.168.1.10, corp.local")
+        dns = ", ".join(ips + doms)
         return {"port": port, "pool": str(pool), "endpoint": endpoint, "split": split, "routes": routes, "dns": dns}
 
     def setup(self, device_id, b, user):
@@ -431,10 +448,15 @@ class RemoteAccess:
 
     def _config(self, srv, priv, ip, acc=None):
         # what the laptop sends through the tunnel - the router decides what's actually allowed (ra_access)
-        if acc is not None:
-            allowed = ", ".join(sorted({e["host"] if "/" in e["host"] else f"{e['host']}/32" for e in acc}))
+        dns_ips = self.dns_parts(srv["dns"])[0]
+        if acc is not None:   # their servers, plus the DNS servers so names resolve through the tunnel
+            allowed = ", ".join(sorted({e["host"] if "/" in e["host"] else f"{e['host']}/32" for e in acc} | {f"{ip}/32" for ip in dns_ips}))
+        elif srv["split"] in (0, False):
+            allowed = "0.0.0.0/0"
         else:
-            allowed = "0.0.0.0/0" if srv["split"] in (0, False) else ", ".join(json.loads(srv["routes"] or "[]") + [srv["pool"]])
+            nets = json.loads(srv["routes"] or "[]") + [srv["pool"]]
+            nets += [f"{ip}/32" for ip in dns_ips if not any(ipaddress.ip_address(ip) in ipaddress.ip_network(n, strict=False) for n in nets)]
+            allowed = ", ".join(nets)
         lines = ["[Interface]", f"PrivateKey = {priv}", f"Address = {ip}/32"]
         if srv["dns"]:
             lines.append(f"DNS = {srv['dns']}")
@@ -451,6 +473,56 @@ class RemoteAccess:
         token = secrets.token_urlsafe(24)
         self.db.run("UPDATE ra_users SET cfg_token=? WHERE id=?", (hashlib.sha256(token.encode()).hexdigest(), uid))
         return {"id": uid, "token": token}
+
+    @staticmethod
+    def rmm_script(name, conf):
+        """PowerShell for an RMM (run as SYSTEM): install WireGuard if missing (the newest signed MSI from
+        download.wireguard.com), save the config readable by SYSTEM / Administrators only, install it as an always-on
+        tunnel service. The person never handles a file."""
+        tun = "".join(c if c.isalnum() or c in "_=+.-" else "-" for c in name)
+        while "--" in tun:
+            tun = tun.replace("--", "-")
+        tun = tun[:32].strip("-") or "office"
+        m = re.search(r"^DNS\s*=\s*(.+)$", conf, re.M)
+        ips, doms = RemoteAccess.dns_parts(m.group(1) if m else "")
+        nrpt = ""
+        if ips and doms:   # Windows asks the laptop's own DNS first on a split tunnel - send the office domain to the office DNS
+            spaces = ", ".join(f"'.{x}', '{x}'" for x in doms)
+            servers = ", ".join(f"'{x}'" for x in ips)
+            nrpt = f"""Get-DnsClientNrptRule | Where-Object {{ $_.Comment -eq "TikManager $name" }} | ForEach-Object {{ Remove-DnsClientNrptRule -Name $_.Name -Force }}
+Add-DnsClientNrptRule -Namespace {spaces} -NameServers {servers} -Comment "TikManager $name"
+Clear-DnsClientCache
+"""
+        return rf"""# TikManager remote access - installs WireGuard and the tunnel "{tun}" as an always-on service.
+# Run as SYSTEM / administrator (e.g. from your RMM). It holds this person's private key: run it once, then delete it.
+$ErrorActionPreference = 'Stop'
+$name = '{tun}'
+$wg = Join-Path $env:ProgramFiles 'WireGuard\wireguard.exe'
+if (-not (Test-Path $wg)) {{
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $base = 'https://download.wireguard.com/windows-client/'
+  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {{ 'arm64' }} elseif ([Environment]::Is64BitOperatingSystem) {{ 'amd64' }} else {{ 'x86' }}
+  $msi = (Invoke-WebRequest -UseBasicParsing $base).Links.href | Where-Object {{ $_ -match "^wireguard-$arch-[\d.]+\.msi$" }} |
+         Sort-Object {{ [version]($_ -replace '^wireguard-\w+-([\d.]+)\.msi$', '$1') }} | Select-Object -Last 1
+  if (-not $msi) {{ throw 'Could not find the WireGuard installer on download.wireguard.com' }}
+  $file = Join-Path $env:TEMP $msi
+  Invoke-WebRequest -UseBasicParsing ($base + $msi) -OutFile $file
+  $sig = Get-AuthenticodeSignature $file
+  if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'WireGuard') {{ Remove-Item $file -Force; throw 'The WireGuard installer signature did not check out - not installed' }}
+  Start-Process msiexec.exe -ArgumentList "/i `"$file`" /qn DO_NOT_LAUNCH=1" -Wait
+  Remove-Item $file -Force
+}}
+$dir = Join-Path $env:ProgramData 'TikManager\WireGuard'
+New-Item -ItemType Directory -Force $dir | Out-Null
+icacls $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+$conf = Join-Path $dir "$name.conf"
+@'
+{conf.strip()}
+'@ | Set-Content -Path $conf -Encoding ASCII
+& $wg /uninstalltunnelservice $name 2>$null
+& $wg /installtunnelservice $conf
+{nrpt}Write-Output "WireGuard tunnel $name installed (Windows service WireGuardTunnel`${{name}}) - it connects at startup."
+"""
 
     def download(self, device_id, uid, token, user):
         """The person's config, once: the encrypted copy is deleted as soon as it's handed out (or after 7 days)."""
@@ -553,11 +625,32 @@ class RemoteAccess:
             if s:
                 self.db.run("UPDATE ra_sessions SET last_seen=?, rx=?, tx=? WHERE id=?", (seen, p["rx"], p["tx"], s["id"]))
             else:
-                self.db.run("INSERT INTO ra_sessions (device_id, user_id, user_name, tunnel_ip, public_ip, started_at, last_seen, rx0, tx0, rx, tx) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            (device_id, u["id"], u["name"], u["ip"], ep, seen, seen, p["rx"], p["tx"], p["rx"], p["tx"]))
+                flag = self._flag(u["id"], ep, seen)
+                self.db.run("INSERT INTO ra_sessions (device_id, user_id, user_name, tunnel_ip, public_ip, started_at, last_seen, rx0, tx0, rx, tx, flag) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (device_id, u["id"], u["name"], u["ip"], ep, seen, seen, p["rx"], p["tx"], p["rx"], p["tx"], flag))
+                if flag:
+                    why = "from two places at once - the config may have been copied" if flag == "shared" else f"from a new address ({ep})"
+                    self.db.event(device_id, d["org_id"], "remote access", f"\"{u['name']}\" connected {why}")
         for s in open_.values():   # people revoked while connected
             self.db.run("UPDATE ra_sessions SET ended_at=? WHERE id=?", (s["last_seen"], s["id"]))
+
+    def _flag(self, uid, ep, now):
+        """'shared' when this person's key bounces between public IPs within 15 minutes (A -> B -> A: two copies of the
+        config in use), 'new_ip' when they've connected before but never from this address, else None."""
+        if not ep:
+            return None
+        prev = self.db.q("SELECT public_ip, started_at FROM ra_sessions WHERE user_id=? ORDER BY started_at DESC LIMIT 2", (uid,))
+        if len(prev) == 2 and prev[0]["public_ip"] != ep and prev[1]["public_ip"] == ep and now - prev[1]["started_at"] < 900:
+            return "shared"
+        if prev and not self.db.one("SELECT 1 FROM ra_sessions WHERE user_id=? AND public_ip=?", (uid, ep)):
+            return "new_ip"
+        return None
+
+    def flagged(self, since):
+        """Unusual sessions since `since` (for alerts): [{id, device_id, org_id, router, user_name, public_ip, flag, started_at}]."""
+        return self.db.q("""SELECT s.id, s.device_id, d.org_id, d.name AS router, s.user_name, s.public_ip, s.flag, s.started_at
+                            FROM ra_sessions s JOIN devices d ON d.id = s.device_id WHERE s.flag IS NOT NULL AND s.started_at > ?""", (since,))
 
     def sessions(self, device_id, limit=300):
         rows = self.db.q("SELECT * FROM ra_sessions WHERE device_id=? ORDER BY started_at DESC LIMIT ?", (device_id, limit))

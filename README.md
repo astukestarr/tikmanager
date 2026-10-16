@@ -564,8 +564,9 @@ faster, more reliable on poor connections, no certificates. Technicians set it u
 1. Check the suggested settings: the **address people connect to** (best: the router's MikroTik **Cloud DNS** name,
    which follows its public IP - **Use Cloud DNS** fills it in and turns IP Cloud on if needed; or a public IP / your own
    DNS name; forward the UDP port to the router if it sits behind another firewall), the **UDP port**, an **address range**
-   for the people connecting (picked so it doesn't overlap the router's networks), optional **DNS** (the office DNS
-   server, so names like fileserver work) and **what goes through the tunnel**: only the office networks you tick
+   for the people connecting (picked so it doesn't overlap the router's networks), **DNS** (the office DNS server, plus
+   the Windows domain, e.g. `192.168.1.10, corp.local` - the domain becomes the search domain and the RMM script pins it
+   to the office DNS server, since on a split tunnel Windows otherwise asks the laptop's own DNS) and **what goes through the tunnel**: only the office networks you tick
    (recommended), or all traffic.
 2. **Set up remote access**. TikManager backs the router up, then adds a WireGuard interface, its gateway address and
    firewall rules (the UDP port open, people let through to the networks, ping - and DNS when it points at the router)
@@ -575,17 +576,21 @@ faster, more reliable on poor connections, no certificates. Technicians set it u
    **what they may reach**: everything, or only some servers and services (e.g. one file server over SMB, one web app
    over HTTP). The router enforces it with one firewall rule per allowed destination and a final drop for the rest of
    the tunnel. TikManager makes the key pair, adds only that peer on the router (nobody else drops)
-   and offers **one download** of the WireGuard config. The config holds the private key: TikManager keeps it encrypted
-   only until it's downloaded (or 7 days) and then deletes it - send it to the person securely. **Revoke** removes just
+   and offers **one download** - either an **RMM install script** or the .conf file. The config holds the private key:
+   TikManager keeps it encrypted only until it's downloaded (or 7 days) and then deletes it - don't email it. **Revoke** removes just
    that person; **Disable** switches them off for now (same config when enabled again).
-4. On the laptop: install WireGuard (wireguard.com/install), **Import tunnel(s) from file**, pick the .conf, **Activate**.
-   Without admin rights a one-time Windows setting is needed to switch tunnels on; or push the install with your RMM -
-   `wireguard /installtunnelservice <file>.conf` installs the tunnel as an always-on service.
+4. On the laptop - best: run the **RMM install script** as SYSTEM from Syncro or any RMM. It installs WireGuard if
+   missing (newest MSI from download.wireguard.com, signature checked), saves the config readable by SYSTEM /
+   Administrators only, installs the tunnel as an always-on service and adds the DNS rule for the domain; the person
+   never handles a file. By hand: install WireGuard, **Import tunnel(s) from file**, pick the .conf, **Activate**, then
+   delete the .conf (without admin rights a one-time Windows setting is needed to switch tunnels on).
 
 The tab shows each person's last handshake and traffic, read live from the router when you open it, and a **connection
 log** - who connected, when, from which public IP, for how long and how much data (read every 2 minutes, kept 400 days,
-**Export CSV** for auditors). WireGuard has no
-second factor: a lost laptop means **Revoke** for that person.
+**Export CSV** for auditors). Connections from an address the person never used, or their key used from two places
+within minutes (a copied config), are flagged in the log and raise a **Remote access** alert. WireGuard has no second
+factor: a lost laptop means **Revoke** for that person - the tab's warning box lists the rest (BitLocker, MFA on what's
+behind the VPN, least access, expiry dates; not FIPS-validated, so not for NIST 800-171 / CMMC).
 
 ## Tasks (scripts, groups, schedules, automatic firmware updates)
 
