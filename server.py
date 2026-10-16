@@ -626,7 +626,6 @@ class Handler(BaseHTTPRequestHandler):
             rows = remote.sessions(d["id"], limit=5000 if m.group(2) else 300)
             if not m.group(2):
                 return self.json(rows)
-            import csv, io
             buf = io.StringIO()
             w = csv.writer(buf)
             w.writerow(["Person", "Tunnel IP", "From (public IP)", "Connected", "Disconnected", "Minutes", "Downloaded bytes", "Uploaded bytes"])
@@ -2327,7 +2326,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if path.endswith("/block"):
                     autoblock.block(ip, s["email"], reason="blocked by hand")
-                    threading.Thread(target=autoblock.push, daemon=True, name="autoblock-push").start()
+                    threading.Thread(target=lambda: (autoblock.push(), autoblock.ensure_rules()), daemon=True, name="autoblock-push").start()
                     return self.json({"ok": True})
                 return self.json({"ok": True, "failed": [], "routers": autoblock.release(ip, s["email"])})
             except ValueError as e:

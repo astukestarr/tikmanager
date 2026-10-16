@@ -3687,6 +3687,8 @@ async function autoBlockCard() {
         <label class="field">within (minutes) <input id="abMin" type="number" min="1" max="1440" value="${c.minutes}"></label>
         <label class="field">Block for (hours) <input id="abHours" type="number" min="1" max="720" value="${c.hours}"></label></div>
       <label class="field">Whitelist - never blocked (addresses or networks, one per line) <textarea id="abWl" rows="3" spellcheck="false">${esc(c.whitelist.join("\n"))}</textarea></label>
+      <label class="chk"><input type="checkbox" id="abAutoRule" ${c.auto_rule !== false ? "checked" : ""}> Add the drop rule to routers that don't have it when something is blocked (recommended -
+        without it a router only lists the address). The rule drops only addresses on the list.</label>
       <div class="actions"><button class="btn primary" type="button" id="abSave">Save</button><span class="status" id="abStatus"></span></div></details>` : ""}
     <p class="status small" id="abMsg"></p>`;
   const msg = (m, ok) => { $("abMsg").textContent = m; $("abMsg").className = `status small ${ok ? "ok" : "err"}`; };
@@ -3710,7 +3712,7 @@ async function autoBlockCard() {
   });
   $("abSave")?.addEventListener("click", async () => {
     try {
-      await post("/api/security/autoblock/settings", { mode: $("abMode").value, threshold: $("abTh").value, minutes: $("abMin").value, hours: $("abHours").value, whitelist: $("abWl").value });
+      await post("/api/security/autoblock/settings", { mode: $("abMode").value, threshold: $("abTh").value, minutes: $("abMin").value, hours: $("abHours").value, whitelist: $("abWl").value, auto_rule: $("abAutoRule").checked });
       await autoBlockCard();
       msg("Saved.", true);
     } catch (e) { $("abStatus").textContent = e.message; $("abStatus").className = "status err"; }

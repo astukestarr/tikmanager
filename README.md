@@ -199,7 +199,8 @@ light levels every 5 minutes for 30 days; alerts can fire when a router runs hot
 
 **Auto-block:** addresses that keep failing to sign in to your routers (counted across the fleet) can be listed
 (audit) or blocked on every router automatically, via the `tikmanager-blocklist` address list with a RouterOS timeout.
-Each router needs one rule that drops the list - **without it the address is only listed, not dropped**; the Security
+Each router needs one rule that drops the list - TikManager adds it to routers that lack it whenever something is blocked
+(Auto-block > Settings can turn that off); **without it the address is only listed, not dropped**; the Security
 page says so at the top, shows "dropped on N of M" per blocked address, and adds the rule (one router, or all). A block
 stops connections from that address straight to a router; Winbox through TikManager's relay comes from TikManager's own
 address and isn't affected. **Unblock** (Top addresses, or Auto-block > Blocked now) releases it at once and takes it off

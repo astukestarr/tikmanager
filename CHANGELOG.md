@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.21 - 2026-10-16
+
+- **Blocking now actually blocks**: whenever an address is blocked (by hand or automatically), TikManager adds the
+  auto-block drop rule (`/ip firewall raw ... action=drop src-address-list=tikmanager-blocklist`) to every online
+  router that doesn't have it - before, a router without it only listed the address, so the block did nothing there.
+  The rule drops only addresses on the list. Auto-block > Settings has a checkbox to turn this off (on by default).
+- **Fix: Logs > Export CSV failed** ("Something went wrong on the server") - a CSV export added to the same part of
+  the server in 1.46.0-beta.6 broke it. A check for that kind of mistake now covers the whole code.
+
 ## 1.46.0-beta.20 - 2026-10-16
 
 - **Fix: Auto-block's Unblock seemed to do nothing** - it took the address off every router one after another before

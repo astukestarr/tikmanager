@@ -21,7 +21,8 @@ from routeros import RouterError
 LIST = "tikmanager-blocklist"
 COMMENT = "TikManager auto-block"
 RULE = {"chain": "prerouting", "action": "drop", "src-address-list": LIST, "comment": COMMENT}
-DEFAULTS = {"mode": "off", "threshold": 5, "minutes": 10, "hours": 72, "whitelist": []}
+DEFAULTS = {"mode": "off", "threshold": 5, "minutes": 10, "hours": 72, "whitelist": [],
+            "auto_rule": True}   # add the drop rule to routers that lack it whenever something is blocked (else they only list it)
 KEEP_DAYS = 30
 
 
@@ -64,7 +65,7 @@ class AutoBlock:
                 wl.append(str(ipaddress.ip_network(x, strict=False)))
             except ValueError:
                 raise ValueError(f"Not an address or network: {x}") from None
-        cur.update(mode=b["mode"], threshold=th, minutes=mins, hours=hours, whitelist=wl[:500])
+        cur.update(mode=b["mode"], threshold=th, minutes=mins, hours=hours, whitelist=wl[:500], auto_rule=bool(b.get("auto_rule", True)))
         self.db.set_setting("autoblock", json.dumps(cur))
         return cur
 
@@ -194,6 +195,19 @@ class AutoBlock:
         self.db.audit(by, "auto-block drop rule added", d["name"], org_id=d.get("org_id"))
         self.db.event(d["id"], d.get("org_id"), "firewall", f"Auto-block rule added (raw drop src-address-list={LIST}) by {by}")
 
+    def ensure_rules(self):
+        """With something blocked and auto_rule on: add the drop rule to every online router that doesn't drop the list
+        yet (a router without it only lists the address - the block does nothing there)."""
+        if not self.settings().get("auto_rule", True) or not self.active():
+            return
+        devs = {d["id"]: d for d in self.db.q("SELECT * FROM devices WHERE state='adopted' AND online=1")}
+        for did, ok in self.rule_status().items():
+            if ok is False and did in devs:
+                try:
+                    self.add_rule(devs[did], "auto-block")
+                except RouterError as e:
+                    self.db.event(did, devs[did].get("org_id"), "auto-block", f"Couldn't add the auto-block drop rule: {str(e)[:150]}")
+
     def run_once(self):
         with self.lock:
             cfg = self.settings()
@@ -211,6 +225,7 @@ class AutoBlock:
                             pass
             if cfg["mode"] != "off":
                 self.push()
+                self.ensure_rules()
             self.db.run("DELETE FROM autoblock WHERE (until < ? OR released_at IS NOT NULL) AND COALESCE(released_at, until) < ?",
                         (now, now - KEEP_DAYS * 86400))
             self.db.run("DELETE FROM autoblock_push WHERE ip NOT IN (SELECT ip FROM autoblock WHERE released_at IS NULL AND until > ?)", (now,))
