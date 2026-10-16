@@ -2281,7 +2281,9 @@ async function versionCard() {
       : !busy && u.latest && !u.available ? `<p class="small status ok">You're on the newest version.</p>`
       : !busy && u.checked_at && !u.error ? `<p class="small muted">No releases have been published yet.</p>` : ""}
     <div class="actions"><button class="btn" type="button" id="verCheckCard" ${busy ? "disabled" : ""}>Check for updates</button><span class="status" id="verStatus"></span></div>
+    <details class="wn-hist" id="wnHistBox"><summary>What's new in past releases</summary><div id="wnHist"><p class="small muted">Loading…</p></div></details>
     ${securityBox(u.security || {}, u)}`;
+  $("wnHistBox")?.addEventListener("toggle", (e) => { if (e.target.open && !e.target.dataset.loaded) { e.target.dataset.loaded = "1"; wnHistory(); } });
   el.querySelectorAll(".sec-howto").forEach((b) => b.addEventListener("click", () => {
     const box = b.nextElementSibling, open = box.classList.toggle("hidden") === false;
     b.setAttribute("aria-expanded", String(open));
@@ -4100,10 +4102,10 @@ async function healthPage() {
 // --- What's new: a tour of everything since the last full release (whatsnew.py) ---------------------------------------
 // On load it shows the slides this person hasn't acknowledged; "Got it - don't show again" acknowledges them until the
 // next full release. Closing (x, Esc, Remind me later) shows them again next time. The top bar's "What's new" shows all.
-async function whatsNew(all) {
+async function whatsNew(all, release) {
   let x;
-  try { x = await api("/api/whats-new"); } catch (e) { return; }
-  $("wnOpen")?.classList.toggle("hidden", !x.slides.length);
+  try { x = await api(release ? `/api/whats-new?release=${encodeURIComponent(release)}` : "/api/whats-new"); } catch (e) { if (release) alert(e.message); return; }
+  if (!release) $("wnOpen")?.classList.toggle("hidden", !x.slides.length);
   if ($("wnOpen") && !$("wnOpen").dataset.wired) { $("wnOpen").dataset.wired = "1"; $("wnOpen").addEventListener("click", () => whatsNew(true)); }
   const slides = all ? x.slides : x.slides.filter((s) => x.unseen.includes(s.id));
   if (!slides.length || (!all && me.viewing_as)) return;
@@ -4122,14 +4124,15 @@ async function whatsNew(all) {
       <div class="wn-foot">
         <button class="btn" type="button" id="wnBack" ${i ? "" : "disabled"}>← Back</button>
         <span class="spacer"></span>
-        ${last ? `<button class="btn" type="button" id="wnLater">Remind me later</button>
+        ${x.history ? (last ? `<button class="btn primary" type="button" id="wnLater">Close</button>` : `<button class="btn primary" type="button" id="wnNext">Next →</button>`)
+          : last ? `<button class="btn" type="button" id="wnLater">Remind me later</button>
           <button class="btn primary" type="button" id="wnAck">Got it - don't show again</button>`
           : `<button class="linkish small" type="button" id="wnAck">Don't show again</button><button class="btn primary" type="button" id="wnNext">Next →</button>`}</div>`;
     $("wnX").addEventListener("click", () => dlg.close());
     $("wnBack").addEventListener("click", () => { i--; draw(); });
     $("wnNext")?.addEventListener("click", () => { i++; draw(); });
     $("wnLater")?.addEventListener("click", () => dlg.close());
-    $("wnAck").addEventListener("click", ack);
+    $("wnAck")?.addEventListener("click", ack);
     $("wnShow")?.addEventListener("click", () => dlg.close());
     dlg.querySelectorAll("[data-wnk]").forEach((b) => b.addEventListener("click", () => { i = +b.dataset.wnk; draw(); }));
   };
@@ -4139,6 +4142,31 @@ async function whatsNew(all) {
   };
   draw();
   if (!dlg.open) dlg.showModal();
+}
+
+// Version & updates > What's new in past releases: this release line and the 5 before it, from the installed changelog
+const mdInline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");   // escaped first
+async function wnHistory() {
+  const box = $("wnHist");
+  let h;
+  try { h = await api("/api/whats-new/history"); } catch (e) { box.innerHTML = `<p class="small status err">${esc(e.message)}</p>`; return; }
+  if (!h.length) { box.innerHTML = `<p class="small muted">No release notes found in this installation.</p>`; return; }
+  const day = (d) => { const t = Date.parse(d); return Number.isNaN(t) ? esc(d) : new Date(t + 43200000).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }); };
+  box.innerHTML = h.map((l, i) => {
+    const first = l.releases[l.releases.length - 1], newest = l.releases[0];
+    return `<div class="wnh"><div class="row"><b>${esc(l.line)}</b>${i === 0 ? ` <span class="pill up-done">this version</span>` : ""}
+        <span class="small muted">${day(first.date)}${l.releases.length > 1 ? ` · latest ${esc(newest.version)}, ${day(newest.date)}` : ""}</span><span class="spacer"></span>
+        ${l.tour ? `<button class="btn small" type="button" data-wntour="${esc(l.tour)}">Tour</button>` : ""}
+        <button class="btn small" type="button" data-wnnotes="${i}">Release notes</button></div>
+      <div class="wnh-notes" id="wnN${i}" hidden>${l.releases.map((r) => `<h4>${esc(r.version)} <span class="small muted">${day(r.date)}</span></h4>
+        ${(() => { let out = "", ul = false; for (const b of r.blocks) {
+          if (b.kind === "li") { if (!ul) { out += "<ul>"; ul = true; } out += `<li>${mdInline(b.text)}</li>`; }
+          else { if (ul) { out += "</ul>"; ul = false; } out += `<p>${mdInline(b.text)}</p>`; } }
+          return out + (ul ? "</ul>" : ""); })()}`).join("")}</div></div>`;
+  }).join("");
+  box.querySelectorAll("[data-wntour]").forEach((b) => b.addEventListener("click", () => whatsNew(true, b.dataset.wntour)));
+  box.querySelectorAll("[data-wnnotes]").forEach((b) => b.addEventListener("click", () => {
+    const n = $(`wnN${b.dataset.wnnotes}`); n.hidden = !n.hidden; b.textContent = n.hidden ? "Release notes" : "Hide notes"; }));
 }
 
 // --- compliance: routers against CIS v8 / NIST 800-171 / PCI DSS 4.0 / HIPAA, and a client report (compliance.py) ------

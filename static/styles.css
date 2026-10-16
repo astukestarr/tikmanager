@@ -684,3 +684,7 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .wn-foot { display: flex; align-items: center; gap: 8px; padding: 12px 18px 16px; flex-wrap: wrap; }
 .h-fix-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; padding: 4px 0 10px 12px; }
 .h-fix-list > div { grid-column: 1 / -1; margin-bottom: 4px; }
+.wn-hist { margin: 14px 0 4px; } .wn-hist > summary { cursor: pointer; font-weight: 600; }
+.wnh { border-top: 1px solid var(--border); padding: 8px 0; } .wnh .row { gap: 8px; flex-wrap: wrap; }
+.wnh-notes { padding: 4px 0 8px; max-width: 80ch; } .wnh-notes h4 { margin: 10px 0 4px; }
+.wnh-notes ul { margin: 4px 0 8px 18px; padding: 0; } .wnh-notes li { margin: 3px 0; } .wnh-notes p { margin: 4px 0; }

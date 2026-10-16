@@ -120,8 +120,9 @@ new version** - don't push code changes without one. To release:
 
 **What's new tour.** `whatsnew.py` describes the current release (`RELEASE`, `SINCE` = the full release before it, and
 `SLIDES`, with screenshots in `static/whatsnew/` taken from dev mode - never real client data). When a feature worth
-showing lands, add a slide; when a new release line starts (e.g. 1.47.0-beta.1), set `RELEASE`/`SINCE` and replace the
-slides - if `RELEASE` doesn't match the running version, no tour is shown.
+showing lands, add a slide; when a new release line starts (e.g. 1.47.0-beta.1), add its tour to `TOURS` (keep the old
+ones - Version & updates shows past tours and release notes via `history()`; give new screenshots their own names), and
+set `RELEASE`/`SINCE`/`SLIDES` to it - if `RELEASE` doesn't match the running version, no tour is shown on load.
 
 **Beta first.** Every new change is released as a beta: version `X.Y.Z-beta.N` (e.g. `1.45.0-beta.1`, then `-beta.2`
 for the next fix), tag `vX.Y.Z-beta.N`, changelog heading `## X.Y.Z-beta.N - date`. Only installations on the Beta

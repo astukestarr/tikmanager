@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.1-beta.2 - 2026-10-16
+
+- **What's new in past releases** (Admin > Settings > Version & updates): this release line and the 5 before it, each
+  with its release notes (every full release in that line, from the changelog the installation shipped with - works
+  offline) and a **Tour** button for releases that have a What's new tour (1.46 so far; later releases keep theirs).
+  Looking at a past tour doesn't change what the next update shows.
+
 ## 1.46.1-beta.1 - 2026-10-16
 
 - **Update checks read every version tag**: GitHub lists at most 100 tags per request and this project is close to

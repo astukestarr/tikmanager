@@ -571,7 +571,9 @@ Findings that aren't a problem on a router can be **accepted** with a reason (se
 
 After an update, technicians see a short tour of everything since the last full release - one feature per slide with a
 screenshot, Next / Back, and **Show me**. **Got it - don't show again** hides it until the next full release (a later
-beta's new slides still show once); **What's new** in the top bar opens it any time.
+beta's new slides still show once); **What's new** in the top bar opens it any time. Admin > Settings > Version &
+updates > **What's new in past releases** has the release notes of this release line and the 5 before it, and their
+tours where they have one.
 
 ## Compliance
 

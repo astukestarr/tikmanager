@@ -694,9 +694,17 @@ class Handler(BaseHTTPRequestHandler):
             if not j or j["user"] != s["email"]:
                 raise HttpError(404, "That fix job has finished and was cleared.")
             return self.json({"id": j["id"], "label": j["label"], "started": j["started"], "finished": j["finished"], "items": j["items"], "now": time.time()})
-        if path == "/api/whats-new":   # the tour of what's new since the last full release (whatsnew.py)
+        if path == "/api/whats-new":   # the tour of what's new since the last full release (whatsnew.py); ?release= a past one
             s = self.require()
+            if q.get("release"):
+                t = whatsnew.tour(str(q["release"])[:20], s["kind"])
+                if not t:
+                    raise HttpError(404, "There's no tour for that release.")
+                return self.json(t)
             return self.json(whatsnew.for_person(s["kind"], user_prefs(s["user_id"]).get("whatsnew")))
+        if path == "/api/whats-new/history":   # Version & updates > What's new in past releases
+            self.require(tech=True)
+            return self.json(whatsnew.history())
         if path in ("/api/compliance", "/api/compliance/report"):   # framework scorecard; ?fw=cis8|nist171|pci4|hipaa &org=<id>
             s = self.require(tech=True)
             fw = q.get("fw") if q.get("fw") in compliance.FRAMEWORKS else "cis8"

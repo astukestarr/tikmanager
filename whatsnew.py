@@ -7,6 +7,9 @@ starts afresh. When RELEASE doesn't match the running version (slides not writte
 
 Screenshots live in static/whatsnew/ (taken from dev mode's simulated routers - no real client data).
 """
+import re
+from pathlib import Path
+
 from version import __version__
 
 RELEASE = "1.46.0"   # the release these slides describe (its betas included)
@@ -71,6 +74,80 @@ SLIDES = [
              "is understood everywhere."},
 ]
 IDS = {s["id"] for s in SLIDES}
+
+# Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
+# starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
+TOURS = {"1.46.0": {"since": "1.45.1", "slides": SLIDES}}
+CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
+STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")
+
+
+def _blocks(lines):
+    """A changelog section -> [{kind: p|li, text}] (bullets joined with their continuation lines; markdown left as text)."""
+    out = []
+    for line in lines:
+        s = line.rstrip()
+        if not s.strip():
+            if out and out[-1]["kind"] == "p" and out[-1]["text"]:
+                out.append({"kind": "p", "text": ""})   # paragraph break
+            continue
+        if s.startswith("- "):
+            out.append({"kind": "li", "text": s[2:].strip()})
+        elif s.startswith("  ") and out and out[-1]["kind"] == "li":
+            out[-1]["text"] += " " + s.strip()
+        elif out and out[-1]["kind"] == "p" and out[-1]["text"]:
+            out[-1]["text"] += " " + s.strip()
+        else:
+            if out and out[-1]["kind"] == "p" and not out[-1]["text"]:
+                out.pop()
+            out.append({"kind": "p", "text": s.strip()})
+    return [b for b in out if b["text"]]
+
+
+def _vt(v):
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?", v)
+    return (int(m[1]), int(m[2]), int(m[3]), 0 if m[4] else 1, int(m[4] or 0)) if m else (0,)
+
+
+def history(lines=6):
+    """The newest full-release lines up to the installed version (this one and the 5 before it), newest first:
+    [{line: "1.46", tour: "1.46.0" or None, releases: [{version, date, blocks}]}] - from the CHANGELOG.md this
+    installation shipped with, so it works offline. Betas are left out (their changes are summed up in the release)."""
+    try:
+        text = CHANGELOG.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    sections, cur = [], None
+    for line in text:
+        if line.startswith("## "):
+            m = STABLE.match(line)
+            cur = {"version": ".".join(m.group(1, 2, 3)), "date": m.group(4) or "", "lines": []} if m else None
+            if cur:
+                sections.append(cur)
+        elif cur is not None:
+            cur["lines"].append(line)
+    mine = _vt(__version__)
+    out = []
+    for sec in sections:
+        if _vt(sec["version"]) > mine:
+            continue
+        line_id = ".".join(sec["version"].split(".")[:2])
+        if not out or out[-1]["line"] != line_id:
+            if len(out) == lines:
+                break
+            tour = next((r for r in TOURS if r.startswith(line_id + ".")), None)
+            out.append({"line": line_id, "tour": tour, "releases": []})
+        out[-1]["releases"].append({"version": sec["version"], "date": sec["date"], "blocks": _blocks(sec["lines"])})
+    return out
+
+
+def tour(release, kind):
+    """A past release's tour, to look at again (nothing is marked seen)."""
+    t = TOURS.get(release)
+    if not t:
+        return None
+    return {"release": release, "since": t["since"], "version": __version__, "history": True,
+            "slides": [s for s in t["slides"] if s["who"] == "all" or kind == "tech"], "unseen": []}
 
 
 def key():
