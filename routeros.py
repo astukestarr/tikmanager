@@ -11,6 +11,7 @@ import math
 import random
 import time
 import hashlib
+import http.client
 import re
 import ssl
 import urllib.error
@@ -30,6 +31,10 @@ class RouterError(Exception):
 class NoConnection(RouterError):
     """The connection couldn't be opened (refused, TLS handshake, connect timeout) - so the request never reached the
     router and is safe to send again another way."""
+
+
+class CutOff(RouterError):
+    """The router's answer stopped part-way (seen on large answers - a backup's export - over www-ssl)."""
 
 
 # HTTPS to the router runs inside TikManager's WireGuard tunnel, where the router is already authenticated by its
@@ -66,6 +71,7 @@ class RouterOS:
         self.timeout = timeout
         self.fell_back = False     # HTTPS didn't connect, this client carries on over HTTP
         self.on_fallback = None    # poller: record it (once in a while) and avoid HTTPS for a few minutes
+        self.tls_only = False      # no HTTP fallback (proving HTTPS alone works before WebFig over HTTP goes off)
 
     def _send(self, base, method, path, body, timeout, ctx):
         data = json.dumps(body).encode() if body is not None else None
@@ -82,17 +88,33 @@ class RouterOS:
             raise RouterError(f"HTTP {e.code}: {detail}") from None
         except urllib.error.URLError as e:   # urllib wraps only failures while connecting / sending - never a request the router ran
             raise NoConnection(f"Unreachable over the tunnel: {getattr(e, 'reason', e)}") from None
-        except (TimeoutError, OSError) as e:
+        except http.client.IncompleteRead as e:
+            raise CutOff(f"The router's answer was cut off ({len(e.partial)} bytes arrived, {e.expected} more expected)") from None
+        except (TimeoutError, OSError, http.client.HTTPException) as e:
             raise RouterError(f"Unreachable over the tunnel: {getattr(e, 'reason', e)}") from None
 
-    def _req(self, method, path, body=None, timeout=None):
+    def _req(self, method, path, body=None, timeout=None, safe=False):
+        """safe: a read that changes nothing (GETs always), so an answer cut off over HTTPS may be asked for again."""
+        safe = safe or method == "GET"
         if self.tls_base and not self.fell_back:
             try:
                 return self._send(self.tls_base, method, path, body, timeout, TLS)
             except NoConnection as e:   # HTTPS isn't answering (service off, port or certificate changed): HTTP, if it's still on
+                if self.tls_only:
+                    raise
                 self.fell_back = True
                 if self.on_fallback:
                     self.on_fallback(str(e))
+            except CutOff as e:
+                if not safe:
+                    raise
+                try:   # once more over HTTPS, then this one read over HTTP
+                    return self._send(self.tls_base, method, path, body, timeout, TLS)
+                except CutOff:
+                    if self.tls_only:
+                        raise
+                    if self.on_fallback:
+                        self.on_fallback(f"{e} - this read went over HTTP")
         return self._send(self.base, method, path, body, timeout, None)
 
     def get(self, path):
@@ -909,7 +931,7 @@ class RouterOS:
         Tries the REST 'execute' call that returns the output directly; falls back to writing a file and reading it back."""
         cmd = "/export" + (" show-sensitive" if sensitive else "")
         try:
-            r = self._req("POST", "/execute", {"script": cmd, "as-string": ""}, timeout=90)
+            r = self._req("POST", "/execute", {"script": cmd, "as-string": ""}, timeout=90, safe=True)
             text = (r or {}).get("ret") if isinstance(r, dict) else None
             if text and "/" in text:
                 return text

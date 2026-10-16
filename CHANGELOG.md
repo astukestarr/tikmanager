@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.19 - 2026-10-16
+
+- **Fix: backups over HTTPS could fail with "IncompleteRead"** - some routers cut a large answer (the backup's export)
+  short over www-ssl. A read that's cut off is now asked for again over HTTPS, then - if WebFig over HTTP is still on -
+  over HTTP (recorded as a router event); changes are never re-sent. The error says what happened ("the router's
+  answer was cut off") instead of IncompleteRead.
+- **Turn off WebFig over HTTP** first takes a full backup over HTTPS alone, and keeps HTTP on (changing nothing) if that
+  doesn't work - so a router that cuts HTTPS answers short never loses the HTTP its backups need.
+
 ## 1.46.0-beta.18 - 2026-10-16
 
 - Sign-in error hints point to the right place: the Microsoft client secret, client ID and tenant ID are set on

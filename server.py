@@ -1799,6 +1799,17 @@ class Handler(BaseHTTPRequestHandler):
                     inv = json.loads(d.get("vpn_inv") or "null") or {}
                     cl = poller.client(d)
                     path_, body = healthdash.fix_request(fix, inv, it.get("extra"))
+                    if fix == "www_off":   # HTTP is TikManager's fallback - only drop it if a full backup works over HTTPS alone
+                        st("checking", "Checking a backup works over HTTPS alone…")
+                        try:
+                            cl.tls_only = True
+                            cl.export(sensitive=True)
+                        except RouterError as e:
+                            return st("failed", f"Kept WebFig over HTTP on: a backup over HTTPS alone didn't work ({e}) - HTTP is what keeps "
+                                                "this router's backups working. Nothing was changed.")
+                        finally:
+                            cl.tls_only = False
+                        st("applying", "Changing the setting…")
                     undo = healthdash.fix_undo(fix, inv) if fix in healthdash.GUARDED else None
                     if undo:   # it touches how TikManager reaches the router: arm an undo on the router first
                         cl.undo_arm(GUARD_UNDO, undo + f'\n/system scheduler remove [find name="{GUARD_UNDO}"]\n/system script remove [find name="{GUARD_UNDO}"]', delay="2m")
