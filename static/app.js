@@ -3913,7 +3913,8 @@ async function subnetsPage() {
   draw();
 }
 // --- Performance & Security dashboard (healthdash.py) ------------------------------------------------------------------
-const hView = { cat: "", sev: "", org: "", q: "", busy: false, job: null, jobData: null, dismissed: null };
+const hView = { cat: "", sev: "", org: "", q: "", busy: false, job: null, jobData: null, dismissed: null,
+  fixOpen: new Set(), fixOff: {} };   // one-click fixes: which kinds show their routers, and routers un-ticked per kind
 const FIX_STATE = { queued: ["Waiting", ""], backup: ["Backing up", "up-run"], applying: ["Changing", "up-run"], checking: ["Re-checking", "up-run"],
   done: ["Done", "up-done"], failed: ["Failed", "up-failed"] };
 // the progress box for a one-click fix job: one line per router, updated every 1.5 s while it runs
@@ -4024,7 +4025,8 @@ async function healthPage() {
       || `<tr><td colspan="5" class="muted">${f.length ? "Nothing matches." : "Nothing to fix - every router passes every check."}</td></tr>`;
     // one-click fixes for what's shown (filters apply): one line per kind of fix, Fix all
     const groups = {};
-    rows.filter((y) => y.fix_id && !y.accepted).forEach((y) => { (groups[y.fix_id] ||= new Map()).set(y.device_id, y.router); });
+    const orgOf = {};
+    rows.filter((y) => y.fix_id && !y.accepted).forEach((y) => { (groups[y.fix_id] ||= new Map()).set(y.device_id, y.router); orgOf[y.device_id] = y.org; });
     document.querySelectorAll("[data-hacc]").forEach((b) => b.addEventListener("click", async () => {
       const r = rows.find((y) => String(y.device_id) === b.dataset.hdev && y.title === b.dataset.hacc);
       const reason = prompt(`Accept "${b.dataset.hacc}" on ${r?.router || "this router"}?\n\nWhy is it not a problem here? This goes in compliance reports.\n(e.g. "FTP backs up the switches and phone system; port 21 is blocked from the internet")`);
@@ -4037,11 +4039,27 @@ async function healthPage() {
     }));
     const keys = Object.keys(groups);
     $("hFixes").innerHTML = keys.length && canWrite() ? `<div class="h-fixes"><b>One-click fixes</b> <span class="small muted">for the findings shown - each router is backed up
-        first, then the one setting is changed and the router re-checked</span>${keys.map((k) => `<div class="h-fix"><div><b>${esc(x.fixes[k].label)}</b>
-        <span class="small muted">${groups[k].size} router${groups[k].size === 1 ? "" : "s"} · ${esc(x.fixes[k].effect)}</span></div>
-        <button class="btn small primary" type="button" data-hfixall="${k}" ${hView.busy ? "disabled" : ""}>Fix ${groups[k].size === 1 ? "it" : `all ${groups[k].size}`}</button></div>`).join("")}</div>` : "";
-    document.querySelectorAll("[data-hfixall]").forEach((b) => b.addEventListener("click", () =>
-      runFix(b.dataset.hfixall, [...groups[b.dataset.hfixall].entries()])));
+        first, then the one setting is changed and the router re-checked</span>${keys.map((k) => {
+          const off = hView.fixOff[k] || new Set(), all = [...groups[k].entries()], pick = all.filter(([id]) => !off.has(id)), open = hView.fixOpen.has(k);
+          return `<div class="h-fix"><div><b>${esc(x.fixes[k].label)}</b>
+            <span class="small muted">${groups[k].size} router${groups[k].size === 1 ? "" : "s"} · ${esc(x.fixes[k].effect)}</span>
+            <a href="#" class="small" data-hfixlist="${k}">${open ? "Hide routers" : "Show routers - pick which"}</a></div>
+            <button class="btn small primary" type="button" data-hfixall="${k}" ${hView.busy || !pick.length ? "disabled" : ""}>${pick.length === all.length
+              ? `Fix ${all.length === 1 ? "it" : `all ${all.length}`}` : `Fix ${pick.length} selected`}</button></div>
+          ${open ? `<div class="h-fix-list"><div class="small"><a href="#" data-hfixpick="${k}" data-v="all">All</a> · <a href="#" data-hfixpick="${k}" data-v="none">None</a></div>
+            ${all.map(([id, name]) => `<label class="chk"><input type="checkbox" data-hfixsel="${k}" value="${id}" ${off.has(id) ? "" : "checked"}> ${esc(name)}${orgOf[id] ? ` <span class="small muted">${esc(orgOf[id])}</span>` : ""}</label>`).join("")}</div>` : ""}`; }).join("")}</div>` : "";
+    document.querySelectorAll("[data-hfixall]").forEach((b) => b.addEventListener("click", () => {
+      const off = hView.fixOff[b.dataset.hfixall] || new Set();
+      runFix(b.dataset.hfixall, [...groups[b.dataset.hfixall].entries()].filter(([id]) => !off.has(id)));
+    }));
+    document.querySelectorAll("[data-hfixlist]").forEach((a) => a.addEventListener("click", (e) => {
+      e.preventDefault(); const k = a.dataset.hfixlist; hView.fixOpen.has(k) ? hView.fixOpen.delete(k) : hView.fixOpen.add(k); draw(); }));
+    document.querySelectorAll("[data-hfixsel]").forEach((c) => c.addEventListener("change", () => {
+      const k = c.dataset.hfixsel, off = (hView.fixOff[k] ||= new Set()), id = Number(c.value);
+      c.checked ? off.delete(id) : off.add(id); draw(); }));
+    document.querySelectorAll("[data-hfixpick]").forEach((a) => a.addEventListener("click", (e) => {
+      e.preventDefault(); const k = a.dataset.hfixpick;
+      hView.fixOff[k] = a.dataset.v === "all" ? new Set() : new Set(groups[k].keys()); draw(); }));
     document.querySelectorAll("[data-hfix]").forEach((b) => b.addEventListener("click", () =>
       runFix(b.dataset.hfix, [[Number(b.dataset.hdev), rows.find((y) => String(y.device_id) === b.dataset.hdev)?.router || ""]])));
   };

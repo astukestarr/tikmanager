@@ -682,3 +682,5 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .wn-dots button { width: 9px; height: 9px; border-radius: 50%; border: 0; padding: 0; background: var(--border); cursor: pointer; }
 .wn-dots button.on { background: var(--accent); }
 .wn-foot { display: flex; align-items: center; gap: 8px; padding: 12px 18px 16px; flex-wrap: wrap; }
+.h-fix-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; padding: 4px 0 10px 12px; }
+.h-fix-list > div { grid-column: 1 / -1; margin-bottom: 4px; }

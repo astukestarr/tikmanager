@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.22 - 2026-10-16
+
+- **One-click fixes: see and pick the routers** - each kind of fix has **Show routers - pick which**, listing the
+  routers it applies to (with their client) with a checkbox each (all ticked), plus All / None. Untick the ones to
+  leave alone and the button becomes **Fix N selected**. The choice stays while you're on the page.
+
 ## 1.46.0-beta.21 - 2026-10-16
 
 - **Blocking now actually blocks**: whenever an address is blocked (by hand or automatically), TikManager adds the
