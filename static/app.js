@@ -3883,6 +3883,7 @@ async function healthPage() {
 }
 
 // --- remote access: WireGuard for Windows (etc.) into this router (remoteaccess.py) ------------------------------------
+const raLinks = {};   // "router:person" -> one-time download link, kept while the page is open (the server only has its hash)
 // who may reach what: Everything, or only some servers and services (the router enforces it - remoteaccess.ra_access)
 function raAccessEditor(el, acc, services) {
   const opts = Object.entries(services).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join("");
@@ -3914,7 +3915,7 @@ function raAccessEditor(el, acc, services) {
 async function raTab(d, note) {
   const root = $("raRoot");
   if (!root) return;
-  rView.hold = !!(note && note.includes('id="raDl"'));   // pause the page refresh only while a one-time download link is shown
+  rView.hold = false;
   let x;
   try { x = await api(`/api/devices/${d.id}/ra?live=1`); }
   catch (e) { root.innerHTML = `<div class="card"><h2>Remote access</h2><p class="status err">${esc(e.message)}</p></div>`; return; }
@@ -3925,7 +3926,7 @@ async function raTab(d, note) {
   const day = (ts) => { if (!ts) return ""; const t = new Date(ts * 1000); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
   const endOfDay = (v) => v ? new Date(`${v}T23:59:59`).getTime() / 1000 : "";   // this browser's end of that day
   const soon = (u) => u.expires_at && u.expires_at - Date.now() / 1000 < 3 * 86400;
-  const userRows = (x.users || []).map((u) => `<tr${u.disabled ? ' class="row-off"' : ""}><td><b>${esc(u.name)}</b>${u.disabled ? ' <span class="pill up-cancelled">Disabled</span>' : ""}
+  const userRows = (x.users || []).map((u) => `<tr id="raU${u.id}"${u.disabled ? ' class="row-off"' : ""}><td><b>${esc(u.name)}</b>${u.disabled ? ' <span class="pill up-cancelled">Disabled</span>' : ""}
       <div class="small muted">added ${ago(u.created_at)} by ${esc(u.created_by || "?")}</div>
       <div class="small">Access: <b>${esc(u.access_text)}</b> ${rw ? `<a href="#" data-raacc="${u.id}">change</a>` : ""}</div>
       <div id="raAccEd${u.id}" class="ra-acc" hidden></div>
@@ -3936,7 +3937,10 @@ async function raTab(d, note) {
       <td>${u.handshake_age == null ? `<span class="small muted">${u.on_router === false ? "missing on the router" : "never connected"}</span>`
         : `<span class="small ${u.handshake_age < 180 ? "status ok" : "muted"}"><span class="dot ${u.handshake_age < 180 ? "on" : "off"}"></span>${u.handshake_age < 180 ? "Connected" : `last ${uptime(`${u.handshake_age}s`, true)} ago`}</span>`}</td>
       <td class="small nowrap">${u.rx != null ? `↓ ${bytes(u.tx)} ↑ ${bytes(u.rx)}` : ""}</td>
-      <td class="nowrap">${u.download && rw ? `<span class="small muted">config not downloaded yet</span>` : u.downloaded_at ? `<span class="small muted">config handed out ${ago(u.downloaded_at)}</span>` : `<span class="small muted">config expired</span>`}</td>
+      <td class="nowrap">${u.download && rw ? (raLinks[`${d.id}:${u.id}`]
+          ? `<a class="btn small primary" href="${raLinks[`${d.id}:${u.id}`]}" download data-radl="${u.id}" title="One download only - it holds their private key, which TikManager then deletes">Download config</a>`
+          : `<button class="btn small" type="button" data-ralink="${u.id}" title="Makes a new one-time download link">Get download link</button>`)
+        : u.downloaded_at ? `<span class="small muted">config handed out ${ago(u.downloaded_at)}</span>` : u.download ? `<span class="small muted">config not downloaded yet</span>` : `<span class="small muted">config expired</span>`}</td>
       <td class="nowrap">${rw ? `<button class="btn small" type="button" data-raoff="${u.id}" data-on="${u.disabled ? 1 : 0}" title="${u.disabled ? "Let them connect again with the same config" : "Stop them connecting for now - same config when you enable them again"}">${u.disabled ? "Enable" : "Disable"}</button>
         <button class="btn small danger" type="button" data-rarevoke="${u.id}" data-name="${esc(u.name)}" title="Remove them for good - their config stops working">Revoke</button>` : ""}</td></tr>`).join("");
   root.innerHTML = `
@@ -3976,6 +3980,7 @@ async function raTab(d, note) {
         <div class="small" style="margin:6px 0 10px"><b>What they may reach</b><div id="raNewAcc"></div></div>` : ""}
       ${(x.users || []).length ? `<div class="table-wrap"><table><thead><tr><th>Person</th><th>Address</th><th>Status</th><th>Traffic</th><th>Config</th><th></th></tr></thead><tbody>${userRows}</tbody></table></div>`
         : `<p class="muted small">Nobody yet - add a person to get their WireGuard config.</p>`}
+      <div id="raLog" style="margin-top:14px"></div>
       <p class="small muted">Windows: install WireGuard, then <b>Import tunnel(s) from file</b> and pick the downloaded .conf, and click Activate. People without admin rights need
         a one-time setting to switch tunnels on - or push the install and tunnel with your RMM (<span class="mono">wireguard /installtunnelservice &lt;file&gt;.conf</span> keeps it always on).</p></div>` : ""}`;
   const say = (id, m, ok) => { const el = $(id); if (el) { el.textContent = m; el.className = `status ${ok ? "ok" : "err"}`; } };
@@ -4003,6 +4008,18 @@ async function raTab(d, note) {
     } catch (err) { b.disabled = false; b.textContent = x.cloud?.name ? "Use Cloud DNS" : "Turn it on and use it"; say("raStatus", err.message); }
   });
   const newAcc = $("raNewAcc") ? raAccessEditor($("raNewAcc"), null, x.services) : null;
+  if ($("raLog")) api(`/api/devices/${d.id}/ra/sessions`).then((rows) => {
+    if (!$("raLog")) return;
+    const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+    $("raLog").innerHTML = `<div class="row"><h3 style="margin:0">Connection log</h3><span class="spacer"></span>
+        <a class="btn small" href="/api/devices/${d.id}/ra/sessions.csv" download>Export CSV</a></div>
+      <p class="small muted">Who connected, when and from where - read from the router every 2 minutes, kept 400 days.</p>
+      ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Person</th><th>From</th><th>Connected</th><th>Disconnected</th><th>Duration</th><th>Data</th></tr></thead><tbody>
+        ${rows.slice(0, 100).map((r) => `<tr><td>${esc(r.user_name)}</td><td class="mono small">${esc(r.public_ip || "")}</td><td class="small">${when(r.started_at)}</td>
+          <td class="small">${r.active ? '<span class="status ok">connected now</span>' : when(r.ended_at)}</td><td class="small">${uptime(`${Math.round(r.duration)}s`, true)}</td>
+          <td class="small nowrap">↓ ${bytes(r.down)} ↑ ${bytes(r.up)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="small muted">No connections logged yet.</p>`}`;
+  }).catch(() => {});
   document.querySelectorAll("[data-raacc]").forEach((a) => a.addEventListener("click", (ev) => {
     ev.preventDefault();
     const u = x.users.find((y) => String(y.id) === a.dataset.raacc), box = $(`raAccEd${u.id}`);
@@ -4029,12 +4046,26 @@ async function raTab(d, note) {
     $("raAdd").disabled = true; say("raUStatus", "Adding…", true);
     try {
       const r = await post(`/api/devices/${d.id}/ra/users`, { name, expires: endOfDay($("raNewExp")?.value), access: newAcc ? newAcc() : null });
-      const url = `/api/devices/${d.id}/ra/users/${r.id}/config?t=${encodeURIComponent(r.token)}`;
-      raTab(d, `<b>${esc(name)}</b> was added. <a class="btn primary" href="${url}" download id="raDl">Download their WireGuard config</a>
-        <span class="small muted">One download only - it holds their private key, which TikManager then deletes. Send it to them securely (not by plain email if you can avoid it).</span>`);
-      setTimeout(() => $("raDl")?.addEventListener("click", () => setTimeout(() => { raTab(d, "Config downloaded - TikManager has deleted its copy of the key."); }, 1500)), 0);
+      raLinks[`${d.id}:${r.id}`] = `/api/devices/${d.id}/ra/users/${r.id}/config?t=${encodeURIComponent(r.token)}`;
+      await raTab(d, `<b>${esc(name)}</b> was added - <b>Download config</b> is next to them below. One download only: it holds their private key, which
+        TikManager then deletes. Send it to them securely (not by plain email if you can avoid it).`);
+      const row = $(`raU${r.id}`);
+      if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("ra-new"); }
     } catch (e) { $("raAdd").disabled = false; say("raUStatus", e.message); }
   });
+  document.querySelectorAll("[data-radl]").forEach((a) => a.addEventListener("click", () => {
+    delete raLinks[`${d.id}:${a.dataset.radl}`];
+    setTimeout(() => raTab(d, "Config downloaded - TikManager has deleted its copy of the key."), 1500);
+  }));
+  document.querySelectorAll("[data-ralink]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try {
+      const r = await post(`/api/devices/${d.id}/ra/users/${b.dataset.ralink}/link`);
+      raLinks[`${d.id}:${r.id}`] = `/api/devices/${d.id}/ra/users/${r.id}/config?t=${encodeURIComponent(r.token)}`;
+      await raTab(d);
+      $(`raU${r.id}`)?.classList.add("ra-new");
+    } catch (e) { b.disabled = false; say("raUStatus", e.message); }
+  }));
   document.querySelectorAll("[data-raoff]").forEach((b) => b.addEventListener("click", async () => {
     const enable = b.dataset.on === "1";
     b.disabled = true;

@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.6 - 2026-10-16
+
+- **Remote access connection log**: who connected, when, from which public IP, for how long and how much data - read
+  from the router every 2 minutes (one read-only request), a new session when someone reconnects from a different IP,
+  kept 400 days. Shown on the Remote access tab with **Export CSV** for auditors (the export is audit-logged).
+- **Download config sits next to the person** (no more scrolling up): right after adding someone their row is
+  highlighted with **Download config**; if the page was reloaded before downloading, **Get download link** makes a fresh
+  one-time link (the old one stops working; the key stays encrypted until that one download).
+
 ## 1.46.0-beta.5 - 2026-10-16
 
 - **Remote access: per-person access.** Each person can reach **Everything** the setup allows, or **Only these servers** -

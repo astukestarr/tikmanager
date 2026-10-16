@@ -582,7 +582,9 @@ faster, more reliable on poor connections, no certificates. Technicians set it u
    Without admin rights a one-time Windows setting is needed to switch tunnels on; or push the install with your RMM -
    `wireguard /installtunnelservice <file>.conf` installs the tunnel as an always-on service.
 
-The tab shows each person's last handshake and traffic, read live from the router when you open it. WireGuard has no
+The tab shows each person's last handshake and traffic, read live from the router when you open it, and a **connection
+log** - who connected, when, from which public IP, for how long and how much data (read every 2 minutes, kept 400 days,
+**Export CSV** for auditors). WireGuard has no
 second factor: a lost laptop means **Revoke** for that person.
 
 ## Tasks (scripts, groups, schedules, automatic firmware updates)

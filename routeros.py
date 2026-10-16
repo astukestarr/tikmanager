@@ -619,7 +619,7 @@ class RouterOS:
         out = []
         for p in self.optional(lambda: self.get(f"/interface/wireguard/peers?interface={urllib.parse.quote(name)}"), []) or []:
             out.append({"public_key": p.get("public-key"), "handshake_age": _dur_s(p.get("last-handshake")),
-                        "rx": int(p.get("rx") or 0), "tx": int(p.get("tx") or 0)})
+                        "rx": int(p.get("rx") or 0), "tx": int(p.get("tx") or 0), "endpoint": p.get("current-endpoint-address") or ""})
         return out
 
     # --- firewall filter / NAT rules (firewall.py drives these, with an automatic undo) -------------------------------
@@ -1171,8 +1171,9 @@ class SimRouter:
     def wg_peers(self, name):
         if name == RA_IFACE:   # remote access: a few people "connected"
             peers = (self._sim().get("ra") or {}).get("peers", {})
-            return [{"public_key": k, "handshake_age": random.choice([None, 12, 40, 3600]), "rx": random.randint(0, 10 ** 8), "tx": random.randint(0, 10 ** 8)}
-                    for k in peers]
+            r = random.Random(int(time.time() // 300))   # people come and go every few minutes
+            return [{"public_key": k, "handshake_age": r.choice([None, 12, 40, 3600]), "rx": random.randint(0, 10 ** 8), "tx": random.randint(0, 10 ** 8),
+                     "endpoint": f"172.58.{abs(hash(k)) % 200}.{r.randint(1, 3)}"} for k in peers]
         cfg = self._sim().get("vpn_cfg") or {}
         mine = self.wg_ensure(name, 0)
         out = []

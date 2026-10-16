@@ -131,6 +131,12 @@ CREATE TABLE IF NOT EXISTS ra_users (                 -- one person (device) per
   expires_at REAL, reminded INTEGER NOT NULL DEFAULT 0,   -- revoked automatically then; a reminder event 3 days before
   access TEXT                                          -- NULL = everything the setup allows; else JSON [{host, service, proto, ports}]
 );
+CREATE TABLE IF NOT EXISTS ra_sessions (              -- remote access connection log: who was connected, when, from where
+  id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES ra_users(id) ON DELETE SET NULL, user_name TEXT NOT NULL, tunnel_ip TEXT, public_ip TEXT,
+  started_at REAL NOT NULL, last_seen REAL NOT NULL, ended_at REAL, rx0 INTEGER, tx0 INTEGER, rx INTEGER, tx INTEGER
+);
+CREATE INDEX IF NOT EXISTS ra_sessions_dev ON ra_sessions(device_id, started_at);
 CREATE TABLE IF NOT EXISTS scripts (                  -- script library
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', body TEXT NOT NULL,
   created_by TEXT, created_at REAL NOT NULL, updated_by TEXT, updated_at REAL

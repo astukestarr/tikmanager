@@ -27,6 +27,9 @@ DEFAULT_PORT = 13251
 POOL_SPACE = ipaddress.ip_network("10.250.0.0/16")   # each router's range: a /24 from here that it doesn't already use
 KEEP_CONFIG = 7 * 86400
 REMIND = 3 * 86400   # reminder event this long before an expiry
+LOG_EVERY = 120   # connection log: how often each router's peers are read
+CONNECTED = 180   # a person counts as connected when their last WireGuard handshake is this recent (seconds)
+KEEP_LOG = 400 * 86400
 SERVICES = {   # what a person may reach on a server: service -> (protocol, ports)
     "smb": ("tcp", "445"), "http": ("tcp", "80"), "https": ("tcp", "443"), "rdp": ("tcp", "3389"), "ssh": ("tcp", "22"),
     "ping": ("icmp", ""), "any": ("", ""),
@@ -439,6 +442,16 @@ class RemoteAccess:
                   "PersistentKeepalive = 25", ""]
         return "\n".join(lines)
 
+    def new_link(self, device_id, uid, user):
+        """A fresh one-time download link for a config that's still waiting (e.g. the page was reloaded before it was
+        downloaded). The old link stops working; the encrypted config is unchanged."""
+        u = self.db.one("SELECT * FROM ra_users WHERE id=? AND device_id=?", (uid, device_id))
+        if not u or not u["cfg_blob"] or u["downloaded_at"] or (u["cfg_expires"] or 0) < time.time():
+            raise RaError("That config isn't available any more - it can be downloaded once, within 7 days. Revoke the user and add them again.")
+        token = secrets.token_urlsafe(24)
+        self.db.run("UPDATE ra_users SET cfg_token=? WHERE id=?", (hashlib.sha256(token.encode()).hexdigest(), uid))
+        return {"id": uid, "token": token}
+
     def download(self, device_id, uid, token, user):
         """The person's config, once: the encrypted copy is deleted as soon as it's handed out (or after 7 days)."""
         u = self.db.one("SELECT u.*, s.endpoint FROM ra_users u JOIN ra_servers s ON s.device_id = u.device_id WHERE u.id=? AND u.device_id=?", (uid, device_id))
@@ -513,12 +526,67 @@ class RemoteAccess:
             except RaError:
                 pass   # router offline: tried again on the next pass
 
-    def loop(self):
-        while True:
-            time.sleep(600)
+    # --- connection log ---------------------------------------------------------------------------------------------
+    def log_sessions(self, device_id, peers=None, now=None):
+        """Turn the router's peer handshakes into sessions: open one when someone connects, extend it while they stay,
+        close it when their handshakes stop (or they reconnect from another public IP)."""
+        now = now or time.time()
+        d = self.device(device_id)
+        if peers is None:
+            peers = self.client_for(d).wg_peers(RA_IFACE)
+        by_key = {p["public_key"]: p for p in peers}
+        users = {u["pubkey"]: u for u in self.db.q("SELECT id, name, ip, pubkey FROM ra_users WHERE device_id=?", (device_id,))}
+        open_ = {s["user_id"]: s for s in self.db.q("SELECT * FROM ra_sessions WHERE device_id=? AND ended_at IS NULL", (device_id,))}
+        for key, u in users.items():
+            p = by_key.get(key)
+            up = bool(p) and p.get("handshake_age") is not None and p["handshake_age"] < CONNECTED
+            s = open_.pop(u["id"], None)
+            if s and not up:   # disconnected: the session ended at their last handshake
+                self.db.run("UPDATE ra_sessions SET ended_at=? WHERE id=?", (s["last_seen"], s["id"]))
+                continue
+            if not up:
+                continue
+            seen, ep = now - (p["handshake_age"] or 0), p.get("endpoint") or ""
+            if s and ep and s["public_ip"] and ep != s["public_ip"]:   # reconnected from somewhere else: a new session
+                self.db.run("UPDATE ra_sessions SET ended_at=? WHERE id=?", (s["last_seen"], s["id"]))
+                s = None
+            if s:
+                self.db.run("UPDATE ra_sessions SET last_seen=?, rx=?, tx=? WHERE id=?", (seen, p["rx"], p["tx"], s["id"]))
+            else:
+                self.db.run("INSERT INTO ra_sessions (device_id, user_id, user_name, tunnel_ip, public_ip, started_at, last_seen, rx0, tx0, rx, tx) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (device_id, u["id"], u["name"], u["ip"], ep, seen, seen, p["rx"], p["tx"], p["rx"], p["tx"]))
+        for s in open_.values():   # people revoked while connected
+            self.db.run("UPDATE ra_sessions SET ended_at=? WHERE id=?", (s["last_seen"], s["id"]))
+
+    def sessions(self, device_id, limit=300):
+        rows = self.db.q("SELECT * FROM ra_sessions WHERE device_id=? ORDER BY started_at DESC LIMIT ?", (device_id, limit))
+        for s in rows:
+            s["active"] = s["ended_at"] is None
+            s["duration"] = (s["ended_at"] or s["last_seen"]) - s["started_at"]
+            s["down"] = max(0, (s["tx"] or 0) - (s["tx0"] or 0))   # the router's tx is the person's download
+            s["up"] = max(0, (s["rx"] or 0) - (s["rx0"] or 0))
+        return rows
+
+    def log_all(self):
+        for r in self.db.q("SELECT s.device_id FROM ra_servers s JOIN devices d ON d.id = s.device_id "
+                           "WHERE s.state='applied' AND d.online=1 AND d.state='adopted'"):
             try:
-                self.expire_due()
-                self.prune()
+                self.log_sessions(r["device_id"])
+            except RouterError:
+                pass
+        self.db.run("DELETE FROM ra_sessions WHERE ended_at IS NOT NULL AND ended_at < ?", (time.time() - KEEP_LOG,))
+
+    def loop(self):
+        n = 0
+        while True:
+            time.sleep(LOG_EVERY)
+            n += 1
+            try:
+                self.log_all()
+                if n % 5 == 0:   # every 10 minutes
+                    self.expire_due()
+                    self.prune()
             except Exception:  # noqa: BLE001 - keep going
                 import traceback
                 traceback.print_exc()

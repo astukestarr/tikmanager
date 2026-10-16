@@ -577,6 +577,23 @@ class Handler(BaseHTTPRequestHandler):
             d = self.device_for(s, m.group(1))
             remote.prune()
             return self.json(remote.info(d["id"], live=q.get("live") == "1"))
+        if m := re.fullmatch(r"/api/devices/(\d+)/ra/sessions(\.csv)?", path):   # remote access connection log
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            rows = remote.sessions(d["id"], limit=5000 if m.group(2) else 300)
+            if not m.group(2):
+                return self.json(rows)
+            import csv, io
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(["Person", "Tunnel IP", "From (public IP)", "Connected", "Disconnected", "Minutes", "Downloaded bytes", "Uploaded bytes"])
+            fmt = lambda t: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) if t else ""
+            for r in rows:
+                w.writerow([r["user_name"], r["tunnel_ip"], r["public_ip"], fmt(r["started_at"]), fmt(r["ended_at"]) or "still connected",
+                            round(r["duration"] / 60), r["down"], r["up"]])
+            db.audit(s["email"], "remote access log exported", d["name"], self.client_ip(), org_id=d["org_id"])
+            fname = re.sub(r"[^A-Za-z0-9._-]+", "-", d["name"]) + f"-remote-access-{time.strftime('%Y%m%d')}.csv"
+            return self.send(200, buf.getvalue().encode(), "text/csv; charset=utf-8", headers=[("Content-Disposition", f'attachment; filename="{fname}"')])
         if m := re.fullmatch(r"/api/devices/(\d+)/ra/users/(\d+)/config", path):   # one person's WireGuard config - once
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))
@@ -1527,6 +1544,13 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **r})
+        if m := re.fullmatch(r"/api/devices/(\d+)/ra/users/(\d+)/link", path):   # a fresh one-time link for a waiting config
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            try:
+                return self.json({"ok": True, **remote.new_link(d["id"], int(m.group(2)), s["email"])})
+            except RaError as e:
+                raise HttpError(400, str(e)) from None
         if m := re.fullmatch(r"/api/devices/(\d+)/ra/users/(\d+)/(disable|enable|expiry|access)", path):   # off / on, expiry, access
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))
