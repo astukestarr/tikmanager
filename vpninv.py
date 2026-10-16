@@ -16,9 +16,9 @@ RECONNECT_MENUS = {"/interface/wireguard/peers", "/ip/ipsec/active-peers", "/int
 def rid(menu, match):
     return json.dumps({"menu": menu, "match": match}, sort_keys=True)
 
-from routeros import VPN_IFACE, _dur_s
+from routeros import VPN_IFACE, RA_IFACE, _dur_s
 
-OWN = {"tikmanager", VPN_IFACE}
+OWN = {"tikmanager", VPN_IFACE, RA_IFACE}   # TikManager's own tunnels (remote-access people are on the router's Remote access tab)
 SHOW_TM_VPN = False   # set by the server while managed VPNs are turned off: their tunnels are listed here, read-only
 UP_SECONDS = 180
 CLIENTS = {"/interface/l2tp-client": "L2TP client", "/interface/sstp-client": "SSTP client", "/interface/ovpn-client": "OpenVPN client",

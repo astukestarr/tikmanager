@@ -118,6 +118,8 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
 .tile { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
 .tile .v { font-size: 26px; font-weight: 800; } .tile .l { color: var(--muted); font-size: 12px; }
 .tile.good .v { color: var(--good); } .tile.bad .v { color: var(--bad); } .tile.warn .v { color: var(--warn); }
+button.h-tile { text-align: left; font: inherit; color: inherit; cursor: pointer; } button.h-tile:hover { border-color: var(--accent); }
+button.h-tile.sel { outline: 2px solid var(--accent); outline-offset: -1px; }
 button.btn, a.btn { font: inherit; border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 7px 14px; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; }
 button.btn:hover { border-color: var(--muted); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }

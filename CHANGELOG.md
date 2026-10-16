@@ -11,6 +11,15 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
   address and firewall rules. **Add person** makes a key pair, adds only that peer, and offers ONE download of the
   WireGuard config - the private key is then deleted (or after 7 days). **Revoke** removes one person; **Remove remote
   access** takes off exactly what was added. Live last-handshake and traffic per person.
+- **Performance & security dashboard** (Monitoring > Performance & security, technicians): every router checked for
+  internet problems (offline, link down, unstable link, loss, latency), performance (CPU, memory, storage, bad blocks,
+  temperature, restarts), open ports and exposed services (management services reachable from the internet, no
+  catch-all input drop, plain-text services, open DNS resolver, SOCKS / proxy / UPnP ...), weak encryption and old VPN
+  technologies (PPTP, L2TP without IPsec, weak IPsec / OpenVPN ciphers, aggressive mode, SSH crypto), VPN problems,
+  updates and CVEs, backups and hygiene - worst first, each with how to fix it. The 15-minute read-only inventory now
+  also reads the router's services, input firewall rules, DNS / UPnP / SOCKS / proxy / MAC server / SNMP / SSH / NTP
+  settings, user names and IPsec / OpenVPN cipher settings (no secrets).
+- Remote-access people no longer show up as unknown WireGuard peers under Existing VPNs.
 - Includes 1.46.0-beta.1 (UniFi / UISP Match filter).
 
 ## 1.46.0-beta.1 - 2026-10-16

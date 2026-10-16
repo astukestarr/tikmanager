@@ -51,6 +51,7 @@ from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHO
 from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
+import healthdash
 from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -585,6 +586,22 @@ class Handler(BaseHTTPRequestHandler):
             fname = re.sub(r"-{2,}", "-", re.sub(r"[^A-Za-z0-9._-]+", "-", f"{d['name']}-{name}")).strip("-")[:60] or "remote-access"
             return self.send(200, conf.encode(), "text/plain; charset=utf-8",
                              headers=[("Content-Disposition", f'attachment; filename="{fname}.conf"'), ("Cache-Control", "no-store")])
+        if path == "/api/health-dash":   # Performance & Security dashboard: every router's findings (healthdash.py)
+            s = self.require(tech=True)
+            where, args = self.org_scope(s, column="d.org_id")
+            rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
+                            WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
+            now = time.time()
+            metrics = {r["device_id"]: {"lat": r["lat"], "loss": r["loss"], "cpu": r["cpu"], "mem": r["mem"]} for r in db.q(
+                """SELECT device_id, AVG(latency) AS lat, AVG(loss) AS loss, AVG(cpu) AS cpu, AVG(mem_pct) AS mem FROM metrics
+                   WHERE ts > ? GROUP BY device_id""", (now - 3600,))}
+            flaps = {r["device_id"]: r["n"] for r in db.q("SELECT device_id, COUNT(*) AS n FROM events WHERE kind='link down' AND ts > ? GROUP BY device_id",
+                                                          (now - 86400,))}
+            found = healthdash.build(rows, metrics, flaps, now)
+            unread = sum(1 for r in rows if r["online"] and not r.get("vpn_inv"))
+            return self.json({"findings": found, "routers": len(rows), "online": sum(1 for r in rows if r["online"]),
+                              "clean": len({r["id"] for r in rows} - {f["device_id"] for f in found}), "unread": unread,
+                              "categories": healthdash.CATEGORIES, "checked_at": now})
         if path == "/api/vpn-inventory":   # VPNs found on the routers (configured outside TikManager); a client admin: their own
             s = self.require_vpn()
             where, args = self.org_scope(s, column="d.org_id")

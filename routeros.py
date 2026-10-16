@@ -413,6 +413,22 @@ class RouterOS:
         "/interface/gre": ("name", "remote-address", "local-address", "running", "disabled", "comment"),
         "/interface/ipip": ("name", "remote-address", "local-address", "running", "disabled", "comment"),
         "/ip/route": ("dst-address", "gateway", "active", "disabled", "comment", "static"),
+        # for the Performance & Security dashboard (healthdash.py) - settings only, never secrets
+        "/ip/ipsec/proposal": ("name", "auth-algorithms", "enc-algorithms", "pfs-group", "disabled"),
+        "/ip/ipsec/profile": ("name", "hash-algorithm", "enc-algorithm", "dh-group"),
+        "/ip/service": ("name", "port", "disabled", "address"),
+        "/ip/firewall/filter": ("chain", "action", "disabled", "protocol", "dst-port", "src-address", "src-address-list", "dst-address",
+                                "dst-address-list", "in-interface", "in-interface-list", "connection-state"),
+        "/ip/dns": ("allow-remote-requests",),
+        "/ip/upnp": ("enabled",),
+        "/ip/socks": ("enabled",),
+        "/ip/proxy": ("enabled",),
+        "/tool/bandwidth-server": ("enabled",),
+        "/tool/mac-server": ("allowed-interface-list",),
+        "/snmp": ("enabled",),
+        "/ip/ssh": ("strong-crypto",),
+        "/system/ntp/client": ("enabled",),
+        "/user": ("name", "group", "disabled"),
     }
 
     def vpn_inventory(self) -> dict:
@@ -1037,6 +1053,25 @@ class SimRouter:
         if self.id == 1:
             inv["/interface/pptp-server/server"] = [{"enabled": "true"}]
             inv["/ppp/active"] = [{"name": "vendor", "service": "pptp", "caller-id": "73.12.4.8", "address": "10.9.9.2", "uptime": "2h"}]
+        # dashboard settings: mostly MikroTik defaults, with a few common mistakes on some routers
+        inv["/ip/service"] = [{"name": n, "port": str(p), "disabled": "true" if n in ("telnet", "ftp", "api", "api-ssl") and self.id % 3 else "false", "address": ""}
+                              for n, p in (("telnet", 23), ("ftp", 21), ("www", 80), ("ssh", 22), ("winbox", 8291), ("api", 8728), ("api-ssl", 8729))]
+        inv["/ip/firewall/filter"] = [{"chain": "input", "action": "accept", "connection-state": "established,related,untracked"},
+                                      {"chain": "input", "action": "accept", "protocol": "tcp", "dst-port": "8291"} if self.id % 4 == 3 else
+                                      {"chain": "input", "action": "accept", "protocol": "icmp"}] + \
+                                     ([] if self.id == 2 else [{"chain": "input", "action": "drop", "in-interface-list": "!LAN"}])
+        inv["/ip/dns"] = [{"allow-remote-requests": "true"}]
+        inv["/ip/upnp"] = [{"enabled": "true" if self.id % 5 == 0 else "false"}]
+        inv["/ip/socks"] = [{"enabled": "false"}]
+        inv["/ip/proxy"] = [{"enabled": "false"}]
+        inv["/tool/bandwidth-server"] = [{"enabled": "true"}]
+        inv["/tool/mac-server"] = [{"allowed-interface-list": "all" if self.id % 2 else "LAN"}]
+        inv["/ip/ssh"] = [{"strong-crypto": "no" if self.id % 3 == 2 else "yes"}]
+        inv["/system/ntp/client"] = [{"enabled": "true" if self.id % 4 else "false"}]
+        inv["/user"] = [{"name": "admin" if self.id % 2 else "starr", "group": "full", "disabled": "false"}]
+        if self.id % 2:
+            inv["/ip/ipsec/proposal"] = [{"name": "default", "auth-algorithms": "sha1", "enc-algorithms": "aes-256-cbc,3des", "pfs-group": "modp1024", "disabled": "false"}]
+            inv["/ip/ipsec/profile"] = [{"name": "default", "hash-algorithm": "sha1", "enc-algorithm": "aes-128", "dh-group": "modp2048,modp1024"}]
         return inv
 
     # simulated site-to-site VPN: a tunnel is "up" when both ends have each other as peers

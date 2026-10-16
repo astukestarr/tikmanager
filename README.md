@@ -25,7 +25,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
 - Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
-  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
+  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Performance & security](#performance--security-dashboard) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
 - Running it: [Keeping it secure](#keeping-it-secure) · [Where things live](#where-things-live-on-the-server) ·
   [Troubleshooting adoption](#if-a-router-registers-but-never-comes-online)
@@ -530,6 +530,30 @@ switch is behind a router port, it's shown as that port's switch and everything 
 device in the router's bridge host table is shown (not only those with an IP in ARP / DHCP). Only devices at that
 router's location (in its tables) are shown, not the client's other locations. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
 minutes by default.
+
+## Performance & security dashboard
+
+**Monitoring > Performance & security** (technicians) checks every router and lists what needs fixing, worst first, each
+with how to fix it. Tiles per category (click one to filter); filter by severity, client or text. It refreshes every
+minute and uses what TikManager already reads - nothing extra is polled:
+
+- **Internet** - router offline, an internet link down (running on the backup), unstable link (3+ drops in 24 h),
+  packet loss or high latency to the internet over the last hour.
+- **Performance** - CPU or memory high over the last hour, storage nearly full, flash bad blocks, temperatures of 75 °C
+  and up, a restart in the last 24 hours.
+- **Open ports & services** - management services (Telnet, FTP, WebFig, SSH, Winbox, API) reachable from the internet
+  (no address restriction and no catch-all drop in the input chain, or an input rule accepting them from anywhere), no
+  catch-all drop at all, plain-text services enabled, an open DNS resolver, SOCKS, web proxy, UPnP, the bandwidth test
+  server, MAC Telnet on every interface, SNMP.
+- **Weak encryption / old VPNs** - PPTP servers and clients, L2TP without IPsec, IPsec proposals or profiles with
+  DES / 3DES / MD5 / SHA1 / modp1024, IPsec aggressive mode, weak OpenVPN ciphers, SSH without strong crypto.
+- **VPN problems** - tunnels that are down (laptops dialling in aren't counted), IPsec without phase 2.
+- **Updates & CVEs** - routers RouterOS itself flagged, known vulnerabilities, RouterOS and RouterBOOT updates,
+  discontinued models.
+- **Backups** - no configuration backup in 7 days. **Hygiene** - the default 'admin' user enabled, NTP off.
+
+The service, firewall, DNS / UPnP / proxy, SSH, NTP, user-name and cipher settings come with the 15-minute VPN
+inventory (a field whitelist: no passwords, keys or SNMP community names are read).
 
 ## Remote access (WireGuard for Windows)
 

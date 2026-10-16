@@ -3832,6 +3832,56 @@ async function subnetsPage() {
   });
   draw();
 }
+// --- Performance & Security dashboard (healthdash.py) ------------------------------------------------------------------
+const hView = { cat: "", sev: "", org: "", q: "" };
+const SEV_PILL = { critical: "up-failed", high: "up-failed", medium: "up-run", low: "" };
+async function healthPage() {
+  const x = await api("/api/health-dash");
+  const f = x.findings;
+  const count = (fn) => f.filter(fn).length;
+  const routersWith = (fn) => new Set(f.filter(fn).map((y) => y.device_id)).size;
+  const tile = (cat, label, sub) => { const n = routersWith((y) => y.category === cat); const worst = f.find((y) => y.category === cat)?.severity;
+    return `<button type="button" class="tile ${n ? (worst === "critical" || worst === "high" ? "bad" : "warn") : "good"} h-tile ${hView.cat === cat ? "sel" : ""}" data-hcat="${cat}">
+      <div class="l">${label}</div><div class="v">${n}</div><div class="small muted">${n ? `router${n === 1 ? "" : "s"} · ${count((y) => y.category === cat)} finding${count((y) => y.category === cat) === 1 ? "" : "s"}` : sub}</div></button>`; };
+  const orgs = [...new Set(f.map((y) => y.org).filter(Boolean))].sort();
+  $("main").innerHTML = `<div class="row"><div><h1>Performance &amp; security</h1>
+      <p class="muted">Every router checked for internet problems, performance, open ports and exposed services, weak encryption and old VPN technologies,
+        VPN problems, updates and backups - from what TikManager already reads (VPN and service settings every 15 minutes, read-only).</p></div>
+      <span class="spacer"></span><span class="small muted">updates every minute</span></div>
+    <div class="tiles">
+      <div class="tile ${count((y) => y.severity === "critical") ? "bad" : "good"}"><div class="l">Critical</div><div class="v">${count((y) => y.severity === "critical")}</div><div class="small muted">fix first</div></div>
+      <div class="tile ${count((y) => y.severity === "high") ? "warn" : "good"}"><div class="l">High</div><div class="v">${count((y) => y.severity === "high")}</div><div class="small muted">this week</div></div>
+      <div class="tile good"><div class="l">Routers with nothing to fix</div><div class="v">${x.clean}</div><div class="small muted">of ${x.routers} (${x.online} online)</div></div></div>
+    <div class="tiles h-cats">${tile("Internet", "Internet", "links and lines fine")}${tile("Performance", "Performance", "CPU, memory, storage OK")}
+      ${tile("Exposure", "Open ports &amp; services", "nothing exposed")}${tile("Encryption", "Weak encryption / old VPNs", "strong everywhere")}
+      ${tile("VPN", "VPN problems", "tunnels up")}${tile("Updates", "Updates &amp; CVEs", "up to date")}${tile("Backups", "Backups", "all recent")}${tile("Hygiene", "Hygiene", "admin user, NTP")}</div>
+    ${x.unread ? `<p class="small muted">${x.unread} online router${x.unread === 1 ? " hasn't" : "s haven't"} had their settings read yet - service, firewall and cipher checks fill in within 15 minutes.</p>` : ""}
+    <div class="card"><div class="row">
+      <select id="hSev" aria-label="Severity"><option value="">Any severity</option><option value="critical">Critical</option><option value="high">High and up</option><option value="medium">Medium and up</option></select>
+      <select id="hCat" aria-label="Category"><option value="">All categories</option>${x.categories.map((c) => `<option>${c}</option>`).join("")}</select>
+      ${orgs.length > 1 ? `<select id="hOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option>${esc(o)}</option>`).join("")}</select>` : ""}
+      <input id="hQ" type="search" placeholder="Search routers and findings" value="${esc(hView.q)}">
+      <span class="spacer"></span><span class="small muted" id="hCount"></span></div>
+      <div class="table-wrap"><table><thead><tr><th>Severity</th><th>Router</th><th>Finding</th><th>Details</th><th>How to fix</th></tr></thead><tbody id="hRows"></tbody></table></div></div>`;
+  const draw = () => {
+    const rank = { critical: 0, high: 1, medium: 2, low: 3 }, q = hView.q.toLowerCase();
+    const rows = f.filter((y) => (!hView.cat || y.category === hView.cat) && (!hView.sev || rank[y.severity] <= rank[hView.sev]) && (!hView.org || y.org === hView.org)
+      && (!q || `${y.router} ${y.org} ${y.title} ${y.detail}`.toLowerCase().includes(q)));
+    $("hCount").textContent = `${rows.length} of ${f.length} findings`;
+    $("hRows").innerHTML = rows.map((y) => `<tr><td><span class="pill ${SEV_PILL[y.severity]}">${y.severity}</span><div class="small muted">${esc(y.category)}</div></td>
+      <td><a href="#router/${y.device_id}">${esc(y.router)}</a>${y.org ? `<div class="small muted">${esc(y.org)}</div>` : ""}</td>
+      <td><b>${esc(y.title)}</b></td><td class="small">${esc(y.detail)}</td><td class="small muted">${esc(y.fix)}</td></tr>`).join("")
+      || `<tr><td colspan="5" class="muted">${f.length ? "Nothing matches." : "Nothing to fix - every router passes every check."}</td></tr>`;
+  };
+  ["hSev", "hCat", "hOrg"].forEach((id) => { const el = $(id); if (!el) return; const k = { hSev: "sev", hCat: "cat", hOrg: "org" }[id]; el.value = hView[k];
+    el.addEventListener("change", (e) => { hView[k] = e.target.value; draw(); document.querySelectorAll("[data-hcat]").forEach((t) => t.classList.toggle("sel", t.dataset.hcat === hView.cat)); }); });
+  $("hQ").addEventListener("input", (e) => { hView.q = e.target.value; draw(); });
+  document.querySelectorAll("[data-hcat]").forEach((t) => t.addEventListener("click", () => {
+    hView.cat = hView.cat === t.dataset.hcat ? "" : t.dataset.hcat; $("hCat").value = hView.cat; draw();
+    document.querySelectorAll("[data-hcat]").forEach((b) => b.classList.toggle("sel", b.dataset.hcat === hView.cat)); }));
+  draw();
+}
+
 // --- remote access: WireGuard for Windows (etc.) into this router (remoteaccess.py) ------------------------------------
 async function raTab(d, note) {
   const root = $("raRoot");
@@ -4181,6 +4231,7 @@ const NAV = [
     { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
     { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
+    { view: "health", label: "Performance & security", who: "tech" },
     { view: "alerts", label: "Alerts", who: "tech", count: "alerts" }, { view: "logs", label: "Logs", who: "tech" }, { view: "security", label: "Security", who: "tech" }] },
   { group: "Maintenance", icon: "maint", items: [
     { view: "backups", label: "Backups", who: "tech" }, { view: "upgrades", label: "Upgrades", who: "tech", count: "updates" }, { view: "tasks", label: "Tasks", who: "tech" }] },
@@ -4323,7 +4374,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { health: healthPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
@@ -4337,6 +4388,7 @@ async function go(v, arg) {
       (v === "router" ? router(arg) : dashboard()).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => { if (!$("dlg").open) upgradesView().catch(() => {}); }, 20000);
     // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)
+    if (v === "health") timer = setInterval(() => { if (document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; healthPage().catch(() => {}); }, 60000);
     if (v === "vpns") timer = setInterval(() => { if (vpnHold || document.hidden || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       (vpnTab === "found" ? vpnFound() : vpnsView()).catch(() => {}); }, 30000);
   } catch (e) { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; }

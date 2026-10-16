@@ -89,6 +89,7 @@ renamed `available-from` in 7.2x) is built at run time with `:parse` instead of 
 | `tasks.py` | script library, groups, scheduled script runs and firmware updates |
 | `firewall.py` | filter / NAT rule and address-list changes, tested like Safe Mode: undo script + scheduler on the router, Keep / Undo, locked rules |
 | `vpn.py` / `vpninv.py` | site-to-site WireGuard VPNs it builds / VPNs already on routers (read-only) |
+| `healthdash.py` | Performance & Security dashboard: findings per router from status, metrics, link events, health, security checks, backups and the 15-minute inventory |
 | `remoteaccess.py` | remote access per router: WireGuard for Windows etc. into a router (`RA_IFACE` "tikmanager-ra", everything tagged `RA_TAG`); client key pairs made here, the config downloadable once |
 | `integrations.py` | ConnectWise PSA (client import) and IT Glue (router documentation) |
 | `branding.py`, `thumbs.py` | branding settings; router product pictures from mikrotik.com |
