@@ -106,6 +106,16 @@ class Updates:
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.loads(r.read() or b"null")
 
+    def _tags(self):
+        """Every tag name - GitHub returns at most 100 per page, so read the pages until a short one (at most 10)."""
+        out = []
+        for page in range(1, 11):
+            batch = self._get(f"https://api.github.com/repos/{self.repo}/tags?per_page=100&page={page}") or []
+            out += [t.get("name") for t in batch if isinstance(t, dict)]
+            if len(batch) < 100:
+                break
+        return out
+
     def check(self):
         if not self.repo or not re.fullmatch(r"[\w.-]+/[\w.-]+", self.repo):
             self.latest.update(error="No update repository configured (TM_UPDATE_REPO).", checked_at=time.time())
@@ -116,7 +126,7 @@ class Updates:
             version = url = notes = None
             pulled = set(self.withdrawn())
             beta_ok = self.channel == "beta"
-            tags = [t.get("name") for t in self._get(f"https://api.github.com/repos/{self.repo}/tags?per_page=100") or []]
+            tags = self._tags()
             # only the newest beta ever counts: an older one (e.g. one a later beta fixed) is never offered - not even
             # when the newest is withdrawn (then no beta is offered until a newer one is out)
             betas = [t for t in tags if vtuple(t) and is_beta(t)]

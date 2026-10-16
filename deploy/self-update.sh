@@ -65,8 +65,19 @@ def k(v):
     return (int(m[1]), int(m[2]), int(m[3]), 0 if m[4] else 1, int(m[4] or 0)) if m else None'
 WITHDRAWN=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://raw.githubusercontent.com/$REPO/HEAD/RELEASES.json" 2>/dev/null \
             | python3 -c 'import json,sys; print(" ".join(str(v).lstrip("v") for v in (json.load(sys.stdin).get("withdrawn") or [])))' 2>/dev/null || true)
+all_tags() {   # every tag, all pages - GitHub returns at most 100 per page (the newest first)
+  local page=1 all="[]" batch n
+  while (( page <= 10 )); do
+    batch=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/tags?per_page=100&page=$page") || break
+    all=$(A="$all" B="$batch" python3 -c 'import json,os; print(json.dumps(json.loads(os.environ["A"]) + json.loads(os.environ["B"])))')
+    n=$(B="$batch" python3 -c 'import json,os; print(len(json.loads(os.environ["B"])))')
+    (( n < 100 )) && break
+    page=$((page + 1))
+  done
+  printf '%s' "$all"
+}
 if [[ -z "$VER" || "$VER" == "latest" || "$VER" == "beta" ]]; then   # the highest tag (betas only when asked for), skipping withdrawn ones
-  VER=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/tags?per_page=100" \
+  VER=$(all_tags \
         | BETA=$([[ "$VER" == "beta" ]] && echo 1 || echo 0) PULLED="$WITHDRAWN" python3 -c "$VKEY"'
 import json, os
 pulled = set(os.environ["PULLED"].split())
@@ -83,7 +94,7 @@ if [[ " $WITHDRAWN " == *" $VER "* && "${TM_ALLOW_WITHDRAWN:-}" != 1 ]]; then
 fi
 # a beta from the web must be the newest beta - an older one was superseded (often because the newer one fixes it)
 if [[ "$FROM_WEB" == 1 && "$VER" == *-beta.* ]]; then
-  NEWEST=$(curl -fsSL -H "User-Agent: TikManager-updater" "https://api.github.com/repos/$REPO/tags?per_page=100"            | python3 -c "$VKEY"'
+  NEWEST=$(all_tags            | python3 -c "$VKEY"'
 import json
 b = [x["name"].lstrip("v") for x in json.load(sys.stdin) if k(x["name"]) and "-beta." in x["name"]]
 print(max(b, key=k) if b else "")')

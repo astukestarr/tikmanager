@@ -71,8 +71,19 @@ python3 -c 'import ipaddress,sys; ipaddress.ip_network(sys.argv[1], strict=False
   || { echo "\"$LAN\" isn't a subnet like 192.168.1.0/24 - run again with --lan."; exit 1; }
 
 UA="User-Agent: TikManager-installer"
+all_tags() {   # every tag, all pages - GitHub returns at most 100 per page (the newest first)
+  local page=1 all="[]" batch n
+  while (( page <= 10 )); do
+    batch=$(curl -fsSL -H "$UA" "https://api.github.com/repos/$REPO/tags?per_page=100&page=$page") || break
+    all=$(A="$all" B="$batch" python3 -c 'import json,os; print(json.dumps(json.loads(os.environ["A"]) + json.loads(os.environ["B"])))')
+    n=$(B="$batch" python3 -c 'import json,os; print(len(json.loads(os.environ["B"])))')
+    (( n < 100 )) && break
+    page=$((page + 1))
+  done
+  printf '%s' "$all"
+}
 if [[ -z "$VER" ]]; then   # the highest vX.Y.Z tag (every version is tagged; GitHub Releases are optional notes)
-  VER=$(curl -fsSL -H "$UA" "https://api.github.com/repos/$REPO/tags?per_page=100" \
+  VER=$(all_tags \
         | python3 -c 'import json,re,sys; t=[x["name"].lstrip("v") for x in json.load(sys.stdin) if re.fullmatch(r"v?\d+\.\d+\.\d+", x["name"])]; print(max(t, key=lambda v: tuple(map(int, v.split(".")))) if t else "")')
 fi
 [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Couldn't find a release to install in github.com/$REPO."; exit 1; }

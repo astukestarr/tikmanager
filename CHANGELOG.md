@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.1-beta.1 - 2026-10-16
+
+- **Update checks read every version tag**: GitHub lists at most 100 tags per request and this project is close to
+  that, so TikManager's update check, the root updater (Upgrade now) and the installer now read all the pages (up to
+  1,000 tags) instead of only the first 100. Nothing changes for you today - it keeps future versions from being
+  missed. (The Beta channel already offers a full release when it's newer than the newest beta.)
+
 ## 1.46.0 - 2026-10-16
 
 The full release of the 1.46.0 betas (beta.1 to beta.23) - a minor version: existing data and settings keep working,
