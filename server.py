@@ -635,7 +635,21 @@ class Handler(BaseHTTPRequestHandler):
             unread = sum(1 for r in rows if r["online"] and not r.get("vpn_inv"))
             return self.json({"findings": found, "routers": len(rows), "online": sum(1 for r in rows if r["online"]),
                               "clean": len({r["id"] for r in rows} - {f["device_id"] for f in found}), "unread": unread,
-                              "categories": healthdash.CATEGORIES, "checked_at": t_now})
+                              "categories": healthdash.CATEGORIES, "checked_at": t_now,
+                              "fixes": {k: {"label": v[0], "effect": v[3]} for k, v in healthdash.FIXES.items()}})
+        if m := re.fullmatch(r"/api/devices/(\d+)/vpns", path):   # router page > VPNs: every VPN found on this router
+            s = self.require_vpn()
+            d = self.device_for(s, m.group(1))
+            where, args = self.org_scope(s, column="d.org_id")
+            routers = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.online, d.wan_ip, d.public_ip, d.vpn_inv, d.vpn_inv_at
+                              FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where}""", args)
+            me_row = next((r for r in routers if r["id"] == d["id"]), None)
+            ra = db.one("SELECT state FROM ra_servers WHERE device_id=?", (d["id"],)) if s["kind"] == "tech" else None
+            return self.json({"online": d["online"], "collected_at": d.get("vpn_inv_at"),
+                              "tunnels": vpninv.for_device(me_row, routers) if me_row else None,
+                              "remote_access": {"people": db.one("SELECT COUNT(*) AS n FROM ra_users WHERE device_id=?", (d["id"],))["n"],
+                                                "connected": db.one("SELECT COUNT(*) AS n FROM ra_sessions WHERE device_id=? AND ended_at IS NULL", (d["id"],))["n"]}
+                              if ra else None})
         if path == "/api/vpn-inventory":   # VPNs found on the routers (configured outside TikManager); a client admin: their own
             s = self.require_vpn()
             where, args = self.org_scope(s, column="d.org_id")
@@ -1586,6 +1600,45 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **remote.info(d["id"])})
+        if path == "/api/health-dash/fix":   # one-click fixes: [{device_id, fix}] - backup first, one fixed setting, re-check
+            s = self.require(tech=True, write=True)
+            items = (self.body().get("items") or [])[:300]
+            ip = self.client_ip()
+
+            def one(it):
+                fix = str(it.get("fix") or "")
+                try:
+                    d = self.device_for(s, it.get("device_id"))
+                except HttpError as e:
+                    return {"device_id": it.get("device_id"), "router": "?", "fix": fix, "ok": False, "detail": str(e)}
+                res = {"device_id": d["id"], "router": d["name"], "fix": fix, "ok": False}
+                if fix not in healthdash.FIXES:
+                    return {**res, "detail": "Not a one-click fix."}
+                if not d["online"]:
+                    return {**res, "detail": "The router is offline."}
+                # only when the finding is really there (so the button can't be used to change anything else)
+                if not any(f.get("fix_id") == fix for f in healthdash.build([d], {}, {}, time.time())):
+                    return {**res, "ok": True, "detail": "Already fixed."}
+                bk = backups.run(d["id"], "pre-fix", s["email"])
+                if not bk.get("ok"):
+                    return {**res, "detail": f"Not changed - the backup failed ({bk.get('detail')})."}
+                try:
+                    inv = json.loads(d.get("vpn_inv") or "null") or {}
+                    cl = poller.client(d)
+                    path_, body = healthdash.fix_request(fix, inv)
+                    cl.post(path_, body)
+                    poller.collect_vpns(d, cl)   # re-read, so the dashboard shows the result straight away
+                except (RouterError, ValueError) as e:
+                    return {**res, "detail": f"The router refused it: {e}"}
+                label = healthdash.FIXES[fix][0]
+                db.event(d["id"], d["org_id"], "security fix", f"{label} (by {s['email']}, backed up first)")
+                db.audit(s["email"], "security fix", f"{d['name']}: {label}", ip, org_id=d["org_id"])
+                return {**res, "ok": True, "detail": "Fixed."}
+
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(6) as ex:
+                results = list(ex.map(one, items))
+            return self.json({"ok": True, "results": results})
         if path == "/api/vpn-inventory/refresh":   # re-read the VPNs on some routers (or every online one) now
             s = self.require_vpn()
             if s["kind"] == "client" and not router_act_limit.allow(s["email"]):

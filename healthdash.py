@@ -21,6 +21,33 @@ WEAK_HASH = re.compile(r"\b(md5|sha1)\b", re.I)
 WEAK_DH = re.compile(r"\b(modp768|modp1024|ec2n155|ec2n185)\b", re.I)
 
 
+# One-click fixes: a fixed list of single settings TikManager may change (never free text from a finding). The plain-HTTP
+# www service is deliberately not here - TikManager itself talks to routers over REST on it.
+# id: (button label, REST path, body, what it may affect)
+FIXES = {
+    "ssh_strong": ("Turn on SSH strong crypto", "/ip/ssh/set", {"strong-crypto": "yes"}, "Very old SSH clients (from before about 2015) may no longer connect."),
+    "svc_telnet": ("Disable Telnet", "/ip/service/set", {"numbers": "telnet", "disabled": "yes"}, "Anyone still using Telnet uses SSH or Winbox instead."),
+    "svc_ftp": ("Disable FTP", "/ip/service/set", {"numbers": "ftp", "disabled": "yes"}, "Anything uploading files to the router by FTP stops working."),
+    "svc_api": ("Disable the plain-text API (port 8728)", "/ip/service/set", {"numbers": "api", "disabled": "yes"},
+                "Tools using the API on port 8728 (The Dude, some monitoring) need api-ssl instead. TikManager doesn't use it."),
+    "socks_off": ("Turn off the SOCKS proxy", "/ip/socks/set", {"enabled": "no"}, "Then check the router's users and scripts - SOCKS is often left by an attacker."),
+    "proxy_off": ("Turn off the web proxy", "/ip/proxy/set", {"enabled": "no"}, "Anything deliberately sent through the router's proxy stops working."),
+    "upnp_off": ("Turn off UPnP", "/ip/upnp/set", {"enabled": "no"}, "Game consoles or apps that open their own ports may need a manual port forward."),
+    "bwtest_off": ("Turn off the bandwidth test server", "/tool/bandwidth-server/set", {"enabled": "no"}, "Bandwidth tests against this router stop working."),
+    "macsrv_lan": ("Limit MAC Telnet to the LAN", "/tool/mac-server/set", {"allowed-interface-list": "LAN"}, "Needs an interface list called LAN (MikroTik's default)."),
+    "ntp_on": ("Turn on NTP", "/system/ntp/client/set", {"enabled": "yes"}, "Uses time.cloudflare.com if no time server is set."),
+}
+
+
+def fix_request(fix_id, inv):
+    """(REST path, body) for a one-click fix on a router with this inventory."""
+    _, path, body, _ = FIXES[fix_id]
+    body = dict(body)
+    if fix_id == "ntp_on" and not ((inv.get("/system/ntp/client") or [{}])[0].get("servers")):
+        body["servers"] = "time.cloudflare.com"
+    return path, body
+
+
 def yes(v):
     return str(v).lower() in ("true", "yes")
 
@@ -66,9 +93,9 @@ def build(rows, metrics, flaps, now=None):
     now = now or time.time()
     out = []
 
-    def add(d, sev, cat, title, detail, fix):
+    def add(d, sev, cat, title, detail, fix, fix_id=None):
         out.append({"device_id": d["id"], "router": d["name"], "org": d.get("org") or "", "severity": sev, "category": cat,
-                    "title": title, "detail": detail, "fix": fix})
+                    "title": title, "detail": detail, "fix": fix, "fix_id": fix_id})
 
     for d in rows:
         m = metrics.get(d["id"]) or {}
@@ -124,7 +151,8 @@ def build(rows, metrics, flaps, now=None):
             caught, open_svc = exposure(inv)
             for name, why in open_svc.items():
                 add(d, "critical" if name in ("telnet", "ftp", "www", "api") else "high", "Exposure", f"{name} reachable from the internet",
-                    why, f"Limit /ip service {name} to your management addresses (address=...), or drop it on the WAN in the input chain.")
+                    why, f"Limit /ip service {name} to your management addresses (address=...), or drop it on the WAN in the input chain.",
+                    f"svc_{name}" if f"svc_{name}" in FIXES else None)
             if not caught:
                 add(d, "critical" if open_svc else "high", "Exposure", "Input firewall has no catch-all drop",
                     "Anything the router itself offers is reachable from the internet.",
@@ -132,23 +160,24 @@ def build(rows, metrics, flaps, now=None):
             for s in inv.get("/ip/service", []):
                 if s.get("name") in PLAINTEXT and not yes(s.get("disabled")) and s.get("name") not in open_svc:
                     add(d, "medium", "Exposure", f"{PLAINTEXT[s['name']]} enabled", "Passwords cross the network in plain text.",
-                        f"/ip service disable {s['name']} (use {'SSH' if s['name'] in ('telnet', 'ftp') else 'HTTPS / api-ssl'} instead).")
+                        f"/ip service disable {s['name']} (use {'SSH' if s['name'] in ('telnet', 'ftp') else 'HTTPS / api-ssl'} instead).",
+                        f"svc_{s['name']}" if f"svc_{s['name']}" in FIXES else None)
             dns = (inv.get("/ip/dns") or [{}])[0]
             if yes(dns.get("allow-remote-requests")) and not caught:
                 add(d, "high", "Exposure", "Open DNS resolver", "The router answers DNS for anyone - it can be abused for DDoS attacks.",
                     "Drop UDP/TCP 53 from the WAN in the input chain (or a catch-all drop).")
             on = lambda menu: yes((inv.get(menu) or [{}])[0].get("enabled"))
             if on("/ip/socks"):
-                add(d, "high", "Exposure", "SOCKS proxy enabled", "Rarely wanted - often a sign of a compromised router.", "/ip socks set enabled=no, then check users and scripts.")
+                add(d, "high", "Exposure", "SOCKS proxy enabled", "Rarely wanted - often a sign of a compromised router.", "/ip socks set enabled=no, then check users and scripts.", "socks_off")
             if on("/ip/proxy"):
-                add(d, "high" if not caught else "medium", "Exposure", "Web proxy enabled", "An open proxy is abused quickly.", "/ip proxy set enabled=no unless it's needed.")
+                add(d, "high" if not caught else "medium", "Exposure", "Web proxy enabled", "An open proxy is abused quickly.", "/ip proxy set enabled=no unless it's needed.", "proxy_off")
             if on("/ip/upnp"):
-                add(d, "medium", "Exposure", "UPnP enabled", "Devices on the LAN can open ports to the internet by themselves.", "/ip upnp set enabled=no unless a game console needs it.")
+                add(d, "medium", "Exposure", "UPnP enabled", "Devices on the LAN can open ports to the internet by themselves.", "/ip upnp set enabled=no unless a game console needs it.", "upnp_off")
             if on("/tool/bandwidth-server"):
-                add(d, "low", "Exposure", "Bandwidth test server enabled", "Can be used to load the router and link.", "/tool bandwidth-server set enabled=no")
+                add(d, "low", "Exposure", "Bandwidth test server enabled", "Can be used to load the router and link.", "/tool bandwidth-server set enabled=no", "bwtest_off")
             mac = (inv.get("/tool/mac-server") or [{}])[0]
             if str(mac.get("allowed-interface-list") or "") == "all":
-                add(d, "low", "Exposure", "MAC Telnet on every interface", "Layer-2 management reachable from any port.", "/tool mac-server set allowed-interface-list=LAN")
+                add(d, "low", "Exposure", "MAC Telnet on every interface", "Layer-2 management reachable from any port.", "/tool mac-server set allowed-interface-list=LAN", "macsrv_lan")
             if (inv.get("/snmp") or [{}])[0].get("enabled") in ("true", "yes"):
                 add(d, "low", "Exposure", "SNMP enabled", "Check it isn't using the 'public' community and is limited to your monitoring.", "/snmp community: set addresses= and a private name.")
         # --- encryption and VPN technologies -----------------------------------------------------------------------------
@@ -188,7 +217,7 @@ def build(rows, metrics, flaps, now=None):
                     add(d, "medium", "Encryption", "Weak OpenVPN ciphers", ", ".join(sorted(set(weak))), "Allow only aes-256-gcm / aes-256-cbc with sha256.")
         ssh = (inv.get("/ip/ssh") or [{}])[0]
         if ssh and str(ssh.get("strong-crypto") or "") in ("no", "false"):
-            add(d, "low", "Encryption", "SSH allows older ciphers", "strong-crypto is off.", "/ip ssh set strong-crypto=yes")
+            add(d, "low", "Encryption", "SSH allows older ciphers", "strong-crypto is off.", "/ip ssh set strong-crypto=yes", "ssh_strong")
         # --- VPN health ---------------------------------------------------------------------------------------------
         for t in vpninv.normalize(inv) if inv else []:
             dials_in = t.get("kind") == "WireGuard" and not t.get("remote")   # a laptop / phone peer: not connected most of the time
@@ -221,7 +250,7 @@ def build(rows, metrics, flaps, now=None):
                 add(d, "medium", "Hygiene", "Default 'admin' user enabled", "The first name every attacker tries.", "Create named accounts, then disable or rename 'admin'.")
         ntp = (inv.get("/system/ntp/client") or [{}])[0]
         if ntp and not yes(ntp.get("enabled")):
-            add(d, "low", "Hygiene", "Clock not synced (NTP off)", "Log times and certificates depend on it.", "/system ntp client set enabled=yes servers=time.cloudflare.com")
+            add(d, "low", "Hygiene", "Clock not synced (NTP off)", "Log times and certificates depend on it.", "/system ntp client set enabled=yes servers=time.cloudflare.com", "ntp_on")
     out.sort(key=lambda f: (SEV_ORDER[f["severity"]], CATEGORIES.index(f["category"]), f["org"], f["router"]))
     return out
 

@@ -427,7 +427,7 @@ class RouterOS:
         "/tool/mac-server": ("allowed-interface-list",),
         "/snmp": ("enabled",),
         "/ip/ssh": ("strong-crypto",),
-        "/system/ntp/client": ("enabled",),
+        "/system/ntp/client": ("enabled", "servers"),
         "/user": ("name", "group", "disabled"),
     }
 
@@ -1043,6 +1043,11 @@ class SimRouter:
         tm = next((k for k, x in enumerate(rules) if x.get("comment") == "TikManager" and x.get("disabled") != "true"), None)
         return tm is not None and tm < rules.index(rule)
 
+    def post(self, path, body):
+        time.sleep(0.3)
+        self._sim().setdefault("set", {})[path + (f"#{body['numbers']}" if body.get("numbers") else "")] = body
+        return []
+
     def _sim(self):
         st = SimRouter.SIM.setdefault(self.id, {"channel": "stable"})
         st.setdefault("pub", base64.b64encode(hashlib.sha256(f"sim-wg-{self.id}".encode()).digest()).decode())
@@ -1110,6 +1115,12 @@ class SimRouter:
         inv["/ip/ssh"] = [{"strong-crypto": "no" if self.id % 3 == 2 else "yes"}]
         inv["/system/ntp/client"] = [{"enabled": "true" if self.id % 4 else "false"}]
         inv["/user"] = [{"name": "admin" if self.id % 2 else "starr", "group": "full", "disabled": "false"}]
+        for path, body in self._sim().get("set", {}).items():   # one-click fixes made here (post)
+            menu, body = path.split("#")[0].rsplit("/set", 1)[0], dict(body)
+            name = body.pop("numbers", None)
+            for item in inv.get(menu) or [{}]:
+                if name is None or item.get("name") == name:
+                    item.update({k: {"yes": "true", "no": "false"}.get(v, v) for k, v in body.items()})
         if self.id % 2:
             inv["/ip/ipsec/proposal"] = [{"name": "default", "auth-algorithms": "sha1", "enc-algorithms": "aes-256-cbc,3des", "pfs-group": "modp1024", "disabled": "false"}]
             inv["/ip/ipsec/profile"] = [{"name": "default", "hash-algorithm": "sha1", "enc-algorithm": "aes-128", "dh-group": "modp2048,modp1024"}]

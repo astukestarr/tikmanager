@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.8 - 2026-10-16
+
+- **One-click fixes on Performance & security**: findings that come down to one setting get a **Fix** button, and a
+  **One-click fixes** box lists each kind with **Fix all N** for the routers shown (filters apply): SSH strong crypto,
+  disable Telnet / FTP / the plain-text API (8728), turn off SOCKS / web proxy / UPnP / the bandwidth test server, MAC
+  Telnet limited to the LAN list, NTP on. Each router is backed up first (nothing changes if the backup fails), only
+  that one setting is changed - from a fixed list, never text from the finding - and the router is re-read so the
+  finding clears. Every fix is a router event and in the audit log. WebFig (www) is never offered: TikManager itself
+  talks to routers over REST on it.
+- **VPNs tab on the router page**: every VPN on that router (the same read-only inventory as Site-to-site VPN >
+  Existing VPNs) with status, remote end, networks / users, traffic, **Restart tunnel** and **Read again**, plus a
+  line for remote access (people, connected now).
+- **Paste coordinates into the location**: `39.21029769702689, -96.48699887138372` (Google Maps' copy format) pasted
+  into the address, latitude or longitude box - or typed in the address box and **Look up** - fills both coordinates
+  and moves the map pin, without sending anything to the address search.
+- Remote access screens: spacing that the page's security policy was blocking now applies.
+
 ## 1.46.0-beta.7 - 2026-10-16
 
 - **DNS suffix for the office domain**: the RMM install script now also sets the domain (e.g. `corp.local`) as the

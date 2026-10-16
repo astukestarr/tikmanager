@@ -535,7 +535,10 @@ minutes by default.
 
 **Monitoring > Performance & security** (technicians) checks every router and lists what needs fixing, worst first, each
 with how to fix it. Tiles per category (click one to filter); filter by severity, client or text. It refreshes every
-minute and uses what TikManager already reads - nothing extra is polled:
+minute and uses what TikManager already reads - nothing extra is polled. Findings that come down to one setting
+(SSH strong crypto, Telnet / FTP / plain-text API on, SOCKS, web proxy, UPnP, bandwidth test server, MAC Telnet on every
+interface, NTP off) have a **Fix** button and a **Fix all** per kind: each router is backed up first, only that setting
+is changed, and the router is re-read. The checks:
 
 - **Internet** - router offline, an internet link down (running on the backup), unstable link (3+ drops in 24 h),
   packet loss or high latency to the internet over the last hour.

@@ -343,7 +343,7 @@ async function router(id) {
   const adopted = d.state === "adopted";
   const radios = (d.interfaces || []).some(isRadio);
   const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["ports", "Ports"]] : []), ...(radios ? [["wireless", "Wireless"]] : []),
-    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
+    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(canVpn() ? [["vpns", "VPNs"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
     ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
@@ -441,6 +441,7 @@ async function router(id) {
       ${adopted && tab === "logs" ? `<div class="card" id="rLogs"></div>` : ""}
       ${adopted && tab === "ports" ? `<div id="ptRoot"><div class="card"><h2>Ports</h2><p class="muted small">Reading the ports…</p></div></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
+      ${adopted && tab === "vpns" ? `<div id="rvRoot"><div class="card"><h2>VPNs</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "remote" ? `<div id="raRoot"><div class="card"><h2>Remote access</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Tags, notes &amp; type</h2>
@@ -532,6 +533,7 @@ async function router(id) {
   if ($("topoCard")) loadTopology(d);
   if ($("fwCard")) loadFirewall(d);
   if ($("raRoot")) raTab(d);
+  if ($("rvRoot")) rvTab(d).catch(() => {});
   if ($("wbBox")) loadWinbox(d);
   loadLocation(d);
   api(`/api/devices/${d.id}/series?range=1h`).then((s) => sparkline($("spark"), s.traffic)).catch(() => {});
@@ -3005,7 +3007,7 @@ function loadLocation(d) {
     $("locEdit").remove();
     $("locEditor").innerHTML = `<div class="loc-edit">
       <label class="field">Address or description (shown on the router page)
-        <span class="row"><input id="locAddr" value="${esc(d.location || "")}" maxlength="200" placeholder="e.g. 123 Main St, Wichita, KS">
+        <span class="row"><input id="locAddr" value="${esc(d.location || "")}" maxlength="200" placeholder="e.g. 123 Main St, Wichita, KS - or paste coordinates: 37.6872, -97.3301">
         <button class="btn" type="button" id="locLook" title="Sends only this text to OpenStreetMap's address search">Look up</button></span></label>
       <div id="locHits"></div>
       <div class="row"><label class="field">Latitude <input id="locLat" inputmode="decimal" value="${has ? d.lat : ""}" placeholder="37.68720"></label>
@@ -3023,7 +3025,24 @@ function loadLocation(d) {
     const typed = () => { const lat = parseFloat($("locLat").value), lon = parseFloat($("locLon").value); if (!Number.isNaN(lat) && !Number.isNaN(lon)) setPick(lat, lon, true); };
     $("locLat").addEventListener("change", typed); $("locLon").addEventListener("change", typed);
     const say = (t, k) => { $("locStatus").textContent = t; $("locStatus").className = `status ${k || ""}`; };
+    // "39.21029769702689, -96.48699887138372" (Google Maps' copy format) pasted into the address, latitude or longitude box
+    const coords = (s) => {
+      const m = String(s || "").trim().match(/^\(?\s*(-?\d{1,2}(?:\.\d+)?)\s*[,; ]\s*(-?\d{1,3}(?:\.\d+)?)\s*\)?$/);
+      if (!m) return null;
+      const lat = Number(m[1]), lon = Number(m[2]);
+      return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? [Number(lat.toFixed(6)), Number(lon.toFixed(6))] : null;
+    };
+    ["locAddr", "locLat", "locLon"].forEach((id) => $(id).addEventListener("paste", (e) => {
+      const c = coords(e.clipboardData?.getData("text"));
+      if (!c) return;
+      e.preventDefault();
+      setPick(c[0], c[1], true);
+      $("locHits").innerHTML = "";
+      say(id === "locAddr" ? "Coordinates filled in - add an address or description above if you like." : "Coordinates filled in.", "ok");
+    }));
     $("locLook").addEventListener("click", async () => {
+      const c = coords($("locAddr").value);
+      if (c) { setPick(c[0], c[1], true); $("locAddr").value = ""; say("Coordinates filled in - add an address or description above if you like.", "ok"); return; }
       say("Looking up…");
       try {
         const r = await post("/api/geocode", { q: $("locAddr").value });
@@ -3833,7 +3852,7 @@ async function subnetsPage() {
   draw();
 }
 // --- Performance & Security dashboard (healthdash.py) ------------------------------------------------------------------
-const hView = { cat: "", sev: "", org: "", q: "" };
+const hView = { cat: "", sev: "", org: "", q: "", busy: false, msg: "" };
 const SEV_PILL = { critical: "up-failed", high: "up-failed", medium: "up-run", low: "" };
 async function healthPage() {
   const x = await api("/api/health-dash");
@@ -3862,6 +3881,8 @@ async function healthPage() {
       ${orgs.length > 1 ? `<select id="hOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option>${esc(o)}</option>`).join("")}</select>` : ""}
       <input id="hQ" type="search" placeholder="Search routers and findings" value="${esc(hView.q)}">
       <span class="spacer"></span><span class="small muted" id="hCount"></span></div>
+      ${hView.msg ? `<div class="small u-my8">${hView.msg}</div>` : ""}
+      <div id="hFixes"></div>
       <div class="table-wrap"><table><thead><tr><th>Severity</th><th>Router</th><th>Finding</th><th>Details</th><th>How to fix</th></tr></thead><tbody id="hRows"></tbody></table></div></div>`;
   const draw = () => {
     const rank = { critical: 0, high: 1, medium: 2, low: 3 }, q = hView.q.toLowerCase();
@@ -3870,8 +3891,35 @@ async function healthPage() {
     $("hCount").textContent = `${rows.length} of ${f.length} findings`;
     $("hRows").innerHTML = rows.map((y) => `<tr><td><span class="pill ${SEV_PILL[y.severity]}">${y.severity}</span><div class="small muted">${esc(y.category)}</div></td>
       <td><a href="#router/${y.device_id}">${esc(y.router)}</a>${y.org ? `<div class="small muted">${esc(y.org)}</div>` : ""}</td>
-      <td><b>${esc(y.title)}</b></td><td class="small">${esc(y.detail)}</td><td class="small muted">${esc(y.fix)}</td></tr>`).join("")
+      <td><b>${esc(y.title)}</b></td><td class="small">${esc(y.detail)}</td><td class="small muted">${esc(y.fix)}
+        ${y.fix_id && canWrite() ? `<div><button class="btn small" type="button" data-hfix="${y.fix_id}" data-hdev="${y.device_id}" ${hView.busy ? "disabled" : ""} title="${esc(x.fixes[y.fix_id].effect)}">Fix</button></div>` : ""}</td></tr>`).join("")
       || `<tr><td colspan="5" class="muted">${f.length ? "Nothing matches." : "Nothing to fix - every router passes every check."}</td></tr>`;
+    // one-click fixes for what's shown (filters apply): one line per kind of fix, Fix all
+    const groups = {};
+    rows.filter((y) => y.fix_id).forEach((y) => { (groups[y.fix_id] ||= new Map()).set(y.device_id, y.router); });
+    const keys = Object.keys(groups);
+    $("hFixes").innerHTML = keys.length && canWrite() ? `<div class="h-fixes"><b>One-click fixes</b> <span class="small muted">for the findings shown - each router is backed up
+        first, then the one setting is changed and the router re-checked</span>${keys.map((k) => `<div class="h-fix"><div><b>${esc(x.fixes[k].label)}</b>
+        <span class="small muted">${groups[k].size} router${groups[k].size === 1 ? "" : "s"} · ${esc(x.fixes[k].effect)}</span></div>
+        <button class="btn small primary" type="button" data-hfixall="${k}" ${hView.busy ? "disabled" : ""}>Fix ${groups[k].size === 1 ? "it" : `all ${groups[k].size}`}</button></div>`).join("")}</div>` : "";
+    document.querySelectorAll("[data-hfixall]").forEach((b) => b.addEventListener("click", () =>
+      runFix(b.dataset.hfixall, [...groups[b.dataset.hfixall].entries()])));
+    document.querySelectorAll("[data-hfix]").forEach((b) => b.addEventListener("click", () =>
+      runFix(b.dataset.hfix, [[Number(b.dataset.hdev), rows.find((y) => String(y.device_id) === b.dataset.hdev)?.router || ""]])));
+  };
+  const runFix = async (fix, routers) => {
+    const label = x.fixes[fix].label;
+    if (!confirm(`${label} on ${routers.length === 1 ? routers[0][1] : `${routers.length} routers`}?\n\nEach router is backed up first. ${x.fixes[fix].effect}`)) return;
+    hView.busy = true;
+    $("hFixes").innerHTML = `<p class="status">${esc(label)} on ${routers.length} router${routers.length === 1 ? "" : "s"} - backing up and changing…</p>`;
+    try {
+      const r = await post("/api/health-dash/fix", { items: routers.map(([id]) => ({ device_id: id, fix })) });
+      const bad = r.results.filter((y) => !y.ok);
+      hView.msg = `<span class="status ${bad.length ? "warn" : "ok"}">${esc(label)}: ${r.results.length - bad.length} of ${r.results.length} done.</span>`
+        + (bad.length ? `<ul class="small">${bad.map((y) => `<li><b>${esc(y.router)}</b>: ${esc(y.detail)}</li>`).join("")}</ul>` : "");
+    } catch (e) { hView.msg = `<span class="status err">${esc(e.message)}</span>`; }
+    hView.busy = false;
+    healthPage().catch(() => {});
   };
   ["hSev", "hCat", "hOrg"].forEach((id) => { const el = $(id); if (!el) return; const k = { hSev: "sev", hCat: "cat", hOrg: "org" }[id]; el.value = hView[k];
     el.addEventListener("change", (e) => { hView[k] = e.target.value; draw(); document.querySelectorAll("[data-hcat]").forEach((t) => t.classList.toggle("sel", t.dataset.hcat === hView.cat)); }); });
@@ -3887,15 +3935,15 @@ const raLinks = {};   // "router:person" -> one-time download link, kept while t
 // who may reach what: Everything, or only some servers and services (the router enforces it - remoteaccess.ra_access)
 function raAccessEditor(el, acc, services) {
   const opts = Object.entries(services).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join("");
-  const row = (e = {}) => `<div class="row ra-acc-row" style="gap:6px;margin:4px 0">
-      <input class="raHost mono" placeholder="server IP, e.g. 192.168.1.20" value="${esc(e.host || "")}" style="max-width:190px">
+  const row = (e = {}) => `<div class="row ra-acc-row u-accrow">
+      <input class="raHost mono u-w190" placeholder="server IP, e.g. 192.168.1.20" value="${esc(e.host || "")}">
       <select class="raSvc">${opts}</select>
       <select class="raProto" ${e.service === "custom" ? "" : "hidden"}><option value="tcp">TCP</option><option value="udp">UDP</option></select>
-      <input class="raPorts" placeholder="ports, e.g. 8080" value="${esc(e.service === "custom" ? e.ports || "" : "")}" style="max-width:120px" ${e.service === "custom" ? "" : "hidden"}>
+      <input class="raPorts u-w120" placeholder="ports, e.g. 8080" value="${esc(e.service === "custom" ? e.ports || "" : "")}" ${e.service === "custom" ? "" : "hidden"}>
       <button class="btn small" type="button" data-rarm title="Remove">✕</button></div>`;
   el.innerHTML = `<label class="chk"><input type="radio" name="raAccMode${el.id}" value="all" ${acc ? "" : "checked"}> Everything this remote access reaches</label>
     <label class="chk"><input type="radio" name="raAccMode${el.id}" value="only" ${acc ? "checked" : ""}> Only these servers</label>
-    <div class="raAccList" style="margin-left:22px" ${acc ? "" : "hidden"}>${(acc || [{}]).map(row).join("")}
+    <div class="raAccList u-ml22" ${acc ? "" : "hidden"}>${(acc || [{}]).map(row).join("")}
       <button class="btn small" type="button" data-raaddrow>+ Add server</button>
       <div class="small muted">Everything else from this person is blocked by the router - even if they edit their config.</div></div>`;
   [...el.querySelectorAll(".ra-acc-row")].forEach((r, i) => { const e = (acc || [{}])[i] || {}; r.querySelector(".raSvc").value = e.service || "smb"; r.querySelector(".raProto").value = e.proto || "tcp"; });
@@ -3976,22 +4024,22 @@ async function raTab(d, note) {
       </div>
       <div class="field"><span>What goes through the tunnel</span>
         <label class="chk"><input type="radio" name="raSplit" value="1" ${cfg.split !== 0 && cfg.split !== false ? "checked" : ""} ${rw ? "" : "disabled"}> Only the office networks (recommended)</label>
-        <div id="raNets" class="small" style="margin:4px 0 0 22px">${nets.map((n) => `<label class="chk"><input type="checkbox" class="raNet" value="${esc(n)}" ${(cfg.routes || []).includes(n) ? "checked" : ""} ${rw ? "" : "disabled"}>
+        <div id="raNets" class="small u-nets">${nets.map((n) => `<label class="chk"><input type="checkbox" class="raNet" value="${esc(n)}" ${(cfg.routes || []).includes(n) ? "checked" : ""} ${rw ? "" : "disabled"}>
           <span class="mono">${esc(n)}</span> ${netName(n) ? `<span class="muted">${esc(netName(n))}</span>` : ""}</label>`).join("<br>")}
-          ${rw ? `<br><input id="raExtra" placeholder="add another network, e.g. 10.10.0.0/16" style="max-width:260px">` : ""}</div>
+          ${rw ? `<br><input class="u-w260" id="raExtra" placeholder="add another network, e.g. 10.10.0.0/16">` : ""}</div>
         <label class="chk"><input type="radio" name="raSplit" value="0" ${cfg.split === 0 || cfg.split === false ? "checked" : ""} ${rw ? "" : "disabled"}> All traffic (their internet goes through the office too)</label></div>
       ${rw ? `<div class="actions"><button class="btn primary" type="button" id="raSave">${srv ? "Save and apply" : "Set up remote access"}</button>
         ${srv ? `<button class="btn danger" type="button" id="raRemove">Remove remote access</button>` : ""}<span class="status" id="raStatus"></span></div>
         <p class="small muted">${srv ? "Saving re-applies the router side (people stay connected)." : "TikManager backs the router up first, then adds a WireGuard interface, its address and the firewall rules - all tagged so they can be removed exactly."}</p>` : ""}
       ${x.live_error ? `<p class="small status err">Couldn't read live status: ${esc(x.live_error)}</p>` : ""}</div>
     ${srv ? `<div class="card"><div class="row"><h2>People (${(x.users || []).length})</h2></div>
-      ${rw && srv.state === "applied" ? `<div class="row"><input id="raName" placeholder="Name - e.g. Jane Smith - Laptop" maxlength="60" style="max-width:320px">
+      ${rw && srv.state === "applied" ? `<div class="row"><input class="u-w320" id="raName" placeholder="Name - e.g. Jane Smith - Laptop" maxlength="60">
         <label class="small">Expires (optional) <input type="date" id="raNewExp" min="${day(Date.now() / 1000 + 86400)}"></label>
         <button class="btn primary" type="button" id="raAdd">Add person</button><span class="status" id="raUStatus"></span></div>
-        <div class="small" style="margin:6px 0 10px"><b>What they may reach</b><div id="raNewAcc"></div></div>` : ""}
+        <div class="small u-reach"><b>What they may reach</b><div id="raNewAcc"></div></div>` : ""}
       ${(x.users || []).length ? `<div class="table-wrap"><table><thead><tr><th>Person</th><th>Address</th><th>Status</th><th>Traffic</th><th>Config</th><th></th></tr></thead><tbody>${userRows}</tbody></table></div>`
         : `<p class="muted small">Nobody yet - add a person to get their WireGuard config.</p>`}
-      <div id="raLog" style="margin-top:14px"></div>
+      <div class="u-mt14" id="raLog"></div>
       <p class="small muted">Windows: install WireGuard, then <b>Import tunnel(s) from file</b> and pick the downloaded .conf, and click Activate. People without admin rights need
         a one-time setting to switch tunnels on - or push the install and tunnel with your RMM (<span class="mono">wireguard /installtunnelservice &lt;file&gt;.conf</span> keeps it always on).</p></div>` : ""}`;
   const say = (id, m, ok) => { const el = $(id); if (el) { el.textContent = m; el.className = `status ${ok ? "ok" : "err"}`; } };
@@ -4022,7 +4070,7 @@ async function raTab(d, note) {
   if ($("raLog")) api(`/api/devices/${d.id}/ra/sessions`).then((rows) => {
     if (!$("raLog")) return;
     const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
-    $("raLog").innerHTML = `<div class="row"><h3 style="margin:0">Connection log</h3><span class="spacer"></span>
+    $("raLog").innerHTML = `<div class="row"><h3 class="u-m0">Connection log</h3><span class="spacer"></span>
         <a class="btn small" href="/api/devices/${d.id}/ra/sessions.csv" download>Export CSV</a></div>
       <p class="small muted">Who connected, when and from where - read from the router every 2 minutes, kept 400 days.</p>
       ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Person</th><th>From</th><th>Connected</th><th>Disconnected</th><th>Duration</th><th>Data</th></tr></thead><tbody>
@@ -4037,7 +4085,7 @@ async function raTab(d, note) {
     const u = x.users.find((y) => String(y.id) === a.dataset.raacc), box = $(`raAccEd${u.id}`);
     if (!box.hidden) { box.hidden = true; return; }
     box.hidden = false;
-    box.innerHTML = `<div id="raAccIn${u.id}"></div><div class="row" style="margin-top:6px"><button class="btn small primary" type="button" id="raAccSave${u.id}">Save access</button>
+    box.innerHTML = `<div id="raAccIn${u.id}"></div><div class="row u-mt6"><button class="btn small primary" type="button" id="raAccSave${u.id}">Save access</button>
       <span class="status" id="raAccSt${u.id}"></span></div>`;
     const val = raAccessEditor($(`raAccIn${u.id}`), u.access, x.services);
     rView.hold = true;   // don't redraw the page under the editor
@@ -4142,8 +4190,33 @@ document.addEventListener("click", async (e) => {
   setTimeout(() => {
     vpnHold--; b.disabled = false; b.dataset.armed = ""; b.textContent = "Restart tunnel";
     if (view === "vpns" && vpnTab === "found") vpnFound().catch(() => {});
+    if (rvDev && $("rvRoot")) rvTab(rvDev).catch(() => {});
   }, 18000);
 });
+// router page > VPNs: every VPN on this one router (the same read-only inventory as Site-to-site VPN > Existing VPNs)
+let rvDev = null;
+async function rvTab(d) {
+  rvDev = d;
+  const x = await api(`/api/devices/${d.id}/vpns`);
+  if (!$("rvRoot")) return;
+  const r = { id: d.id, name: d.name, online: x.online, org: d.org };
+  const list = (x.tunnels || []).map((t) => ({ r, t }));
+  const down = list.filter(({ t }) => t.status === "down").length;
+  $("rvRoot").innerHTML = `<div class="card"><div class="row"><h2 class="u-m0">VPNs</h2><span class="spacer"></span>
+      ${x.online ? `<button class="btn small" type="button" id="rvRead">Read again</button>` : ""}</div>
+    <p class="small muted">${x.tunnels == null ? "Not read yet - VPNs are read every 15 minutes (read-only)."
+      : `${list.length} VPN connection${list.length === 1 ? "" : "s"}${down ? ` · <b>${down} down</b>` : ""} · read ${x.collected_at ? ago(x.collected_at) : "?"} (every 15 minutes, read-only). Linked names are other TikManager routers.`}</p>
+    ${x.remote_access ? `<p class="small">Remote access (WireGuard for people): <b>${x.remote_access.people}</b> ${x.remote_access.people === 1 ? "person" : "people"},
+      ${x.remote_access.connected} connected now - <a href="#" id="rvRa">Remote access tab</a></p>` : ""}
+    ${list.length ? `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Remote end</th><th>Status</th><th>Networks / users</th><th>Traffic</th><th>Notes</th><th></th></tr></thead>
+      <tbody>${tunnelRows(list, false)}</tbody></table></div>` : x.tunnels ? `<p class="muted">No VPNs on this router.</p>` : ""}</div>`;
+  $("rvRa")?.addEventListener("click", (e) => { e.preventDefault(); rView.rtab = "remote"; router(d.id); });
+  $("rvRead")?.addEventListener("click", async () => {
+    $("rvRead").disabled = true; $("rvRead").textContent = "Reading…";
+    try { await post("/api/vpn-inventory/refresh", { device_ids: [d.id] }); } catch (e) { /* the next read shows the state */ }
+    rvTab(d).catch(() => {});
+  });
+}
 const foundView = { org: "", kind: "", problems: false };
 async function vpnFound(reading = false) {
   const rows = await api("/api/vpn-inventory");
@@ -4510,11 +4583,11 @@ async function go(v, arg) {
   try {
     await (v === "router" ? router(arg) : VIEWS[v](arg));
     // auto-refresh, skipped while someone is typing in a field on the page
-    if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
+    if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || vpnHold || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       (v === "router" ? router(arg) : dashboard()).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => { if (!$("dlg").open) upgradesView().catch(() => {}); }, 20000);
     // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)
-    if (v === "health") timer = setInterval(() => { if (document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; healthPage().catch(() => {}); }, 60000);
+    if (v === "health") timer = setInterval(() => { if (hView.busy || document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; healthPage().catch(() => {}); }, 60000);
     if (v === "vpns") timer = setInterval(() => { if (vpnHold || document.hidden || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       (vpnTab === "found" ? vpnFound() : vpnsView()).catch(() => {}); }, 30000);
   } catch (e) { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; }
