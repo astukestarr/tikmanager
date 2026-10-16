@@ -122,22 +122,36 @@ class RouterOS:
         body, created = {}, False
         cert = s.get("certificate") or "none"
         if cert == "none":
-            if not self.get(f"/certificate?name={HTTPS_CERT}"):
-                r = self._req("PUT", "/certificate", {"name": HTTPS_CERT, "common-name": self.ip, "key-size": "2048", "days-valid": "3650",
-                                                      "key-usage": "digital-signature,key-encipherment,tls-server"}, timeout=30)
-                try:
-                    self._req("POST", "/certificate/sign", {".id": (r or {}).get(".id") or HTTPS_CERT}, timeout=120)
-                except RouterError as e:
-                    if "HTTP 400" in str(e):
-                        self._req("POST", "/certificate/sign", {"number": HTTPS_CERT}, timeout=120)
+            signed = lambda c: bool(c.get("fingerprint")) or _yes(c.get("private-key"))
+            tpl = (self.get(f"/certificate?name={HTTPS_CERT}") or [None])[0]
+            if not tpl:
+                self._req("PUT", "/certificate", {"name": HTTPS_CERT, "common-name": self.ip, "key-size": "2048", "days-valid": "3650",
+                                                  "key-usage": "digital-signature,key-encipherment,tls-server"}, timeout=30)
                 created = True
-            for _ in range(90):   # signing a 2048-bit key takes a while on small routers
-                c = (self.get(f"/certificate?name={HTTPS_CERT}") or [{}])[0]
-                if c.get("fingerprint") or _yes(c.get("private-key")):
-                    break
-                time.sleep(1)
-            else:
-                raise RouterError("The router didn't finish making its HTTPS certificate in time - try again in a minute.")
+            if not tpl or not signed(tpl):   # new, or an unsigned template an earlier try left behind
+                # sign with the same command as the terminal (/execute, like the backups' export): the REST "sign" call's
+                # arguments differ between RouterOS versions ("failure: CA not found")
+                out = ""
+                try:
+                    r = self._req("POST", "/execute", {"script": f"/certificate sign {HTTPS_CERT}", "as-string": ""}, timeout=120)
+                    out = str((r or {}).get("ret") or "") if isinstance(r, dict) else ""
+                except RouterError as e:
+                    if "HTTP" in str(e):
+                        out = str(e)
+                ok = False
+                if "failure" not in out.lower() and "error" not in out.lower():
+                    for _ in range(90):   # signing a 2048-bit key takes a while on small routers
+                        c = (self.get(f"/certificate?name={HTTPS_CERT}") or [{}])[0]
+                        if signed(c):
+                            ok = True
+                            break
+                        time.sleep(1)
+                if not ok:   # don't leave a half-made certificate behind
+                    for c in self.get(f"/certificate?name={HTTPS_CERT}") or []:
+                        if not signed(c):
+                            self.optional(lambda c=c: self._req("DELETE", f"/certificate/{c['.id']}", timeout=15))
+                    raise RouterError("The router couldn't make its HTTPS certificate" + (f": {out.strip()[:200]}" if out.strip() else
+                                      " in time - try again in a minute") + ". Nothing was changed.")
             body["certificate"] = cert = HTTPS_CERT
         if was_off and port == 443:   # turning it on: don't collide with SSTP (or anything else) on 443
             used = {int(x.get("port") or 0) for x in svcs if x.get("name") != "www-ssl" and not _yes(x.get("disabled"))}

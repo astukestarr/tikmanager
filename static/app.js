@@ -3889,7 +3889,9 @@ function fixJobBox() {
   const n = j.items.length, fin = j.items.filter((y) => y.state === "done" || y.state === "failed").length, bad = j.items.filter((y) => y.state === "failed").length;
   return `<div class="h-job"><div class="row"><b>${esc(j.label)}</b><span class="small ${j.finished ? (bad ? "status warn" : "status ok") : "muted"}">
       ${j.finished ? `finished - ${n - bad} of ${n} done${bad ? `, ${bad} failed` : ""}` : `${fin} of ${n} finished · up to 6 routers at a time`}</span>
-      <span class="spacer"></span>${j.finished ? `<button class="btn small" type="button" id="hJobClose">Dismiss</button>` : ""}</div>
+      <span class="spacer"></span>${bad ? `<button class="btn small" type="button" data-hjobcopy="failed" title="Copy the failed routers and their errors as text">Copy failures (${bad})</button>` : ""}
+      <button class="btn small" type="button" data-hjobcopy="all" title="Copy every router and its result as text">Copy results</button>
+      ${j.finished ? `<button class="btn small" type="button" id="hJobClose">Dismiss</button>` : ""}</div>
     <div class="bar"><i data-pct="${n ? Math.round(100 * fin / n) : 100}"></i></div>
     <div class="table-wrap"><table class="h-job-list"><tbody>${j.items.map((y) => `<tr><td><a href="#router/${y.device_id}">${esc(y.router)}</a></td>
       <td><span class="pill ${FIX_STATE[y.state]?.[1] || ""}">${FIX_STATE[y.state]?.[0] || esc(y.state)}</span></td>
@@ -3906,6 +3908,31 @@ async function followFixJob() {
   if (hView.jobData.finished) { if (!hView.shownDone) { hView.shownDone = true; healthPage().catch(() => {}); } return; }   // refresh the findings once
   hView.poll = setTimeout(followFixJob, 1500);
 }
+// Copy failures / Copy all: the job as plain text (one router per line) - for a ticket, an email or support
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* not allowed here: fall back to a selection */ }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.className = "offscreen";
+  document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  ta.remove();
+  return ok;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-hjobcopy]");
+  const j = hView.jobData;
+  if (!b || !j) return;
+  const rows = j.items.filter((y) => b.dataset.hjobcopy === "all" || y.state === "failed");
+  const n = j.items.length, bad = j.items.filter((y) => y.state === "failed").length;
+  const text = [`${j.label} - ${j.finished ? "finished" : "running"}: ${n - bad - j.items.filter((y) => y.state !== "done" && y.state !== "failed").length} done, ${bad} failed, ${n} routers`
+    + ` (TikManager ${me.version || "?"}, ${new Date().toLocaleString()})`,
+    ...rows.map((y) => `${y.router}\t${FIX_STATE[y.state]?.[0] || y.state}\t${y.detail || ""}`)].join("\n");
+  const ok = await copyText(text);
+  const was = b.textContent;
+  b.textContent = ok ? `Copied ${rows.length} line${rows.length === 1 ? "" : "s"}` : "Couldn't copy - select the list and press Ctrl+C";
+  setTimeout(() => { if (b.isConnected) b.textContent = was; }, 2500);
+});
 function closeFixJob() { hView.dismissed = hView.job; hView.job = hView.jobData = null; hView.busy = false; if ($("hJob")) $("hJob").innerHTML = ""; }
 const SEV_PILL = { critical: "up-failed", high: "up-failed", medium: "up-run", low: "" };
 async function healthPage() {

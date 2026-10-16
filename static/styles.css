@@ -668,3 +668,4 @@ tr.ra-new td { background: var(--accent-soft); }
 .sec-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px; }
 @keyframes secFlash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
 .sec-flash { animation: secFlash 1.6s ease-out; }
+.offscreen { position: fixed; left: -9999px; top: 0; opacity: 0; }

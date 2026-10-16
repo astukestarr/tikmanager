@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.15 - 2026-10-16
+
+- **Copy failures / Copy results** on the one-click fix progress box: the job as plain text - a line with what ran,
+  the counts, the TikManager version and the time, then one line per router (router, result, error), tab-separated
+  so it also pastes into a spreadsheet.
+- **Fix: Switch to HTTPS failed with "failure: CA not found"** when signing the new certificate: the REST call's
+  arguments differ between RouterOS versions, so it now signs with the terminal command (/certificate sign
+  tikmanager-https, through /execute like the backups' export). An unsigned certificate left by the failed try is
+  signed and used rather than waited on; if signing fails, the half-made certificate is removed and the router's own
+  message is shown. Nothing on www-ssl changes until the certificate exists. Run Fix all again.
+
 ## 1.46.0-beta.14 - 2026-10-16
 
 - **TikManager can manage routers over HTTPS** (router page > Settings > Management connection > **Switch to HTTPS**,
