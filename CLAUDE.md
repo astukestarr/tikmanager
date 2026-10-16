@@ -80,6 +80,9 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | RouterOS security (CVEs, security releases, What's new) | `rossec.py` (`security_items`, `releases_between`, `cves_for`), `secState/secCard/notesDialog/rosSecCard` in `app.js` |
 | Router lifecycle (age, discontinued, replacements) | `lifecycle.py` (`REPLACEMENTS`, overrides in setting `lifecycle_suggest`), `lcYears/lcMade/lcFlag/lcSuggest/lifecycleCard/lcAdminCard` in `app.js` |
 | Performance & Security dashboard | `healthdash.py` (`build`, `exposure`, `CATEGORIES`), extra fields in `RouterOS.INVENTORY`, `/api/health-dash`, `healthPage()` in `app.js` |
+| Compliance (frameworks, client report) | `compliance.py` (`CHECKS`, `FRAMEWORKS`, `evaluate`, `scorecard`, `report_html/csv`), `/api/compliance*`, `compliancePage()` in `app.js`, `static/report.css` + `report.js` |
+| Accepted findings (exceptions) | `exceptions` table, `exceptions_map()` + `/api/exceptions` in `server.py`; keys `hd:<dashboard title>` / `cc:<check id>`; `compliance.HD` / `ITEM_HD` map them onto checks |
+| One-click security fixes | `healthdash.FIXES` / `fix_request` / `fix_retry`, `/api/health-dash/fix` (background job, `FIX_JOBS`), `fixJobBox()` in `app.js` |
 | Remote access (WireGuard for Windows into a router) | `remoteaccess.py` (`RemoteAccess.setup/add_user/download/revoke/remove`, `keypair`), `RouterOS.ra_*`, `raTab()` in `app.js` |
 | Send email | `mailer.Mailer.send()` (`server.mailer`, `alerts.mailer`); settings in `integrations.py` FIELDS "mail" |
 | UniFi / UISP connections, sites, devices | `ubnt.py` (`UnifiClient`, `UispClient`, `Ubnt.sync_account/sites/conditions`), `/api/net/*` and `/api/unifi*` in `server.py`, `unifiPage()` / `wireNetAccounts()` in `app.js` |

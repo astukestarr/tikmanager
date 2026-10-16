@@ -682,7 +682,6 @@ $conf = Join-Path $dir "$name.conf"
                 self.log_sessions(r["device_id"])
             except RouterError:
                 pass
-        self.db.run("DELETE FROM ra_sessions WHERE ended_at IS NOT NULL AND ended_at < ?", (time.time() - KEEP_LOG,))
 
     def loop(self):
         n = 0
@@ -694,6 +693,7 @@ $conf = Join-Path $dir "$name.conf"
                 if n % 5 == 0:   # every 10 minutes
                     self.expire_due()
                     self.prune()
+                    self.db.run("DELETE FROM ra_sessions WHERE ended_at IS NOT NULL AND ended_at < ?", (time.time() - KEEP_LOG,))
             except Exception:  # noqa: BLE001 - keep going
                 import traceback
                 traceback.print_exc()

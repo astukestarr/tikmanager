@@ -693,9 +693,10 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require_vpn()
             d = self.device_for(s, m.group(1))
             where, args = self.org_scope(s, column="d.org_id")
-            routers = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.online, d.wan_ip, d.public_ip, d.vpn_inv, d.vpn_inv_at
+            # the other routers only for linking remote ends (names and addresses - not their whole inventories)
+            routers = db.q(f"""SELECT d.id, o.name AS org, d.name, d.wan_ip, d.public_ip
                               FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where}""", args)
-            me_row = next((r for r in routers if r["id"] == d["id"]), None)
+            me_row = d
             ra = db.one("SELECT state FROM ra_servers WHERE device_id=?", (d["id"],)) if s["kind"] == "tech" else None
             return self.json({"online": d["online"], "collected_at": d.get("vpn_inv_at"),
                               "tunnels": vpninv.for_device(me_row, routers) if me_row else None,

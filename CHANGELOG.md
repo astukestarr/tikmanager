@@ -24,6 +24,9 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
 - **Fix: "Limit MAC Telnet to the LAN" failed** with "input does not match any value of allowed-interface-list" on
   devices without an interface list called LAN (switches, custom setups): those now get MAC Telnet turned off
   (allowed-interface-list=none) on a second try. MAC Winbox is a separate setting and isn't touched.
+- Code checkup: the router page's VPNs tab no longer loads every router's VPN inventory on each refresh (only names
+  and addresses to link remote ends); the remote access connection log got indexes for its per-person and alert
+  queries, and its 400-day pruning runs every 10 minutes instead of every 2.
 
 ## 1.46.0-beta.10 - 2026-10-16
 

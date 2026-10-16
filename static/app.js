@@ -4226,7 +4226,7 @@ async function raTab(d, note) {
     catch (e) { b.disabled = false; say("raUStatus", e.message); }
   }));
   document.querySelectorAll(".raExp").forEach((inp) => inp.addEventListener("change", async () => {
-    try { await post(`/api/devices/${d.id}/ra/users/${inp.dataset.id}/expiry`, { date: endOfDay(inp.value) }); raTab(d, inp.value ? `Access ends at the end of ${inp.value} - TikManager revokes it then.` : "No expiry any more."); }
+    try { await post(`/api/devices/${d.id}/ra/users/${inp.dataset.id}/expiry`, { date: endOfDay(inp.value) }); raTab(d, inp.value ? `Access ends at the end of ${esc(inp.value)} - TikManager revokes it then.` : "No expiry any more."); }
     catch (e) { say("raUStatus", e.message); raTab(d); }
   }));
   document.querySelectorAll("[data-rarevoke]").forEach((b) => b.addEventListener("click", async () => {

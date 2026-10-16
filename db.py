@@ -144,6 +144,9 @@ CREATE TABLE IF NOT EXISTS ra_sessions (              -- remote access connectio
   flag TEXT                                            -- new_ip (an address this person never used) / shared (the key used from two places)
 );
 CREATE INDEX IF NOT EXISTS ra_sessions_dev ON ra_sessions(device_id, started_at);
+CREATE INDEX IF NOT EXISTS ra_sessions_user ON ra_sessions(user_id, started_at);   -- unusual-connection checks (per person)
+CREATE INDEX IF NOT EXISTS ra_sessions_started ON ra_sessions(started_at);         -- alerts: flagged sessions in the last hour
+CREATE INDEX IF NOT EXISTS ra_sessions_ended ON ra_sessions(ended_at);             -- pruning
 CREATE TABLE IF NOT EXISTS scripts (                  -- script library
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', body TEXT NOT NULL,
   created_by TEXT, created_at REAL NOT NULL, updated_by TEXT, updated_at REAL
