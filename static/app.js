@@ -3717,11 +3717,14 @@ async function securityPage() {
         `<tr><td>${esc(r.name)}</td><td class="num">${r.count}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None in this period.</p>`}
         <p class="small muted">Router logins and changes come from the log each router sends TikManager over its tunnel. Routers adopted before 1.10.0 already send it.</p></div>
     </div>
-    <div class="card"><div class="row"><h2>Events</h2><span class="spacer"></span>
+    <div class="card" id="secEvents"><div class="row"><h2>Events</h2><span class="spacer"></span>
         <select id="secSrc" aria-label="Where"><option value="">Everywhere</option>${Object.entries(SEC_SOURCE).map(([k, l]) => `<option value="${k}" ${secView.source === k ? "selected" : ""}>${l}</option>`).join("")}</select>
         <select id="secKind" aria-label="What"><option value="">Everything</option><option value="failed" ${secView.kind === "failed" ? "selected" : ""}>Failures only</option>
           ${Object.entries(SEC_KIND).map(([k, l]) => `<option value="${k}" ${secView.kind === k ? "selected" : ""}>${l}</option>`).join("")}</select>
         <input id="secQ" type="search" placeholder="Address, user, router" aria-label="Search events" value="${esc(secView.q)}"></div>
+      ${secView.q || secView.source || secView.kind ? `<div class="sec-filter small">Showing ${s.total_events.toLocaleString()} event${s.total_events === 1 ? "" : "s"}
+        ${secView.q ? `matching <b class="mono">${esc(secView.q)}</b>` : ""}${secView.source ? ` on ${esc(SEC_SOURCE[secView.source] || secView.source)}` : ""}${secView.kind ? ` · ${esc(secView.kind === "failed" ? "failures only" : SEC_KIND[secView.kind] || secView.kind)}` : ""}
+        <button class="btn small" type="button" id="secClear">Show everything</button></div>` : ""}
       ${s.events.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Where</th><th>What</th><th>User</th><th>From</th><th>How</th><th>Details</th></tr></thead><tbody>
         ${s.events.map((e) => `<tr class="${e.kind === "login_ok" || e.kind === "config_change" ? "" : "sec-row-bad"}"><td class="nowrap small">${when(e.ts)}</td>
           <td class="small">${e.device_id ? `<a href="#router/${e.device_id}" data-dev="${e.device_id}">${esc(e.device || "router")}</a>` : esc(SEC_SOURCE[e.source] || e.source)}</td>
@@ -3731,7 +3734,11 @@ async function securityPage() {
         : `<p class="muted">Nothing in this period.</p>`}</div>`;
   const reload = () => securityPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
   $("main").querySelectorAll("[data-h]").forEach((b) => b.addEventListener("click", () => { secView.hours = +b.dataset.h; reload(); }));
-  $("main").querySelectorAll("[data-ip]").forEach((b) => b.addEventListener("click", () => { secView.q = b.dataset.ip; secView.source = ""; secView.kind = ""; reload(); }));
+  // "show" / an address: filter the Events list to it and jump there (it's at the bottom of the page)
+  $("main").querySelectorAll("[data-ip]").forEach((b) => b.addEventListener("click", () => {
+    secView.q = b.dataset.ip; secView.source = ""; secView.kind = ""; secView.jump = true; reload(); }));
+  $("secClear")?.addEventListener("click", () => { secView.q = ""; secView.source = ""; secView.kind = ""; reload(); });
+  if (secView.jump) { secView.jump = false; $("secEvents").scrollIntoView({ behavior: "smooth", block: "start" }); $("secEvents").classList.add("sec-flash"); }
   rosSecCard();
   autoBlockCard();
   $("main").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));

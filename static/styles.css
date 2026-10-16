@@ -665,3 +665,6 @@ tr.ra-new td { background: var(--accent-soft); }
 .h-job .bar { margin: 6px 0; } .h-job-list td { padding: 3px 8px 3px 0; }
 .h-acts { gap: 6px; margin-top: 4px; }
 .c-detail td { padding: 4px 8px 4px 0; vertical-align: top; }
+.sec-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px; }
+@keyframes secFlash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+.sec-flash { animation: secFlash 1.6s ease-out; }

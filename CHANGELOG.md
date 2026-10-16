@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.13 - 2026-10-16
+
+- **Fix: Security > Worth a look > show seemed to do nothing** - it filtered the Events list, which is at the bottom
+  of the page, without going there. It now jumps to Events and says what's shown ("Showing 22 events matching
+  203.0.113.66") with **Show everything** to clear the filter. Clicking an address in Top addresses does the same.
+
 ## 1.46.0-beta.12 - 2026-10-16
 
 - **Fix: the dashboard told you to disable WebFig (www)** for "WebFig over plain HTTP enabled" - that would cut
