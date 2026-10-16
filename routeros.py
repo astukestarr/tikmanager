@@ -418,7 +418,7 @@ class RouterOS:
         "/ip/ipsec/profile": ("name", "hash-algorithm", "enc-algorithm", "dh-group"),
         "/ip/service": ("name", "port", "disabled", "address"),
         "/ip/firewall/filter": ("chain", "action", "disabled", "protocol", "dst-port", "src-address", "src-address-list", "dst-address",
-                                "dst-address-list", "in-interface", "in-interface-list", "connection-state"),
+                                "dst-address-list", "in-interface", "in-interface-list", "connection-state", "connection-nat-state"),
         "/ip/dns": ("allow-remote-requests",),
         "/ip/upnp": ("enabled",),
         "/ip/socks": ("enabled",),
@@ -429,6 +429,13 @@ class RouterOS:
         "/ip/ssh": ("strong-crypto", "ciphers"),
         "/system/ntp/client": ("enabled", "servers"),
         "/user": ("name", "group", "disabled"),
+        # for compliance checks (compliance.py)
+        "/system/logging/action": ("name", "target", "remote", "remote-port"),
+        "/system/logging": ("topics", "action", "disabled"),
+        "/user/aaa": ("use-radius",),
+        "/radius": ("service", "address", "disabled"),
+        "/snmp/community": ("security", "authentication-protocol", "encryption-protocol", "addresses", "disabled"),   # never the name (on v1/v2c it is the password)
+        "/system/note": ("show-at-login", "note"),
     }
 
     def vpn_inventory(self) -> dict:
@@ -1117,6 +1124,15 @@ class SimRouter:
         inv["/ip/ssh"] = [{"strong-crypto": "no" if self.id % 3 == 2 else "yes"}]
         inv["/system/ntp/client"] = [{"enabled": "true" if self.id % 4 else "false"}]
         inv["/user"] = [{"name": "admin" if self.id % 2 else "starr", "group": "full", "disabled": "false"}]
+        inv["/ip/firewall/filter"] += [{"chain": "forward", "action": "accept", "connection-state": "established,related"}] + \
+            ([{"chain": "forward", "action": "drop", "connection-nat-state": "!dstnat", "in-interface-list": "WAN"}] if self.id % 3 else [])
+        inv["/system/logging/action"] = [{"name": "memory", "target": "memory"}, {"name": "tikmanager", "target": "remote", "remote": "10.77.0.1"}]
+        inv["/system/logging"] = [{"topics": "info", "action": "memory"}, {"topics": "info", "action": "tikmanager"}, {"topics": "warning", "action": "tikmanager"}]
+        inv["/user/aaa"] = [{"use-radius": "true" if self.id % 4 == 0 else "false"}]
+        inv["/radius"] = [{"service": "login", "address": "192.168.88.10", "disabled": "false"}] if self.id % 4 == 0 else []
+        inv["/snmp"] = [{"enabled": "true" if self.id % 3 == 1 else "false"}]
+        inv["/snmp/community"] = [{"security": "none", "disabled": "false"}]
+        inv["/system/note"] = [{"show-at-login": "true" if self.id % 2 == 0 else "false", "note": "Authorized use only." if self.id % 2 == 0 else ""}]
         for path, body in self._sim().get("set", {}).items():   # one-click fixes made here (post)
             menu, body = path.split("#")[0].rsplit("/set", 1)[0], dict(body)
             name = body.pop("numbers", None)

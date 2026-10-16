@@ -3883,7 +3883,7 @@ function closeFixJob() { hView.dismissed = hView.job; hView.job = hView.jobData 
 const SEV_PILL = { critical: "up-failed", high: "up-failed", medium: "up-run", low: "" };
 async function healthPage() {
   const x = await api("/api/health-dash");
-  const f = x.findings;
+  const all = x.findings, f = all.filter((y) => !y.accepted), accepted = all.filter((y) => y.accepted);
   const count = (fn) => f.filter(fn).length;
   const routersWith = (fn) => new Set(f.filter(fn).map((y) => y.device_id)).size;
   const tile = (cat, label, sub) => { const n = routersWith((y) => y.category === cat); const worst = f.find((y) => y.category === cat)?.severity;
@@ -3907,23 +3907,37 @@ async function healthPage() {
       <select id="hCat" aria-label="Category"><option value="">All categories</option>${x.categories.map((c) => `<option>${c}</option>`).join("")}</select>
       ${orgs.length > 1 ? `<select id="hOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option>${esc(o)}</option>`).join("")}</select>` : ""}
       <input id="hQ" type="search" placeholder="Search routers and findings" value="${esc(hView.q)}">
+      ${accepted.length ? `<label class="chk"><input type="checkbox" id="hAcc" ${hView.acc ? "checked" : ""}> Show accepted (${accepted.length})</label>` : ""}
       <span class="spacer"></span><span class="small muted" id="hCount"></span></div>
       <div id="hJob">${fixJobBox()}</div>
       <div id="hFixes"></div>
       <div class="table-wrap"><table><thead><tr><th>Severity</th><th>Router</th><th>Finding</th><th>Details</th><th>How to fix</th></tr></thead><tbody id="hRows"></tbody></table></div></div>`;
   const draw = () => {
     const rank = { critical: 0, high: 1, medium: 2, low: 3 }, q = hView.q.toLowerCase();
-    const rows = f.filter((y) => (!hView.cat || y.category === hView.cat) && (!hView.sev || rank[y.severity] <= rank[hView.sev]) && (!hView.org || y.org === hView.org)
+    const rows = (hView.acc ? all : f).filter((y) => (!hView.cat || y.category === hView.cat) && (!hView.sev || rank[y.severity] <= rank[hView.sev]) && (!hView.org || y.org === hView.org)
       && (!q || `${y.router} ${y.org} ${y.title} ${y.detail}`.toLowerCase().includes(q)));
-    $("hCount").textContent = `${rows.length} of ${f.length} findings`;
+    $("hCount").textContent = `${rows.length} of ${f.length} findings${accepted.length ? ` · ${accepted.length} accepted` : ""}`;
     $("hRows").innerHTML = rows.map((y) => `<tr><td><span class="pill ${SEV_PILL[y.severity]}">${y.severity}</span><div class="small muted">${esc(y.category)}</div></td>
       <td><a href="#router/${y.device_id}">${esc(y.router)}</a>${y.org ? `<div class="small muted">${esc(y.org)}</div>` : ""}</td>
-      <td><b>${esc(y.title)}</b></td><td class="small">${esc(y.detail)}</td><td class="small muted">${esc(y.fix)}
-        ${y.fix_id && canWrite() ? `<div><button class="btn small" type="button" data-hfix="${y.fix_id}" data-hdev="${y.device_id}" ${hView.busy ? "disabled" : ""} title="${esc(x.fixes[y.fix_id].effect)}">Fix</button></div>` : ""}</td></tr>`).join("")
+      <td><b>${esc(y.title)}</b>${y.accepted ? `<div><span class="pill up-cancelled">Accepted</span></div>` : ""}</td><td class="small">${esc(y.detail)}</td>
+      <td class="small muted">${y.accepted ? `<b>Accepted</b> by ${esc(y.accepted.by)} ${ago(y.accepted.at)}: ${esc(y.accepted.reason)}
+          ${canWrite() ? `<div><button class="btn small" type="button" data-hunacc="${y.accepted.id}">Undo</button></div>` : ""}` : `${esc(y.fix)}
+        <div class="row h-acts">${y.fix_id && canWrite() ? `<button class="btn small" type="button" data-hfix="${y.fix_id}" data-hdev="${y.device_id}" ${hView.busy ? "disabled" : ""} title="${esc(x.fixes[y.fix_id].effect)}">Fix</button>` : ""}
+          ${canWrite() ? `<button class="btn small" type="button" data-hacc="${esc(y.title)}" data-hdev="${y.device_id}" title="Not a problem on this router (e.g. the port is blocked from the internet) - record why; it leaves the list and shows as a documented exception in compliance reports">Accept…</button>` : ""}</div>`}</td></tr>`).join("")
       || `<tr><td colspan="5" class="muted">${f.length ? "Nothing matches." : "Nothing to fix - every router passes every check."}</td></tr>`;
     // one-click fixes for what's shown (filters apply): one line per kind of fix, Fix all
     const groups = {};
-    rows.filter((y) => y.fix_id).forEach((y) => { (groups[y.fix_id] ||= new Map()).set(y.device_id, y.router); });
+    rows.filter((y) => y.fix_id && !y.accepted).forEach((y) => { (groups[y.fix_id] ||= new Map()).set(y.device_id, y.router); });
+    document.querySelectorAll("[data-hacc]").forEach((b) => b.addEventListener("click", async () => {
+      const r = rows.find((y) => String(y.device_id) === b.dataset.hdev && y.title === b.dataset.hacc);
+      const reason = prompt(`Accept "${b.dataset.hacc}" on ${r?.router || "this router"}?\n\nWhy is it not a problem here? This goes in compliance reports.\n(e.g. "FTP backs up the switches and phone system; port 21 is blocked from the internet")`);
+      if (reason == null) return;
+      try { await post("/api/exceptions", { device_id: Number(b.dataset.hdev), key: `hd:${b.dataset.hacc}`, reason }); healthPage().catch(() => {}); }
+      catch (e) { alert(e.message); }
+    }));
+    document.querySelectorAll("[data-hunacc]").forEach((b) => b.addEventListener("click", async () => {
+      try { await post(`/api/exceptions/${b.dataset.hunacc}/delete`); healthPage().catch(() => {}); } catch (e) { alert(e.message); }
+    }));
     const keys = Object.keys(groups);
     $("hFixes").innerHTML = keys.length && canWrite() ? `<div class="h-fixes"><b>One-click fixes</b> <span class="small muted">for the findings shown - each router is backed up
         first, then the one setting is changed and the router re-checked</span>${keys.map((k) => `<div class="h-fix"><div><b>${esc(x.fixes[k].label)}</b>
@@ -3951,6 +3965,7 @@ async function healthPage() {
   ["hSev", "hCat", "hOrg"].forEach((id) => { const el = $(id); if (!el) return; const k = { hSev: "sev", hCat: "cat", hOrg: "org" }[id]; el.value = hView[k];
     el.addEventListener("change", (e) => { hView[k] = e.target.value; draw(); document.querySelectorAll("[data-hcat]").forEach((t) => t.classList.toggle("sel", t.dataset.hcat === hView.cat)); }); });
   $("hQ").addEventListener("input", (e) => { hView.q = e.target.value; draw(); });
+  $("hAcc")?.addEventListener("change", (e) => { hView.acc = e.target.checked; draw(); });
   document.querySelectorAll("[data-hcat]").forEach((t) => t.addEventListener("click", () => {
     hView.cat = hView.cat === t.dataset.hcat ? "" : t.dataset.hcat; $("hCat").value = hView.cat; draw();
     document.querySelectorAll("[data-hcat]").forEach((b) => b.classList.toggle("sel", b.dataset.hcat === hView.cat)); }));
@@ -3960,6 +3975,52 @@ async function healthPage() {
   // a fix job still running (or just finished) - also after a reload or coming back to the page
   if (!hView.job && x.fix_job && x.fix_job !== hView.dismissed) { hView.job = x.fix_job; hView.shownDone = true; }
   if (hView.job && !hView.poll_on) { hView.poll_on = true; followFixJob().finally(() => { hView.poll_on = false; }); }
+}
+
+// --- compliance: routers against CIS v8 / NIST 800-171 / PCI DSS 4.0 / HIPAA, and a client report (compliance.py) ------
+const cView = { fw: "cis8", org: "", open: null, failOnly: false };
+const C_PILL = { pass: "up-done", accepted: "up-done", fail: "up-failed", manual: "up-run", unknown: "up-cancelled", na: "up-cancelled" };
+async function compliancePage() {
+  const x = await api(`/api/compliance?fw=${cView.fw}&org=${encodeURIComponent(cView.org)}`);
+  const L = x.labels, pill = (st) => `<span class="pill ${C_PILL[st]}">${esc(L[st])}</span>`;
+  const names = Object.fromEntries(x.routers.map((r) => [r.id, r.name]));
+  const qs = `fw=${cView.fw}&org=${encodeURIComponent(cView.org)}`;
+  $("main").innerHTML = `<div class="row"><div><h1>Compliance</h1>
+      <p class="muted">Routers checked against the network-device controls of common frameworks, from the settings TikManager reads (read-only).
+        A router covers only its part of a framework - the report says so - so this is evidence for these controls, not a certification.</p></div></div>
+    <div class="card"><div class="row">
+      <select id="cFw" aria-label="Framework">${Object.entries(x.frameworks).map(([k, n]) => `<option value="${k}" ${k === x.framework ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <select id="cOrg" aria-label="Client"><option value="">All clients</option>${x.orgs.map((o) => `<option value="${o.id}" ${String(o.id) === String(cView.org) ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
+      <label class="chk"><input type="checkbox" id="cFail" ${cView.failOnly ? "checked" : ""}> Not met only</label>
+      <span class="spacer"></span>
+      <a class="btn primary" href="/api/compliance/report?${qs}" target="_blank" rel="noopener" title="Opens the client report - print it or save it as PDF">Client report (PDF)</a>
+      <a class="btn" href="/api/compliance/report?${qs}&format=csv" download>CSV for auditors</a></div>
+    ${cView.org ? "" : `<p class="small muted">Pick a client for their report; "All clients" gives a fleet-wide view.</p>`}</div>
+    <div class="tiles">
+      <div class="tile ${x.score == null ? "" : x.score >= 90 ? "good" : x.score >= 70 ? "warn" : "bad"}"><div class="l">Controls met</div><div class="v">${x.score == null ? "—" : `${x.score}%`}</div><div class="small muted">of the checked controls</div></div>
+      <div class="tile good"><div class="l">Met</div><div class="v">${x.met}</div><div class="small muted">${x.accepted ? `${x.accepted} with an accepted exception` : "all routers pass"}</div></div>
+      <div class="tile ${x.not_met ? "bad" : "good"}"><div class="l">Not met</div><div class="v">${x.not_met}</div><div class="small muted">on one router or more</div></div>
+      <div class="tile ${x.review ? "warn" : "good"}"><div class="l">Needs review</div><div class="v">${x.review}</div><div class="small muted">depends on something outside the router</div></div></div>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>Control</th><th>Requirement</th><th>Result</th><th>Routers not meeting it</th></tr></thead>
+      <tbody>${x.controls.filter((c) => !cView.failOnly || c.status === "fail").map((c) => `<tr class="c-row" data-ctl="${esc(c.id)}"><td class="nowrap"><b>${esc(c.id)}</b></td>
+        <td>${esc(c.title)}<div class="small muted">${c.checks.map((k) => esc(x.check_info[k].title)).join(" · ")}</div></td><td>${pill(c.status)}</td>
+        <td class="small">${c.failing.length ? `${c.failing.slice(0, 4).map((i) => esc(names[i])).join(", ")}${c.failing.length > 4 ? ` +${c.failing.length - 4} more` : ""}` : ""}
+          <div><a href="#" data-copen="${esc(c.id)}">${cView.open === c.id ? "Hide" : "Details"}</a></div></td></tr>
+        ${cView.open === c.id ? `<tr><td></td><td colspan="3"><table class="c-detail"><tbody>${x.routers.map((r) => { const p = c.routers[r.id];
+          return p.checks.map((ch, i) => `<tr>${i === 0 ? `<td rowspan="${p.checks.length}" class="nowrap"><a href="#router/${r.id}">${esc(r.name)}</a>${r.org && !cView.org ? `<div class="small muted">${esc(r.org)}</div>` : ""}</td>` : ""}
+            <td class="small">${esc(ch.title)}</td><td>${pill(ch.status)}</td><td class="small">${esc(ch.evidence)}
+            ${ch.status === "fail" && canWrite() && !["fips"].includes(ch.id) ? `<div class="row h-acts">${x.check_info[ch.id].fix_id ? `<a class="btn small" href="#health">Fix on Performance &amp; security</a>` : ""}
+              <button class="btn small" type="button" data-cacc="${esc(ch.id)}" data-cdev="${r.id}" title="Not a problem on this router - record why (shown in the report as a documented exception)">Accept…</button></div>` : ""}</td></tr>`).join(""); }).join("")}
+          </tbody></table></td></tr>` : ""}`).join("")}</tbody></table></div></div>`;
+  $("cFw").addEventListener("change", (e) => { cView.fw = e.target.value; cView.open = null; compliancePage(); });
+  $("cOrg").addEventListener("change", (e) => { cView.org = e.target.value; compliancePage(); });
+  $("cFail").addEventListener("change", (e) => { cView.failOnly = e.target.checked; compliancePage(); });
+  document.querySelectorAll("[data-copen]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); cView.open = cView.open === a.dataset.copen ? null : a.dataset.copen; compliancePage(); }));
+  document.querySelectorAll("[data-cacc]").forEach((b) => b.addEventListener("click", async () => {
+    const reason = prompt(`Accept "${x.check_info[b.dataset.cacc].title}" on ${names[b.dataset.cdev]}?\n\nWhy is it fine here? This goes in the client report as a documented exception.`);
+    if (reason == null) return;
+    try { await post("/api/exceptions", { device_id: Number(b.dataset.cdev), key: `cc:${b.dataset.cacc}`, reason }); compliancePage(); } catch (e) { alert(e.message); }
+  }));
 }
 
 // --- remote access: WireGuard for Windows (etc.) into this router (remoteaccess.py) ------------------------------------
@@ -4462,7 +4523,7 @@ const NAV = [
     { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
     { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
-    { view: "health", label: "Performance & security", who: "tech" },
+    { view: "health", label: "Performance & security", who: "tech" }, { view: "compliance", label: "Compliance", who: "tech" },
     { view: "alerts", label: "Alerts", who: "tech", count: "alerts" }, { view: "logs", label: "Logs", who: "tech" }, { view: "security", label: "Security", who: "tech" }] },
   { group: "Maintenance", icon: "maint", items: [
     { view: "backups", label: "Backups", who: "tech" }, { view: "upgrades", label: "Upgrades", who: "tech", count: "updates" }, { view: "tasks", label: "Tasks", who: "tech" }] },
@@ -4605,7 +4666,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { health: healthPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { health: healthPage, compliance: compliancePage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

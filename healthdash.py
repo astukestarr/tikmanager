@@ -36,7 +36,7 @@ FIXES = {
     "proxy_off": ("Turn off the web proxy", "/ip/proxy/set", {"enabled": "no"}, "Anything deliberately sent through the router's proxy stops working."),
     "upnp_off": ("Turn off UPnP", "/ip/upnp/set", {"enabled": "no"}, "Game consoles or apps that open their own ports may need a manual port forward."),
     "bwtest_off": ("Turn off the bandwidth test server", "/tool/bandwidth-server/set", {"enabled": "no"}, "Bandwidth tests against this router stop working."),
-    "macsrv_lan": ("Limit MAC Telnet to the LAN", "/tool/mac-server/set", {"allowed-interface-list": "LAN"}, "Needs an interface list called LAN (MikroTik's default)."),
+    "macsrv_lan": ("Limit MAC Telnet to the LAN", "/tool/mac-server/set", {"allowed-interface-list": "LAN"}, "Where there's no interface list called LAN (switches, custom setups) MAC Telnet is turned off instead; MAC Winbox is a separate setting and stays as it is."),
     "ntp_on": ("Turn on NTP", "/system/ntp/client/set", {"enabled": "yes"}, "Uses time.cloudflare.com if no time server is set."),
 }
 
@@ -46,6 +46,8 @@ def fix_retry(fix_id, error):
     strong-crypto while its cipher list allows null ("strong-crypto and none cipher can't be used at the same time")."""
     if fix_id == "ssh_strong" and "none cipher" in str(error):
         return "/ip/ssh/set", {"ciphers": "aes-ctr,aes-gcm", "strong-crypto": "yes"}
+    if fix_id == "macsrv_lan" and "allowed-interface-list" in str(error):   # no interface list called LAN (switches, custom setups)
+        return "/tool/mac-server/set", {"allowed-interface-list": "none"}
     return None
 
 

@@ -52,6 +52,7 @@ from alerts import Alerts
 from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
 import healthdash
+import compliance
 from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -140,6 +141,15 @@ geo_lock = threading.Lock()
 geo_last = [0.0]
 adopt_limit = RateLimiter(30, 300)     # per IP
 notes_limit = RateLimiter(60, 300)
+def exceptions_map(device_ids=None):
+    """Accepted findings that haven't expired: {device_id: {key: row}}."""
+    out = {}
+    for r in db.q("SELECT * FROM exceptions WHERE expires_at IS NULL OR expires_at > ?", (time.time(),)):
+        if device_ids is None or r["device_id"] in device_ids:
+            out.setdefault(r["device_id"], {})[r["key"]] = r
+    return out
+
+
 FIX_JOBS, FIX_LOCK = {}, threading.Lock()   # Performance & security one-click fixes in progress (and the last hour's)
 router_act_limit = RateLimiter(20, 300)   # VPN reconnects / re-reads per person (each one works a router)     # release-note lookups per technician (each may fetch from MikroTik)
 pending_logins: dict = {}              # ticket -> {user_id, created, enroll_secret}
@@ -633,9 +643,14 @@ class Handler(BaseHTTPRequestHandler):
                                                             else f"access ends {time.strftime('%Y-%m-%d', time.localtime(u['expires_at']))}"),
                               "fix": "Router page > Remote access: extend the date if they still need it." if not past else "Bring the router online, or revoke by hand."})
             found.sort(key=lambda f: (healthdash.SEV_ORDER[f["severity"]], healthdash.CATEGORIES.index(f["category"]), f["org"], f["router"]))
+            exc = exceptions_map({r["id"] for r in rows})
+            for f in found:
+                e = exc.get(f["device_id"], {}).get(f"hd:{f['title']}")
+                f["accepted"] = {"id": e["id"], "reason": e["reason"], "by": e["created_by"], "at": e["created_at"]} if e else None
+            open_found = [f for f in found if not f["accepted"]]
             unread = sum(1 for r in rows if r["online"] and not r.get("vpn_inv"))
             return self.json({"findings": found, "routers": len(rows), "online": sum(1 for r in rows if r["online"]),
-                              "clean": len({r["id"] for r in rows} - {f["device_id"] for f in found}), "unread": unread,
+                              "clean": len({r["id"] for r in rows} - {f["device_id"] for f in open_found}), "unread": unread,
                               "categories": healthdash.CATEGORIES, "checked_at": t_now,
                               "fixes": {k: {"label": v[0], "effect": v[3]} for k, v in healthdash.FIXES.items()},
                               # this person's newest fix job (running, or finished in the last 10 minutes) - the page shows its progress
@@ -647,6 +662,33 @@ class Handler(BaseHTTPRequestHandler):
             if not j or j["user"] != s["email"]:
                 raise HttpError(404, "That fix job has finished and was cleared.")
             return self.json({"id": j["id"], "label": j["label"], "started": j["started"], "finished": j["finished"], "items": j["items"], "now": time.time()})
+        if path in ("/api/compliance", "/api/compliance/report"):   # framework scorecard; ?fw=cis8|nist171|pci4|hipaa &org=<id>
+            s = self.require(tech=True)
+            fw = q.get("fw") if q.get("fw") in compliance.FRAMEWORKS else "cis8"
+            where, args = self.org_scope(s, column="d.org_id")
+            orgs = db.q(f"""SELECT DISTINCT o.id, o.name FROM orgs o JOIN devices d ON d.org_id = o.id WHERE d.state='adopted' AND {where} ORDER BY o.name""", args)
+            org = next((o for o in orgs if str(o["id"]) == str(q.get("org") or "")), None)
+            rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
+                            WHERE d.state='adopted' AND {where} {"AND d.org_id=?" if org else ""} ORDER BY o.name, d.name""", args + ([org["id"]] if org else []))
+            results = compliance.evaluate(rows, exceptions_map({r["id"] for r in rows}))
+            card = compliance.scorecard(fw, rows, results)
+            if path == "/api/compliance":
+                return self.json({**card, "frameworks": {k: v["name"] for k, v in compliance.FRAMEWORKS.items()}, "orgs": orgs,
+                                  "org": org["id"] if org else None, "labels": compliance.LABEL,
+                                  "check_info": {k: {"title": v[0], "fix": v[2], "fix_id": v[3]} for k, v in compliance.CHECKS.items()},
+                                  "routers": [{"id": r["id"], "name": r["name"], "org": r["org"] or "", "online": r["online"]} for r in rows]})
+            client = org["name"] if org else (brand.get().get("company") or "All clients") + " - all clients"
+            db.audit(s["email"], "compliance report", f"{compliance.FRAMEWORKS[fw]['short']}: {client}", self.client_ip(), org_id=org["id"] if org else None)
+            fname = re.sub(r"[^A-Za-z0-9._-]+", "-", f"{client}-{compliance.FRAMEWORKS[fw]['short']}-{time.strftime('%Y-%m-%d')}").strip("-")
+            if q.get("format") == "csv":
+                return self.send(200, compliance.report_csv(fw, card, rows).encode(), "text/csv; charset=utf-8",
+                                 headers=[("Content-Disposition", f'attachment; filename="{fname}.csv"')])
+            return self.send(200, compliance.report_html(fw, card, rows, results, client, brand.public(), html.escape).encode(), "text/html; charset=utf-8")
+        if path == "/api/exceptions":   # accepted findings (a router's, or everything this person can see)
+            s = self.require(tech=True)
+            where, args = self.org_scope(s, column="d.org_id")
+            return self.json(db.q(f"""SELECT e.*, d.name AS router, o.name AS org FROM exceptions e JOIN devices d ON d.id = e.device_id
+                                     LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY e.created_at DESC""", args))
         if m := re.fullmatch(r"/api/devices/(\d+)/vpns", path):   # router page > VPNs: every VPN found on this router
             s = self.require_vpn()
             d = self.device_for(s, m.group(1))
@@ -1610,6 +1652,30 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **remote.info(d["id"])})
+        if path == "/api/exceptions":   # accept a finding on one router: {device_id, key: "hd:<title>" | "cc:<check>", reason}
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            d = self.device_for(s, b.get("device_id"))
+            key, reason = str(b.get("key") or "")[:200], str(b.get("reason") or "").strip()[:500]
+            if not (key.startswith("hd:") or (key.startswith("cc:") and key[3:] in compliance.CHECKS)):
+                raise HttpError(400, "Not something that can be accepted.")
+            if len(reason) < 5:
+                raise HttpError(400, "Give the reason (it goes in the compliance report) - e.g. \"FTP backs up the switches; port 21 is blocked from the internet\".")
+            db.run("INSERT INTO exceptions (device_id, key, reason, created_by, created_at) VALUES (?, ?, ?, ?, ?) "
+                   "ON CONFLICT (device_id, key) DO UPDATE SET reason=excluded.reason, created_by=excluded.created_by, created_at=excluded.created_at",
+                   (d["id"], key, reason, s["email"], time.time()))
+            db.audit(s["email"], "finding accepted", f"{d['name']}: {key[3:]} - {reason}", self.client_ip(), org_id=d["org_id"])
+            db.event(d["id"], d["org_id"], "finding accepted", f"{key[3:]}: {reason} (by {s['email']})")
+            return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/exceptions/(\d+)/delete", path):
+            s = self.require(tech=True, write=True)
+            e = db.one("SELECT * FROM exceptions WHERE id=?", (int(m.group(1)),))
+            if not e:
+                raise HttpError(404, "Already removed.")
+            d = self.device_for(s, e["device_id"])
+            db.run("DELETE FROM exceptions WHERE id=?", (e["id"],))
+            db.audit(s["email"], "finding acceptance removed", f"{d['name']}: {e['key'][3:]}", self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True})
         if path == "/api/health-dash/fix":   # one-click fixes: [{device_id, fix}] -> a background job the page follows
             s = self.require(tech=True, write=True)
             items, rows = [], {}

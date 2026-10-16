@@ -25,7 +25,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
 - Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
-  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Performance & security](#performance--security-dashboard) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
+  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Performance & security](#performance--security-dashboard) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
 - Running it: [Keeping it secure](#keeping-it-secure) · [Where things live](#where-things-live-on-the-server) ·
   [Troubleshooting adoption](#if-a-router-registers-but-never-comes-online)
@@ -557,6 +557,31 @@ is changed, and the router is re-read. The checks:
 
 The service, firewall, DNS / UPnP / proxy, SSH, NTP, user-name and cipher settings come with the 15-minute VPN
 inventory (a field whitelist: no passwords, keys or SNMP community names are read).
+
+Findings that aren't a problem on a router can be **accepted** with a reason (see [Compliance](#compliance)).
+
+## Compliance
+
+**Monitoring > Compliance** (technicians) scores the routers against the network-device controls of **CIS Controls v8**,
+**NIST SP 800-171 Rev. 2 / CMMC Level 2**, **PCI DSS 4.0** and the **HIPAA Security Rule**, for all clients or one. No
+framework has a MikroTik benchmark, so each control is mapped to the router settings an auditor would look at
+(compliance.py): management reachable from the internet, deny-by-default input and forward firewall, encrypted
+management (Telnet / FTP / API off, WebFig over HTTP limited to the management address), SSH strong crypto, VPN crypto,
+the default admin account, RADIUS sign-in, MFA (always "needs review" - RouterOS has none built in), central logging,
+NTP, unneeded services, SNMP v3, a login notice, firmware and CVEs, backups, and - for 800-171 - FIPS-validated
+cryptography, which MikroTik can't provide (CUI needs a FIPS-validated VPN on top).
+
+- **Client report (PDF)** opens a branded report (Admin > Branding: company name and logo) to print or save as PDF:
+  score, scope - it is evidence for these controls, not a certification - per-router results, each control with its
+  evidence, a remediation plan, and documented exceptions. **CSV for auditors** has every router x control x check.
+- **Accept** a finding on a router when it isn't a problem there (e.g. FTP used to back up switches, port 21 blocked
+  from the internet), with the reason. It leaves the Performance & security list and its one-click fixes and shows in
+  compliance as **Met with exception**, with the reason, who and when. Per item: accepting FTP doesn't excuse Telnet.
+
+TikManager manages routers over REST on the WebFig (www) service, inside its WireGuard tunnel. Unless that service is
+limited to management addresses (/ip service set www address=...), "Management traffic is encrypted" isn't met - WebFig
+answers plain HTTP on the LAN. Limit it to TikManager's tunnel address and your management network, or accept it with
+the reason.
 
 ## Remote access (WireGuard for Windows)
 

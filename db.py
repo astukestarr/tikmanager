@@ -131,6 +131,12 @@ CREATE TABLE IF NOT EXISTS ra_users (                 -- one person (device) per
   expires_at REAL, reminded INTEGER NOT NULL DEFAULT 0,   -- revoked automatically then; a reminder event 3 days before
   access TEXT                                          -- NULL = everything the setup allows; else JSON [{host, service, proto, ports}]
 );
+CREATE TABLE IF NOT EXISTS exceptions (               -- accepted findings: "this is fine on this router, because ..."
+  id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,                                   -- hd:<Performance & security finding title> or cc:<compliance check id>
+  reason TEXT NOT NULL, created_by TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL,
+  UNIQUE (device_id, key)
+);
 CREATE TABLE IF NOT EXISTS ra_sessions (              -- remote access connection log: who was connected, when, from where
   id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   user_id INTEGER REFERENCES ra_users(id) ON DELETE SET NULL, user_name TEXT NOT NULL, tunnel_ip TEXT, public_ip TEXT,

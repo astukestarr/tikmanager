@@ -663,3 +663,5 @@ tr.ra-new td { background: var(--accent-soft); }
 .h-fix .small { display: block; }
 .h-job { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 8px 0 12px; }
 .h-job .bar { margin: 6px 0; } .h-job-list td { padding: 3px 8px 3px 0; }
+.h-acts { gap: 6px; margin-top: 4px; }
+.c-detail td { padding: 4px 8px 4px 0; vertical-align: top; }

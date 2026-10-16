@@ -3,6 +3,28 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.11 - 2026-10-16
+
+- **Compliance** (Monitoring > Compliance): every router checked against the network-device controls of **CIS Controls
+  v8**, **NIST SP 800-171 / CMMC Level 2**, **PCI DSS 4.0** and the **HIPAA Security Rule** - for all clients or one.
+  Each control shows met / not met / needs review per router with the evidence read from the router (management
+  exposure, deny-by-default firewall on input and forward, encrypted management, SSH crypto, VPN crypto, default admin,
+  RADIUS sign-in, MFA, central logging, NTP, unneeded services, SNMP, login notice, firmware / CVEs, backups; and FIPS
+  for 800-171, which MikroTik can't meet). **Client report (PDF)**: a branded report to hand the client - score, scope
+  (evidence for these controls, not a certification), per-router results, every control with its evidence, a
+  remediation plan and the documented exceptions - printed or saved as PDF from the browser. **CSV for auditors**:
+  every router x control x check with the evidence. Report downloads are audit-logged.
+- **Accept a finding** (Performance & security and Compliance): "not a problem on this router, because ..." - e.g. FTP
+  that backs up switches and phone systems, with port 21 blocked from the internet. The finding leaves the dashboard's
+  list, counts and one-click fixes (**Show accepted** brings it back, with **Undo**), and compliance shows it as **Met
+  with exception** with the reason, who accepted it and when. Exceptions are per item: accepting FTP doesn't excuse
+  Telnet. Audit-logged and recorded as a router event.
+- New read-only settings for these checks: remote logging actions and rules, RADIUS / AAA, SNMP community security
+  (never the community name), the login note, and the firewall's NAT-state matcher.
+- **Fix: "Limit MAC Telnet to the LAN" failed** with "input does not match any value of allowed-interface-list" on
+  devices without an interface list called LAN (switches, custom setups): those now get MAC Telnet turned off
+  (allowed-interface-list=none) on a second try. MAC Winbox is a separate setting and isn't touched.
+
 ## 1.46.0-beta.10 - 2026-10-16
 
 - **Fix: "Turn on SSH strong crypto" failed** with "strong-crypto and none cipher can't be used at the same time" on
