@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS events (
   org_id INTEGER, ts REAL NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS events_dev ON events(device_id, ts);
+CREATE INDEX IF NOT EXISTS events_ts ON events(ts);   -- recent events (dashboard, every 30 s) and pruning
 CREATE TABLE IF NOT EXISTS backups (
   id INTEGER PRIMARY KEY, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, org_id INTEGER,
   ts REAL NOT NULL, checked_at REAL, size INTEGER, sha256 TEXT NOT NULL, blob BLOB NOT NULL, enc TEXT NOT NULL,

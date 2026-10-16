@@ -27,6 +27,9 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
 - Code checkup: the router page's VPNs tab no longer loads every router's VPN inventory on each refresh (only names
   and addresses to link remote ends); the remote access connection log got indexes for its per-person and alert
   queries, and its 400-day pruning runs every 10 minutes instead of every 2.
+- Second code checkup: the dashboard's recent events (every 30 s) and event pruning use a new time index instead of
+  sorting up to 180 days of events; Performance & security's latency / loss / CPU and link-flap figures read each
+  router's last hour through its index instead of scanning a week of metrics, every minute it's open.
 
 ## 1.46.0-beta.10 - 2026-10-16
 

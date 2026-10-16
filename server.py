@@ -625,11 +625,13 @@ class Handler(BaseHTTPRequestHandler):
             rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                             WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
             t_now = time.time()
+            ids = [r["id"] for r in rows]   # per router through metrics_dev (device_id, ts) - not a scan of the week's metrics
             metrics = {r["device_id"]: {"lat": r["lat"], "loss": r["loss"], "cpu": r["cpu"], "mem": r["mem"]} for r in db.q(
-                """SELECT device_id, AVG(latency) AS lat, AVG(loss) AS loss, AVG(cpu) AS cpu, AVG(mem_pct) AS mem FROM metrics
-                   WHERE ts > ? GROUP BY device_id""", (t_now - 3600,))}
-            flaps = {r["device_id"]: r["n"] for r in db.q("SELECT device_id, COUNT(*) AS n FROM events WHERE kind='link down' AND ts > ? GROUP BY device_id",
-                                                          (t_now - 86400,))}
+                f"""SELECT device_id, AVG(latency) AS lat, AVG(loss) AS loss, AVG(cpu) AS cpu, AVG(mem_pct) AS mem FROM metrics
+                    WHERE device_id IN ({",".join("?" * len(ids))}) AND ts > ? GROUP BY device_id""", (*ids, t_now - 3600))} if ids else {}
+            flaps = {r["device_id"]: r["n"] for r in db.q(
+                f"""SELECT device_id, COUNT(*) AS n FROM events WHERE device_id IN ({",".join("?" * len(ids))}) AND ts > ? AND kind='link down'
+                    GROUP BY device_id""", (*ids, t_now - 86400))} if ids else {}
             found = healthdash.build(rows, metrics, flaps, t_now)
             ids = {r["id"]: r for r in rows}   # remote-access people: ending soon, or past their expiry (router offline)
             for u in db.q("SELECT name, device_id, expires_at FROM ra_users WHERE expires_at IS NOT NULL AND expires_at < ?", (t_now + 3 * 86400,)):
