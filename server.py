@@ -151,6 +151,27 @@ def exceptions_map(device_ids=None):
     return out
 
 
+def switch_https(d, user, cl=None):
+    """Move TikManager's management connection for router d to HTTPS: set up www-ssl (routeros.https_setup - keeps the
+    port and certificate it has, limits who can reach it), prove HTTPS answers over the tunnel, and only then switch.
+    If HTTPS doesn't answer, www-ssl is put back as it was and TikManager stays on HTTP. Returns a sentence for people."""
+    cl = cl or poller.client(d)
+    info = cl.https_setup(settings.wg_server_ip)
+    try:
+        fp = cl.https_test(info["port"])
+    except RouterError as e:
+        try:
+            cl.https_revert(info)
+        except RouterError:
+            pass
+        raise RouterError(f"HTTPS didn't answer over the tunnel ({e}) - www-ssl was put back as it was and TikManager stays on HTTP.") from None
+    db.run("UPDATE devices SET api_tls_port=?, api_tls_fp=? WHERE id=?", (info["port"], fp, d["id"]))
+    what = f"HTTPS on port {info['port']}" + (" (new self-signed certificate)" if info.get("created_cert") else "") + \
+        (f"; www-ssl available from {info['allowed']}" if "address" in info.get("changed", {}) or "available-from" in info.get("changed", {}) else "")
+    db.event(d["id"], d["org_id"], "management https", f"TikManager now manages the router over {what} (by {user})")
+    return f"TikManager now uses {what}. HTTP still works as a fallback until you turn it off."
+
+
 FIX_JOBS, FIX_LOCK = {}, threading.Lock()
 GUARD_UNDO = "tikmanager-fix-undo"   # router script + scheduler that undo a guarded one-click fix unless TikManager cancels them   # Performance & security one-click fixes in progress (and the last hour's)
 router_act_limit = RateLimiter(20, 300)   # VPN reconnects / re-reads per person (each one works a router)     # release-note lookups per technician (each may fetch from MikroTik)
@@ -1003,7 +1024,7 @@ class Handler(BaseHTTPRequestHandler):
                                           ORDER BY finished_at DESC LIMIT 1""", (d["id"],))
             d["events"] = db.q("SELECT ts, kind, detail FROM events WHERE device_id=? ORDER BY ts DESC LIMIT 50", (d["id"],))
             if s["kind"] != "tech":   # clients see their router, not TikManager's internal bookkeeping about it
-                for k in ("wg_pubkey", "token_expires", "notes", "api_port", "created_by", "thumb_tried", "itg_config_id",
+                for k in ("wg_pubkey", "token_expires", "notes", "api_port", "api_tls_port", "api_tls_fp", "created_by", "thumb_tried", "itg_config_id",
                           "itg_synced_at", "itg_error", "vpn_inv_at", "ros_checked", "name_custom", "lc_checked"):
                     d.pop(k, None)
             return self.json(d)
@@ -1657,6 +1678,26 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **remote.info(d["id"])})
+        if m := re.fullmatch(r"/api/devices/(\d+)/mgmt-https", path):   # {on: true} switch TikManager to HTTPS; {on: false} back to HTTP
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            if self.body().get("on"):
+                if not d["online"]:
+                    raise HttpError(400, "The router is offline.")
+                bk = backups.run(d["id"], "pre-https", s["email"])
+                if not bk.get("ok"):
+                    raise HttpError(400, f"Not changed - the backup failed ({bk.get('detail')}).")
+                try:
+                    msg = switch_https(d, s["email"])
+                except RouterError as e:
+                    raise HttpError(400, str(e)) from None
+                db.audit(s["email"], "management https", d["name"], self.client_ip(), org_id=d["org_id"])
+                poller.collect_vpns(db.one("SELECT * FROM devices WHERE id=?", (d["id"],)))
+                return self.json({"ok": True, "message": msg})
+            db.run("UPDATE devices SET api_tls_port=NULL, api_tls_fp=NULL WHERE id=?", (d["id"],))   # nothing changes on the router
+            db.audit(s["email"], "management http", d["name"], self.client_ip(), org_id=d["org_id"])
+            db.event(d["id"], d["org_id"], "management https", f"TikManager switched back to HTTP for this router (by {s['email']})")
+            return self.json({"ok": True, "message": "TikManager uses HTTP for this router again (www-ssl was left as it is)."})
         if path == "/api/exceptions":   # accept a finding on one router: {device_id, key: "hd:<title>" | "cc:<check>", reason}
             s = self.require(tech=True, write=True)
             b = self.body()
@@ -1723,6 +1764,16 @@ class Handler(BaseHTTPRequestHandler):
                 bk = backups.run(d["id"], "pre-fix", s["email"])
                 if not bk.get("ok"):
                     return st("failed", f"Not changed - the backup failed ({bk.get('detail')}).")
+                if fix == "use_https":
+                    try:
+                        st("applying", "Setting up HTTPS (a new certificate can take a minute on small routers)…")
+                        cl = poller.client(d)
+                        msg = switch_https(d, s["email"], cl)
+                        poller.collect_vpns(db.one("SELECT * FROM devices WHERE id=?", (d["id"],)))
+                    except RouterError as e:
+                        return st("failed", str(e))
+                    db.audit(s["email"], "management https", d["name"], ip, org_id=d["org_id"])
+                    return st("done", msg)
                 try:
                     st("applying", "Changing the setting…")
                     inv = json.loads(d.get("vpn_inv") or "null") or {}
@@ -1734,7 +1785,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         cl.post(path_, body)
                     except RouterError as e:   # a known refusal with a known way round it (healthdash.fix_retry), else give up
-                        alt = healthdash.fix_retry(fix, e)
+                        alt = healthdash.fix_retry(fix, e, body)
                         if not alt:
                             raise
                         st("applying", "Changing the setting (second try)…")

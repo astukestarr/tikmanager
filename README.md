@@ -580,9 +580,24 @@ cryptography, which MikroTik can't provide (CUI needs a FIPS-validated VPN on to
 
 TikManager manages routers over REST on the WebFig (www) service, inside its WireGuard tunnel. Unless that service is
 limited to management addresses (/ip service set www address=...), "Management traffic is encrypted" isn't met - WebFig
-answers plain HTTP on the LAN. **Never disable www** - TikManager would lose the router. Use the one-click **Limit WebFig
+answers plain HTTP on the LAN. **Never disable www while TikManager uses it** - switch the router to HTTPS first (router
+page > Settings > Management connection, or Fix all on "TikManager manages this router over HTTP"), then **Turn off
+WebFig over HTTP**. Use the one-click **Limit WebFig
 (HTTP) to TikManager** on Performance & security (you can also allow the client's admin addresses; www-ssl and Winbox
 aren't touched, and the router undoes it by itself if TikManager loses contact), or accept it with the reason.
+
+### HTTPS management connection
+
+TikManager talks to each router's REST API inside its WireGuard tunnel, over HTTP by default. **Switch to HTTPS**
+(router Settings tab, or the one-click fix for many routers) backs the router up and readies www-ssl without disturbing
+anyone using it: it keeps an existing certificate (makes a self-signed `tikmanager-https` one only if there's none),
+keeps a port other than 443, and moves 443 to 8443 / 9443 / 10443 / 18443 only when SSTP or another service already
+holds 443. It makes sure www-ssl isn't open to the world: TikManager's tunnel address only if the service was off, the
+private ranges + TikManager if it was open to everyone, the existing "available from" list + TikManager otherwise. It
+switches only after HTTPS answers; otherwise www-ssl is put back as it was. HTTP stays as a fallback (used only when
+the HTTPS connection can't be opened, and recorded as an event) until you turn WebFig over HTTP off. The certificate
+isn't verified - the router is already authenticated by its WireGuard key inside the tunnel, and client certificates
+get renewed - its fingerprint at switch time is shown on the Settings tab.
 
 ## Remote access (WireGuard for Windows)
 

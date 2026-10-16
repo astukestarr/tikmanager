@@ -12,6 +12,7 @@ import random
 import time
 import hashlib
 import re
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -26,18 +27,52 @@ class RouterError(Exception):
     pass
 
 
+class NoConnection(RouterError):
+    """The connection couldn't be opened (refused, TLS handshake, connect timeout) - so the request never reached the
+    router and is safe to send again another way."""
+
+
+# HTTPS to the router runs inside TikManager's WireGuard tunnel, where the router is already authenticated by its
+# WireGuard key - the certificate (often self-signed, or the client's own and renewed now and then) isn't verified;
+# TLS adds encryption on the router's side and lets WebFig over plain HTTP be switched off.
+TLS = ssl.create_default_context()
+TLS.check_hostname, TLS.verify_mode = False, ssl.CERT_NONE
+HTTPS_CERT = "tikmanager-https"
+PRIVATE = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+TLS_PORTS = (8443, 9443, 10443, 18443)   # for www-ssl when 443 is taken (SSTP, another service)
+
+
+def _yes(v):
+    return str(v).lower() in ("true", "yes")
+
+
+def _covers(addr_list, ip):
+    import ipaddress
+    for a in str(addr_list or "").split(","):
+        try:
+            if a.strip() and ipaddress.ip_address(ip) in ipaddress.ip_network(a.strip(), strict=False):
+                return True
+        except ValueError:
+            pass
+    return False
+
+
 class RouterOS:
-    def __init__(self, ip, user, password, timeout=8, port=80):
+    def __init__(self, ip, user, password, timeout=8, port=80, tls_port=None):
+        self.ip = ip
         self.base = f"http://{ip}/rest" if int(port) == 80 else f"http://{ip}:{int(port)}/rest"
+        self.tls_base = f"https://{ip}:{int(tls_port)}/rest" if tls_port else None
         self.auth = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
         self.timeout = timeout
+        self.fell_back = False     # HTTPS didn't connect, this client carries on over HTTP
+        self.on_fallback = None    # poller: record it (once in a while) and avoid HTTPS for a few minutes
 
-    def _req(self, method, path, body=None, timeout=None):
+    def _send(self, base, method, path, body, timeout, ctx):
         data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(self.base + path, data=data, method=method,
+        req = urllib.request.Request(base + path, data=data, method=method,
                                      headers={"Authorization": self.auth, "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
+            with urllib.request.urlopen(req, timeout=timeout or self.timeout, context=ctx) as r:
                 raw = r.read()
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as e:
@@ -45,8 +80,20 @@ class RouterOS:
             if e.code == 401:
                 raise RouterError("The router refused TikManager's login (was the tikmanager user changed?)") from None
             raise RouterError(f"HTTP {e.code}: {detail}") from None
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
+        except urllib.error.URLError as e:   # urllib wraps only failures while connecting / sending - never a request the router ran
+            raise NoConnection(f"Unreachable over the tunnel: {getattr(e, 'reason', e)}") from None
+        except (TimeoutError, OSError) as e:
             raise RouterError(f"Unreachable over the tunnel: {getattr(e, 'reason', e)}") from None
+
+    def _req(self, method, path, body=None, timeout=None):
+        if self.tls_base and not self.fell_back:
+            try:
+                return self._send(self.tls_base, method, path, body, timeout, TLS)
+            except NoConnection as e:   # HTTPS isn't answering (service off, port or certificate changed): HTTP, if it's still on
+                self.fell_back = True
+                if self.on_fallback:
+                    self.on_fallback(str(e))
+        return self._send(self.base, method, path, body, timeout, None)
 
     def get(self, path):
         return self._req("GET", path)
@@ -55,6 +102,80 @@ class RouterOS:
         """Raises RouterError unless the router answers over the tunnel now (strict - unlike optional() reads)."""
         self._req("GET", "/system/identity", timeout=10)
         return True
+
+    # --- HTTPS for TikManager's own management connection ----------------------------------------------------------
+    def https_setup(self, tm_ip):
+        """Get www-ssl ready for TikManager without disturbing anyone using it: keep its certificate and port if it has
+        them (a self-signed "tikmanager-https" certificate only when it has none; port 443 moves to 8443... only when
+        SSTP or another service holds 443), and make sure it isn't open to the world - TikManager's tunnel address only if
+        the service was off, the private ranges + TikManager if it was open to everyone, else the existing list + TikManager.
+        Returns what to connect to and what to put back (https_revert)."""
+        svcs = self.get("/ip/service") or []
+        s = next((x for x in svcs if x.get("name") == "www-ssl"), None)
+        if not s:
+            raise RouterError("This router has no www-ssl service.")
+        prop = "available-from" if "available-from" in s else "address"
+        was_off = _yes(s.get("disabled"))
+        port = int(s.get("port") or 443)
+        prev = {"id": s[".id"], "prop": prop, "addr": s.get(prop) or "", "disabled": "yes" if was_off else "no",
+                "certificate": s.get("certificate") or "none", "port": str(port)}
+        body, created = {}, False
+        cert = s.get("certificate") or "none"
+        if cert == "none":
+            if not self.get(f"/certificate?name={HTTPS_CERT}"):
+                r = self._req("PUT", "/certificate", {"name": HTTPS_CERT, "common-name": self.ip, "key-size": "2048", "days-valid": "3650",
+                                                      "key-usage": "digital-signature,key-encipherment,tls-server"}, timeout=30)
+                try:
+                    self._req("POST", "/certificate/sign", {".id": (r or {}).get(".id") or HTTPS_CERT}, timeout=120)
+                except RouterError as e:
+                    if "HTTP 400" in str(e):
+                        self._req("POST", "/certificate/sign", {"number": HTTPS_CERT}, timeout=120)
+                created = True
+            for _ in range(90):   # signing a 2048-bit key takes a while on small routers
+                c = (self.get(f"/certificate?name={HTTPS_CERT}") or [{}])[0]
+                if c.get("fingerprint") or _yes(c.get("private-key")):
+                    break
+                time.sleep(1)
+            else:
+                raise RouterError("The router didn't finish making its HTTPS certificate in time - try again in a minute.")
+            body["certificate"] = cert = HTTPS_CERT
+        if was_off and port == 443:   # turning it on: don't collide with SSTP (or anything else) on 443
+            used = {int(x.get("port") or 0) for x in svcs if x.get("name") != "www-ssl" and not _yes(x.get("disabled"))}
+            sstp = self.optional(lambda: self.get("/interface/sstp-server/server"), {}) or {}
+            sstp = sstp[0] if isinstance(sstp, list) and sstp else sstp if isinstance(sstp, dict) else {}
+            if _yes(sstp.get("enabled")):
+                used.add(int(sstp.get("port") or 443))
+            if 443 in used:
+                port = next(p for p in TLS_PORTS if p not in used)
+                body["port"] = str(port)
+        addr = s.get(prop) or ""
+        want = f"{tm_ip}/32" if was_off else ",".join(list(PRIVATE) + [f"{tm_ip}/32"]) if not addr else \
+            addr if _covers(addr, tm_ip) else f"{addr},{tm_ip}/32"
+        if want != addr:
+            body[prop] = want
+        if was_off:
+            body["disabled"] = "no"
+        if body:
+            self._req("PATCH", f"/ip/service/{s['.id']}", body, timeout=15)
+        return {"port": port, "cert": cert, "created_cert": created, "prev": prev, "allowed": want, "changed": body}
+
+    def https_test(self, port):
+        """Fetch the identity over HTTPS only (no fallback). Returns the certificate's SHA-256 fingerprint."""
+        self._send(f"https://{self.ip}:{int(port)}/rest", "GET", "/system/identity", None, 20, TLS)
+        try:
+            pem = ssl.get_server_certificate((self.ip, int(port)), timeout=10)
+            return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+        except (OSError, ValueError):
+            return ""
+
+    def https_revert(self, info):
+        """Put www-ssl back exactly as https_setup found it (and remove a certificate it made)."""
+        p = info["prev"]
+        self._req("PATCH", f"/ip/service/{p['id']}", {p["prop"]: p["addr"], "disabled": p["disabled"], "certificate": p["certificate"],
+                                                     "port": p["port"]}, timeout=15)
+        if info.get("created_cert"):
+            for c in self.get(f"/certificate?name={HTTPS_CERT}") or []:
+                self._req("DELETE", f"/certificate/{c['.id']}", timeout=15)
 
     def post(self, path, body):
         return self._req("POST", path, body, timeout=15)
@@ -421,7 +542,7 @@ class RouterOS:
         # for the Performance & Security dashboard (healthdash.py) - settings only, never secrets
         "/ip/ipsec/proposal": ("name", "auth-algorithms", "enc-algorithms", "pfs-group", "disabled"),
         "/ip/ipsec/profile": ("name", "hash-algorithm", "enc-algorithm", "dh-group"),
-        "/ip/service": ("name", "port", "disabled", "address"),
+        "/ip/service": ("name", "port", "disabled", "address", "available-from", "certificate"),   # 7.20+ renamed address
         "/ip/firewall/filter": ("chain", "action", "disabled", "protocol", "dst-port", "src-address", "src-address-list", "dst-address",
                                 "dst-address-list", "in-interface", "in-interface-list", "connection-state", "connection-nat-state"),
         "/ip/dns": ("allow-remote-requests",),
@@ -865,6 +986,19 @@ class SimRouter:
     def reachable(self):
         return True
 
+    def https_setup(self, tm_ip):
+        time.sleep(0.5)
+        port = 8443 if self.id % 3 == 0 else 443   # some simulated routers have SSTP on 443
+        self.post("/ip/service/set", {"numbers": "www-ssl", "disabled": "no", "port": str(port), "certificate": HTTPS_CERT,
+                                      "address": ",".join(list(PRIVATE) + [f"{tm_ip}/32"])})
+        return {"port": port, "cert": HTTPS_CERT, "created_cert": True, "prev": {"id": "*sim"}, "allowed": "", "changed": {}}
+
+    def https_test(self, port):
+        return hashlib.sha256(f"sim-cert-{self.id}".encode()).hexdigest()
+
+    def https_revert(self, info):
+        self.post("/ip/service/set", {"numbers": "www-ssl", "disabled": "yes", "port": "443", "certificate": "none", "address": ""})
+
     def ping(self, target="1.1.1.1", count=3):
         r = random.Random(int(time.time() // 60) * 7 + self.id)
         base = 8 + self.id % 30
@@ -1118,7 +1252,8 @@ class SimRouter:
             inv["/ppp/active"] = [{"name": "vendor", "service": "pptp", "caller-id": "73.12.4.8", "address": "10.9.9.2", "uptime": "2h"}]
         # dashboard settings: mostly MikroTik defaults, with a few common mistakes on some routers
         inv["/ip/service"] = [{"name": n, "port": str(p), "disabled": "true" if n in ("telnet", "ftp", "api", "api-ssl") and self.id % 3 else "false", "address": ""}
-                              for n, p in (("telnet", 23), ("ftp", 21), ("www", 80), ("ssh", 22), ("winbox", 8291), ("api", 8728), ("api-ssl", 8729))]
+                              for n, p in (("telnet", 23), ("ftp", 21), ("www", 80), ("ssh", 22), ("winbox", 8291), ("api", 8728), ("api-ssl", 8729))] + \
+            [{"name": "www-ssl", "port": "443", "disabled": "true", "address": "", "certificate": "none"}]
         inv["/ip/firewall/filter"] = [{"chain": "input", "action": "accept", "connection-state": "established,related,untracked"},
                                       {"chain": "input", "action": "accept", "protocol": "tcp", "dst-port": "8291"} if self.id % 4 == 3 else
                                       {"chain": "input", "action": "accept", "protocol": "icmp"}] + \

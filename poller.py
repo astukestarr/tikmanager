@@ -26,12 +26,28 @@ class Poller:
         self.thumbs = None   # thumbs.Thumbs, set by the server
         self._prev_if = {}   # device id -> {interface: (time, rx bytes, tx bytes)}
         self._gps = {}   # device id -> when its GPS was last read (every 6 hours)
+        self._tls_down, self._tls_said = {}, {}   # device id -> when HTTPS last failed / when that was last recorded
         self._last_prune = 0
 
     def client(self, d):
         if self.s.dev:
             return SimRouter(d["id"], d["name"])
-        return RouterOS(d["tunnel_ip"], "tikmanager", derive(self.key, f"router-api:{d['id']}"), port=d.get("api_port") or 80)
+        tls = d.get("api_tls_port") if time.time() - self._tls_down.get(d["id"], 0) > 600 else None   # HTTPS failed just now: HTTP for 10 min
+        cl = RouterOS(d["tunnel_ip"], "tikmanager", derive(self.key, f"router-api:{d['id']}"), port=d.get("api_port") or 80, tls_port=tls)
+        if tls:
+            cl.on_fallback = lambda why, d=d: self._tls_fallback(d, why)
+        return cl
+
+    def _tls_fallback(self, d, why):
+        """HTTPS to a router that's set to use it didn't connect, and the client went on over HTTP: say so (every 6 hours at most)."""
+        first = d["id"] not in self._tls_down
+        last = self._tls_said.get(d["id"], 0)
+        self._tls_down[d["id"]] = time.time()
+        if first or time.time() - last > 6 * 3600:
+            self._tls_said[d["id"]] = time.time()
+            self.db.event(d["id"], d["org_id"], "https fallback",
+                          f"HTTPS to the router didn't connect ({why[:150]}) - TikManager used HTTP instead. Check www-ssl on the router "
+                          "(on, certificate, port), or switch the router back to HTTP on its Settings tab.")
 
     @staticmethod
     def isp_links(ifaces, chosen=None):

@@ -82,6 +82,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Performance & Security dashboard | `healthdash.py` (`build`, `exposure`, `CATEGORIES`), extra fields in `RouterOS.INVENTORY`, `/api/health-dash`, `healthPage()` in `app.js` |
 | Compliance (frameworks, client report) | `compliance.py` (`CHECKS`, `FRAMEWORKS`, `evaluate`, `scorecard`, `report_html/csv`), `/api/compliance*`, `compliancePage()` in `app.js`, `static/report.css` + `report.js` |
 | Accepted findings (exceptions) | `exceptions` table, `exceptions_map()` + `/api/exceptions` in `server.py`; keys `hd:<dashboard title>` / `cc:<check id>`; `compliance.HD` / `ITEM_HD` map them onto checks |
+| HTTPS management connection | `RouterOS(tls_port=...)` + `_req` fallback (`NoConnection` only), `https_setup/test/revert` (+ `SimRouter`), `Poller.client/_tls_fallback`, `switch_https()` + `/api/devices/<id>/mgmt-https` in `server.py`, `devices.api_tls_port/api_tls_fp` |
 | One-click security fixes | `healthdash.FIXES` / `fix_request` / `fix_retry`, `/api/health-dash/fix` (background job, `FIX_JOBS`), `fixJobBox()` in `app.js` |
 | Remote access (WireGuard for Windows into a router) | `remoteaccess.py` (`RemoteAccess.setup/add_user/download/revoke/remove`, `keypair`), `RouterOS.ra_*`, `raTab()` in `app.js` |
 | Send email | `mailer.Mailer.send()` (`server.mailer`, `alerts.mailer`); settings in `integrations.py` FIELDS "mail" |

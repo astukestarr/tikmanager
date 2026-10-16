@@ -452,6 +452,17 @@ async function router(id) {
           ${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}" ${d.kind_override === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <div class="actions"><button class="btn primary" type="button" id="mSave">Save</button><span class="status" id="mMetaStatus"></span></div></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? ispSettings(d) : ""}
+      ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Management connection</h2>
+        <p class="small muted">How TikManager talks to this router's REST API - always inside its encrypted WireGuard tunnel.</p>
+        ${d.api_tls_port ? `<p><span class="pill up-done">HTTPS</span> on port <b>${esc(String(d.api_tls_port))}</b>${d.api_tls_fp ? ` <span class="small muted mono" title="Certificate SHA-256 when it was switched">${esc(d.api_tls_fp.slice(0, 16))}…</span>` : ""}</p>
+          <p class="small muted">If HTTPS ever stops answering, TikManager carries on over HTTP (while WebFig over HTTP is on) and records an event.
+            Once this works, Performance &amp; security offers to turn WebFig over HTTP off.</p>
+          <div class="row"><button class="btn" type="button" id="mgHttp">Use HTTP again</button><span class="status" id="mgSt"></span></div>`
+        : `<p><span class="pill up-run">HTTP</span> - the REST API on the router's www service.</p>
+          <p class="small muted"><b>Switch to HTTPS</b> sets up www-ssl and moves TikManager to it only once HTTPS answers - HTTP keeps working meanwhile.
+            A port other than 443 and an existing certificate are kept; 443 moves to 8443 only if SSTP or another service uses it.
+            www-ssl is limited to the LAN ranges + TikManager if it was open to everyone (TikManager only if it was off). The router is backed up first.</p>
+          <div class="row"><button class="btn primary" type="button" id="mgHttps">Switch to HTTPS</button><span class="status" id="mgSt"></span></div>`}</div>` : ""}
       ${on("events") ? `<div class="card"><h2>Events</h2>${d.events.length ? `<table><tbody>${d.events.map((e) => `<tr><td class="nowrap">${when(e.ts)}</td><td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None yet.</p>`}</div>` : ""}
       ${canWrite() && on("settings") ? `<div class="card"><h2>Manage</h2>
         ${d.state === "adopted" ? `<div class="row"><label class="field">Router identity (on the MikroTik) <input id="rIdent" value="${esc(d.identity || "")}" maxlength="64" spellcheck="false"></label>
@@ -533,6 +544,15 @@ async function router(id) {
   if ($("topoCard")) loadTopology(d);
   if ($("fwCard")) loadFirewall(d);
   if ($("raRoot")) raTab(d);
+  const mg = async (on) => {
+    const b = $(on ? "mgHttps" : "mgHttp");
+    b.disabled = true; $("mgSt").textContent = on ? "Backing up, then setting up HTTPS (a new certificate can take a minute)…" : "…"; $("mgSt").className = "status";
+    rView.hold = true;
+    try { const r = await post(`/api/devices/${d.id}/mgmt-https`, { on }); rView.hold = false; await router(d.id); $("mgSt") && ($("mgSt").textContent = r.message, $("mgSt").className = "status ok"); }
+    catch (e) { rView.hold = false; b.disabled = false; $("mgSt").textContent = e.message; $("mgSt").className = "status err"; }
+  };
+  $("mgHttps")?.addEventListener("click", () => mg(true));
+  $("mgHttp")?.addEventListener("click", () => mg(false));
   if ($("rvRoot")) rvTab(d).catch(() => {});
   if ($("wbBox")) loadWinbox(d);
   loadLocation(d);

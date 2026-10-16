@@ -43,14 +43,52 @@ FIXES = {
                "working for addresses you don't also allow; WebFig over HTTPS (www-ssl) and Winbox are separate and not touched. "
                "If TikManager can't reach the router afterwards, the router puts the old setting back by itself within 2 minutes."),
 }
+FIXES.update({
+    "use_https": ("Switch TikManager to HTTPS", None, None,
+                  "TikManager sets up www-ssl and moves to it only once HTTPS answers; HTTP stays as it is (TikManager falls back to it if "
+                  "HTTPS ever stops). A port other than 443 and an existing certificate are kept; 443 moves to 8443 only when SSTP or another "
+                  "service already uses it. www-ssl is limited to the LAN ranges + TikManager if it was open to everyone (TikManager only "
+                  "if it was off), so it isn't open to the internet."),
+    "www_off": ("Turn off WebFig over HTTP (TikManager uses HTTPS)", "/ip/service/set", {"numbers": "www", "disabled": "yes"},
+                "TikManager already manages this router over HTTPS. WebFig over plain HTTP stops for everyone - use WebFig over HTTPS or "
+                "Winbox. If TikManager can't reach the router afterwards, the router turns HTTP back on by itself within 2 minutes."),
+    "wwwssl_lan": ("Limit WebFig over HTTPS to the LAN and TikManager", "/ip/service/set", {"numbers": "www-ssl"},
+                   "www-ssl's \"available from\" becomes the private ranges (10/8, 172.16/12, 192.168/16) + TikManager, so it can't be "
+                   "reached from the internet. If TikManager can't reach the router afterwards, the router puts it back within 2 minutes."),
+})
 TM_IP = "10.77.0.1"   # TikManager's tunnel address (server.py sets it from WG_SERVER_IP) - the source of every REST call
-GUARDED = {"www_tm"}   # fixes that touch how TikManager reaches the router: armed undo on the router, kept only if still reachable
+GUARDED = {"www_tm", "www_off", "wwwssl_lan"}   # fixes that touch how TikManager reaches the router: armed undo, kept only if still reachable
+PRIVATE = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+
+
+def svc_addr(s):
+    """A service's "available from" list (RouterOS 7.20+ calls it available-from, older versions address)."""
+    return s.get("available-from") or s.get("address") or ""
+
+
+def svc_prop(inv):
+    return "available-from" if any("available-from" in s for s in inv.get("/ip/service", [])) else "address"
+
+
+def _svc_restore(name, old):
+    """RouterOS script setting a service's address list back - under either property name (:parse, as the adoption does)."""
+    if not SAFE_ADDR.match(old):
+        raise ValueError(f"unexpected address list on the {name} service")
+    return (f':do {{ :local f [:parse "/ip service set [find name={name}] available-from=\\"{old}\\""]; $f }} '
+            f'on-error={{ :local f [:parse "/ip service set [find name={name}] address=\\"{old}\\""]; $f }}')
 SAFE_ADDR = re.compile(r"^[0-9A-Fa-f.:/,]*$")
 
 
-def fix_retry(fix_id, error):
+def fix_retry(fix_id, error, body=None):
     """A second attempt when the router refused the first for a known reason, else None. RouterOS won't turn on SSH
     strong-crypto while its cipher list allows null ("strong-crypto and none cipher can't be used at the same time")."""
+    if body and ("address" in body or "available-from" in body) and "unknown parameter" in str(error):   # 7.20+ renamed it
+        b = dict(body)
+        if "address" in b:
+            b["available-from"] = b.pop("address")
+        else:
+            b["address"] = b.pop("available-from")
+        return "/ip/service/set", b
     if fix_id == "ssh_strong" and "none cipher" in str(error):
         return "/ip/ssh/set", {"ciphers": "aes-ctr,aes-gcm", "strong-crypto": "yes"}
     if fix_id == "macsrv_lan" and "allowed-interface-list" in str(error):   # no interface list called LAN (switches, custom setups)
@@ -60,11 +98,11 @@ def fix_retry(fix_id, error):
 
 def fix_undo(fix_id, inv):
     """RouterOS script that puts a guarded fix back (run by a scheduler unless TikManager cancels it), else None."""
-    if fix_id == "www_tm":
-        old = next((s.get("address") or "" for s in inv.get("/ip/service", []) if s.get("name") == "www"), "")
-        if not SAFE_ADDR.match(old):
-            raise ValueError("unexpected address list on the www service")
-        return f'/ip service set [find name=www] address="{old}"'
+    if fix_id in ("www_tm", "wwwssl_lan"):
+        name = "www" if fix_id == "www_tm" else "www-ssl"
+        return _svc_restore(name, next((svc_addr(s) for s in inv.get("/ip/service", []) if s.get("name") == name), ""))
+    if fix_id == "www_off":
+        return "/ip service set [find name=www] disabled=no"
     return None
 
 
@@ -83,7 +121,9 @@ def fix_request(fix_id, inv, extra=None):
     _, path, body, _ = FIXES[fix_id]
     body = dict(body)
     if fix_id == "www_tm":   # TikManager's tunnel address first, then any addresses the technician also allows
-        body["address"] = ",".join(dict.fromkeys([f"{TM_IP}/32"] + list(extra or [])))
+        body[svc_prop(inv)] = ",".join(dict.fromkeys([f"{TM_IP}/32"] + list(extra or [])))
+    if fix_id == "wwwssl_lan":
+        body[svc_prop(inv)] = ",".join(list(PRIVATE) + [f"{TM_IP}/32"])
     if fix_id == "ntp_on" and not ((inv.get("/system/ntp/client") or [{}])[0].get("servers")):
         body["servers"] = "time.cloudflare.com"
     return path, body
@@ -115,7 +155,7 @@ def exposure(inv):
     open_svc = {}
     for s in inv.get("/ip/service", []):
         name = s.get("name")
-        if name not in MGMT or yes(s.get("disabled")) or s.get("address"):   # off, or limited to some addresses on the router
+        if name not in MGMT or yes(s.get("disabled")) or svc_addr(s):   # off, or limited to some addresses on the router
             continue
         port = int(s.get("port") or MGMT[name])
         if catch_all is None:
@@ -195,7 +235,8 @@ def build(rows, metrics, flaps, now=None):
                     why, (f"Don't disable it - TikManager manages the router through it. Limit it to TikManager's tunnel address ({TM_IP}) "
                           "with the one-click fix (or add your management network too: /ip service set www address=...)." if name == "www" else
                           f"Limit /ip service {name} to your management addresses (address=...), or drop it on the WAN in the input chain."),
-                    "www_tm" if name == "www" else f"svc_{name}" if f"svc_{name}" in FIXES else None)
+                    ("www_off" if d.get("api_tls_port") else "www_tm") if name == "www" else "wwwssl_lan" if name == "www-ssl"
+                    else f"svc_{name}" if f"svc_{name}" in FIXES else None)
             if not caught:
                 add(d, "critical" if open_svc else "high", "Exposure", "Input firewall has no catch-all drop",
                     "Anything the router itself offers is reachable from the internet.",
@@ -203,11 +244,15 @@ def build(rows, metrics, flaps, now=None):
             for s in inv.get("/ip/service", []):
                 if s.get("name") in PLAINTEXT and not yes(s.get("disabled")) and s.get("name") not in open_svc:
                     if s["name"] == "www":   # TikManager's own way in (REST) - never disable it; limit who can reach it
-                        if not s.get("address"):
+                        if d.get("api_tls_port"):   # TikManager is on HTTPS: plain HTTP can go
+                            add(d, "medium", "Exposure", "WebFig over plain HTTP enabled",
+                                "Passwords cross the network in plain text. TikManager already uses HTTPS for this router, so HTTP isn't needed.",
+                                "Turn WebFig over HTTP off (one-click, undone by the router itself if TikManager lost contact).", "www_off")
+                        elif not svc_addr(s):
                             add(d, "medium", "Exposure", "WebFig over plain HTTP enabled",
                                 "Anyone on the LAN can open WebFig over plain HTTP, so passwords cross the network unencrypted.",
-                                f"Don't disable www - TikManager manages the router through it. Limit it to TikManager's tunnel address ({TM_IP}) "
-                                "with the one-click fix; add your management network if people use WebFig over HTTP from there.", "www_tm")
+                                f"Don't disable www while TikManager uses it - switch TikManager to HTTPS first, then turn HTTP off; or limit www "
+                                f"to TikManager's tunnel address ({TM_IP}) and your admin addresses with the one-click fix.", "www_tm")
                         continue
                     add(d, "medium", "Exposure", f"{PLAINTEXT[s['name']]} enabled", "Passwords cross the network in plain text.",
                         f"/ip service disable {s['name']} (use {'SSH' if s['name'] in ('telnet', 'ftp') else 'HTTPS / api-ssl'} instead).",
@@ -265,6 +310,10 @@ def build(rows, metrics, flaps, now=None):
                 weak = WEAK_ENC.findall(str(s.get("cipher") or "")) + WEAK_HASH.findall(str(s.get("auth") or ""))
                 if weak:
                     add(d, "medium", "Encryption", "Weak OpenVPN ciphers", ", ".join(sorted(set(weak))), "Allow only aes-256-gcm / aes-256-cbc with sha256.")
+        if inv.get("/ip/service") and not d.get("api_tls_port"):
+            add(d, "low", "Encryption", "TikManager manages this router over HTTP",
+                "The connection runs inside TikManager's encrypted WireGuard tunnel; HTTPS adds a second layer and lets WebFig over plain "
+                "HTTP be turned off.", "Switch to HTTPS (one-click, or the router's Settings tab) - HTTP keeps working until HTTPS is proven.", "use_https")
         ssh = (inv.get("/ip/ssh") or [{}])[0]
         if ssh and str(ssh.get("strong-crypto") or "") in ("no", "false"):
             null = "null" in str(ssh.get("ciphers") or "")

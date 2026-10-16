@@ -3,6 +3,25 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.14 - 2026-10-16
+
+- **TikManager can manage routers over HTTPS** (router page > Settings > Management connection > **Switch to HTTPS**,
+  or **Fix all** on Performance & security's "TikManager manages this router over HTTP"). After a backup, TikManager
+  gets www-ssl ready without disturbing anyone using it: an existing certificate is kept (a self-signed
+  "tikmanager-https" one is made only when there's none); a port other than 443 is kept, and 443 moves to 8443 (or
+  9443 ...) only when SSTP or another service already uses it; and www-ssl is not left open to the world - TikManager's
+  tunnel address only if it was off, the private ranges (10/8, 172.16/12, 192.168/16) + TikManager if it was open to
+  everyone, the existing list + TikManager otherwise. TikManager switches only after HTTPS answers over its tunnel; if
+  it doesn't, www-ssl is put back exactly as it was and nothing changes. HTTP keeps working: if HTTPS ever stops
+  answering, TikManager carries on over HTTP and records an event (it retries HTTPS after 10 minutes). The fallback only
+  happens when the HTTPS connection can't be opened, so a command is never sent twice. **Use HTTP again** switches
+  back without touching the router.
+- Once a router is on HTTPS, "WebFig over plain HTTP enabled" offers **Turn off WebFig over HTTP** (guarded: the router
+  turns it back on by itself within 2 minutes if TikManager loses contact), and "www-ssl reachable from the internet"
+  offers **Limit WebFig over HTTPS to the LAN and TikManager** (guarded too).
+- RouterOS 7.20+ renamed the services' "address" to "available-from": the dashboard, compliance and the WebFig fixes
+  now read and set either, so a restricted service on a newer router is no longer reported as open.
+
 ## 1.46.0-beta.13 - 2026-10-16
 
 - **Fix: Security > Worth a look > show seemed to do nothing** - it filtered the Events list, which is at the bottom
