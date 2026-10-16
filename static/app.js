@@ -3971,8 +3971,8 @@ async function raTab(d, note) {
           <span class="small muted">Each person gets one address from it; must not overlap the router's networks.${(x.users || []).length ? " Remove everyone to change it." : ""}</span></label>
         <label class="field">DNS for people <input id="raDns" value="${esc(cfg.dns || "")}" placeholder="e.g. 192.168.1.10, corp.local" ${rw ? "" : "disabled"}>
           <span class="small muted">The office DNS server${cfg.dns ? "" : " - <b>set this on a Windows domain</b>, or names like fileserver and corp.local go to the laptop's own DNS"}.
-            Add the <b>domain</b> too (e.g. <span class="mono">192.168.1.10, corp.local</span>): it becomes the search domain, and the RMM install script pins that
-            domain to the office DNS server. Only configs made after a change get it - give existing people a new config.</span></label>
+            Add the <b>domain</b> too (e.g. <span class="mono">192.168.1.10, corp.local</span>): it becomes the DNS suffix (type <span class="mono">ad</span>, get
+            <span class="mono">ad.corp.local</span>), and the RMM install script also sets it on the tunnel adapter and pins the domain to the office DNS server. Only configs made after a change get it - give existing people a new config.</span></label>
       </div>
       <div class="field"><span>What goes through the tunnel</span>
         <label class="chk"><input type="radio" name="raSplit" value="1" ${cfg.split !== 0 && cfg.split !== false ? "checked" : ""} ${rw ? "" : "disabled"}> Only the office networks (recommended)</label>

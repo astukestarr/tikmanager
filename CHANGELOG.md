@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.7 - 2026-10-16
+
+- **DNS suffix for the office domain**: the RMM install script now also sets the domain (e.g. `corp.local`) as the
+  tunnel adapter's DNS suffix, so typing `ad` finds `ad.corp.local`. Where a global DNS suffix search list is already
+  set on the laptop (often by Group Policy - Windows then ignores per-connection suffixes), the domain is added to it.
+  The .conf file already carries the domain as its search domain (WireGuard applies it when the tunnel is up).
+
 ## 1.46.0-beta.6 - 2026-10-16
 
 - **Remote access connection log**: who connected, when, from which public IP, for how long and how much data - read

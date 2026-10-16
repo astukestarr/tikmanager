@@ -491,8 +491,22 @@ class RemoteAccess:
             servers = ", ".join(f"'{x}'" for x in ips)
             nrpt = f"""Get-DnsClientNrptRule | Where-Object {{ $_.Comment -eq "TikManager $name" }} | ForEach-Object {{ Remove-DnsClientNrptRule -Name $_.Name -Force }}
 Add-DnsClientNrptRule -Namespace {spaces} -NameServers {servers} -Comment "TikManager $name"
-Clear-DnsClientCache
 """
+        if doms:   # DNS suffix: typing "ad" finds ad.corp.local
+            suffixes = ", ".join(f"'{x}'" for x in doms)
+            nrpt += f"""$suffixes = @({suffixes})
+for ($i = 0; $i -lt 30 -and -not (Get-NetAdapter -Name $name -ErrorAction SilentlyContinue); $i++) {{ Start-Sleep 1 }}
+if (Get-NetAdapter -Name $name -ErrorAction SilentlyContinue) {{
+  Set-DnsClient -InterfaceAlias $name -ConnectionSpecificSuffix $suffixes[0] -RegisterThisConnectionsAddress $false
+}}
+# Windows ignores the per-connection suffixes once a global suffix search list is set (often by Group Policy) - add ours to it then
+$global = @((Get-DnsClientGlobalSetting).SuffixSearchList | Where-Object {{ $_ }})
+if ($global.Count -and ($suffixes | Where-Object {{ $global -notcontains $_ }})) {{
+  Set-DnsClientGlobalSetting -SuffixSearchList @($global + ($suffixes | Where-Object {{ $global -notcontains $_ }}))
+}}
+"""
+        if nrpt:
+            nrpt += "Clear-DnsClientCache" + chr(10)
         return rf"""# TikManager remote access - installs WireGuard and the tunnel "{tun}" as an always-on service.
 # Run as SYSTEM / administrator (e.g. from your RMM). It holds this person's private key: run it once, then delete it.
 $ErrorActionPreference = 'Stop'
