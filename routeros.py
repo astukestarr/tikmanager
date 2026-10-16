@@ -124,13 +124,16 @@ class RouterOS:
         if cert == "none":
             signed = lambda c: bool(c.get("fingerprint")) or _yes(c.get("private-key"))
             tpl = (self.get(f"/certificate?name={HTTPS_CERT}") or [None])[0]
+            if tpl and not signed(tpl):   # an unsigned template from an earlier try (made without key-cert-sign): start again
+                self._req("DELETE", f"/certificate/{tpl['.id']}", timeout=15)
+                tpl = None
             if not tpl:
                 self._req("PUT", "/certificate", {"name": HTTPS_CERT, "common-name": self.ip, "key-size": "2048", "days-valid": "3650",
-                                                  "key-usage": "digital-signature,key-encipherment,tls-server"}, timeout=30)
+                                                  "key-usage": "digital-signature,key-encipherment,key-cert-sign,tls-server"}, timeout=30)   # key-cert-sign:
+                # it signs itself - without it RouterOS looks for a separate CA ("failure: CA not found")
                 created = True
-            if not tpl or not signed(tpl):   # new, or an unsigned template an earlier try left behind
-                # sign with the same command as the terminal (/execute, like the backups' export): the REST "sign" call's
-                # arguments differ between RouterOS versions ("failure: CA not found")
+            if not tpl or not signed(tpl):
+                # sign with the terminal command (/execute, like the backups' export) - its output carries the router's message
                 out = ""
                 try:
                     r = self._req("POST", "/execute", {"script": f"/certificate sign {HTTPS_CERT}", "as-string": ""}, timeout=120)

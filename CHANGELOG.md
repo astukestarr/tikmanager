@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.16 - 2026-10-16
+
+- **Fix: Switch to HTTPS still failed with "failure: CA not found"**. The real cause: the certificate TikManager made
+  was a pure server certificate (no key-cert-sign), so RouterOS couldn't sign it with itself and looked for a separate
+  CA. It's now made with key-cert-sign (as RouterOS's own default template has). An unsigned template left by an
+  earlier try is deleted and made again. Nothing changed on the routers that failed - run it again.
+
 ## 1.46.0-beta.15 - 2026-10-16
 
 - **Copy failures / Copy results** on the one-click fix progress box: the job as plain text - a line with what ran,
