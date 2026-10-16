@@ -1653,7 +1653,14 @@ class Handler(BaseHTTPRequestHandler):
                     inv = json.loads(d.get("vpn_inv") or "null") or {}
                     cl = poller.client(d)
                     path_, body = healthdash.fix_request(fix, inv)
-                    cl.post(path_, body)
+                    try:
+                        cl.post(path_, body)
+                    except RouterError as e:   # a known refusal with a known way round it (healthdash.fix_retry), else give up
+                        alt = healthdash.fix_retry(fix, e)
+                        if not alt:
+                            raise
+                        st("applying", "Changing the setting (second try)…")
+                        cl.post(*alt)
                     st("checking", "Re-checking…")
                     poller.collect_vpns(d, cl)   # re-read, so the dashboard shows the result straight away
                 except (RouterError, ValueError) as e:

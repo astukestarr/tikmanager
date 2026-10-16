@@ -426,7 +426,7 @@ class RouterOS:
         "/tool/bandwidth-server": ("enabled",),
         "/tool/mac-server": ("allowed-interface-list",),
         "/snmp": ("enabled",),
-        "/ip/ssh": ("strong-crypto",),
+        "/ip/ssh": ("strong-crypto", "ciphers"),
         "/system/ntp/client": ("enabled", "servers"),
         "/user": ("name", "group", "disabled"),
     }
@@ -1045,6 +1045,8 @@ class SimRouter:
 
     def post(self, path, body):
         time.sleep(0.3)
+        if path == "/ip/ssh/set" and body.get("strong-crypto") == "yes" and "ciphers" not in body and self.id % 2:   # like real routers allowing null
+            raise RouterError('HTTP 400: {"detail":"failure: strong-crypto and none cipher can\'t be used at the same time","error":400}')
         self._sim().setdefault("set", {})[path + (f"#{body['numbers']}" if body.get("numbers") else "")] = body
         return []
 

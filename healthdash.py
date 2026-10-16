@@ -25,7 +25,9 @@ WEAK_DH = re.compile(r"\b(modp768|modp1024|ec2n155|ec2n185)\b", re.I)
 # www service is deliberately not here - TikManager itself talks to routers over REST on it.
 # id: (button label, REST path, body, what it may affect)
 FIXES = {
-    "ssh_strong": ("Turn on SSH strong crypto", "/ip/ssh/set", {"strong-crypto": "yes"}, "Very old SSH clients (from before about 2015) may no longer connect."),
+    "ssh_strong": ("Turn on SSH strong crypto", "/ip/ssh/set", {"strong-crypto": "yes"},
+                   "Very old SSH clients (from before about 2015) may no longer connect. Where SSH also allows the null (no encryption) "
+                   "cipher, the cipher list is set to aes-ctr, aes-gcm."),
     "svc_telnet": ("Disable Telnet", "/ip/service/set", {"numbers": "telnet", "disabled": "yes"}, "Anyone still using Telnet uses SSH or Winbox instead."),
     "svc_ftp": ("Disable FTP", "/ip/service/set", {"numbers": "ftp", "disabled": "yes"}, "Anything uploading files to the router by FTP stops working."),
     "svc_api": ("Disable the plain-text API (port 8728)", "/ip/service/set", {"numbers": "api", "disabled": "yes"},
@@ -37,6 +39,14 @@ FIXES = {
     "macsrv_lan": ("Limit MAC Telnet to the LAN", "/tool/mac-server/set", {"allowed-interface-list": "LAN"}, "Needs an interface list called LAN (MikroTik's default)."),
     "ntp_on": ("Turn on NTP", "/system/ntp/client/set", {"enabled": "yes"}, "Uses time.cloudflare.com if no time server is set."),
 }
+
+
+def fix_retry(fix_id, error):
+    """A second attempt when the router refused the first for a known reason, else None. RouterOS won't turn on SSH
+    strong-crypto while its cipher list allows null ("strong-crypto and none cipher can't be used at the same time")."""
+    if fix_id == "ssh_strong" and "none cipher" in str(error):
+        return "/ip/ssh/set", {"ciphers": "aes-ctr,aes-gcm", "strong-crypto": "yes"}
+    return None
 
 
 def fix_request(fix_id, inv):
@@ -217,7 +227,9 @@ def build(rows, metrics, flaps, now=None):
                     add(d, "medium", "Encryption", "Weak OpenVPN ciphers", ", ".join(sorted(set(weak))), "Allow only aes-256-gcm / aes-256-cbc with sha256.")
         ssh = (inv.get("/ip/ssh") or [{}])[0]
         if ssh and str(ssh.get("strong-crypto") or "") in ("no", "false"):
-            add(d, "low", "Encryption", "SSH allows older ciphers", "strong-crypto is off.", "/ip ssh set strong-crypto=yes", "ssh_strong")
+            null = "null" in str(ssh.get("ciphers") or "")
+            add(d, "low", "Encryption", "SSH allows older ciphers", "strong-crypto is off" + (", and the null (no encryption) cipher is allowed." if null else "."),
+                "/ip ssh set ciphers=aes-ctr,aes-gcm strong-crypto=yes" if null else "/ip ssh set strong-crypto=yes", "ssh_strong")
         # --- VPN health ---------------------------------------------------------------------------------------------
         for t in vpninv.normalize(inv) if inv else []:
             dials_in = t.get("kind") == "WireGuard" and not t.get("remote")   # a laptop / phone peer: not connected most of the time

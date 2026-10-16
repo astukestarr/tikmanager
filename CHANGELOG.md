@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.10 - 2026-10-16
+
+- **Fix: "Turn on SSH strong crypto" failed** with "strong-crypto and none cipher can't be used at the same time" on
+  routers whose SSH cipher list allows null (no encryption). When a router gives that answer, the fix now sets the
+  cipher list to aes-ctr, aes-gcm together with strong-crypto (a second try - routers that don't need it are left as
+  they were). The dashboard also reads the SSH cipher list and says when null is allowed. Routers that failed: run
+  **Fix all** again.
+
 ## 1.46.0-beta.9 - 2026-10-16
 
 - **One-click fixes show their progress**: **Fix** / **Fix all** now starts a background job and a progress box lists
