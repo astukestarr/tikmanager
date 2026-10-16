@@ -140,6 +140,7 @@ geo_lock = threading.Lock()
 geo_last = [0.0]
 adopt_limit = RateLimiter(30, 300)     # per IP
 notes_limit = RateLimiter(60, 300)
+FIX_JOBS, FIX_LOCK = {}, threading.Lock()   # Performance & security one-click fixes in progress (and the last hour's)
 router_act_limit = RateLimiter(20, 300)   # VPN reconnects / re-reads per person (each one works a router)     # release-note lookups per technician (each may fetch from MikroTik)
 pending_logins: dict = {}              # ticket -> {user_id, created, enroll_secret}
 pending_lock = threading.Lock()
@@ -636,7 +637,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"findings": found, "routers": len(rows), "online": sum(1 for r in rows if r["online"]),
                               "clean": len({r["id"] for r in rows} - {f["device_id"] for f in found}), "unread": unread,
                               "categories": healthdash.CATEGORIES, "checked_at": t_now,
-                              "fixes": {k: {"label": v[0], "effect": v[3]} for k, v in healthdash.FIXES.items()}})
+                              "fixes": {k: {"label": v[0], "effect": v[3]} for k, v in healthdash.FIXES.items()},
+                              # this person's newest fix job (running, or finished in the last 10 minutes) - the page shows its progress
+                              "fix_job": next((j["id"] for j in sorted(FIX_JOBS.values(), key=lambda j: -j["started"]) if j["user"] == s["email"]
+                                               and (not j["finished"] or t_now - j["finished"] < 600)), None)})
+        if m := re.fullmatch(r"/api/health-dash/fix/([\w-]+)", path):   # one fix job's per-router progress
+            s = self.require(tech=True)
+            j = FIX_JOBS.get(m.group(1))
+            if not j or j["user"] != s["email"]:
+                raise HttpError(404, "That fix job has finished and was cleared.")
+            return self.json({"id": j["id"], "label": j["label"], "started": j["started"], "finished": j["finished"], "items": j["items"]})
         if m := re.fullmatch(r"/api/devices/(\d+)/vpns", path):   # router page > VPNs: every VPN found on this router
             s = self.require_vpn()
             d = self.device_for(s, m.group(1))
@@ -1600,45 +1610,73 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **remote.info(d["id"])})
-        if path == "/api/health-dash/fix":   # one-click fixes: [{device_id, fix}] - backup first, one fixed setting, re-check
+        if path == "/api/health-dash/fix":   # one-click fixes: [{device_id, fix}] -> a background job the page follows
             s = self.require(tech=True, write=True)
-            items = (self.body().get("items") or [])[:300]
-            ip = self.client_ip()
-
-            def one(it):
+            items, rows = [], {}
+            for it in (self.body().get("items") or [])[:300]:
                 fix = str(it.get("fix") or "")
                 try:
                     d = self.device_for(s, it.get("device_id"))
                 except HttpError as e:
-                    return {"device_id": it.get("device_id"), "router": "?", "fix": fix, "ok": False, "detail": str(e)}
-                res = {"device_id": d["id"], "router": d["name"], "fix": fix, "ok": False}
+                    items.append({"device_id": it.get("device_id"), "router": "?", "org": "", "fix": fix, "state": "failed", "detail": str(e)})
+                    continue
+                rows[d["id"]] = d
+                items.append({"device_id": d["id"], "router": d["name"], "org": "", "fix": fix, "state": "queued", "detail": ""})
+            job = {"id": secrets.token_urlsafe(8), "user": s["email"], "started": time.time(), "finished": None, "items": items,
+                   "label": healthdash.FIXES[items[0]["fix"]][0] if items and items[0]["fix"] in healthdash.FIXES else "Fix"}
+            with FIX_LOCK:
+                for k in [k for k, j in FIX_JOBS.items() if time.time() - j["started"] > 3600]:
+                    FIX_JOBS.pop(k)
+                FIX_JOBS[job["id"]] = job
+            ip = self.client_ip()
+
+            def one(it):
+                def st(state, detail=""):
+                    it["state"], it["detail"] = state, detail
+                d, fix = rows.get(it["device_id"]), it["fix"]
+                if it["state"] != "queued":
+                    return
                 if fix not in healthdash.FIXES:
-                    return {**res, "detail": "Not a one-click fix."}
+                    return st("failed", "Not a one-click fix.")
+                d = db.one("SELECT * FROM devices WHERE id=?", (d["id"],)) or d   # fresh: online, latest settings read
                 if not d["online"]:
-                    return {**res, "detail": "The router is offline."}
+                    return st("failed", "The router is offline.")
                 # only when the finding is really there (so the button can't be used to change anything else)
                 if not any(f.get("fix_id") == fix for f in healthdash.build([d], {}, {}, time.time())):
-                    return {**res, "ok": True, "detail": "Already fixed."}
+                    return st("done", "Already fixed.")
+                st("backup", "Backing up…")
                 bk = backups.run(d["id"], "pre-fix", s["email"])
                 if not bk.get("ok"):
-                    return {**res, "detail": f"Not changed - the backup failed ({bk.get('detail')})."}
+                    return st("failed", f"Not changed - the backup failed ({bk.get('detail')}).")
                 try:
+                    st("applying", "Changing the setting…")
                     inv = json.loads(d.get("vpn_inv") or "null") or {}
                     cl = poller.client(d)
                     path_, body = healthdash.fix_request(fix, inv)
                     cl.post(path_, body)
+                    st("checking", "Re-checking…")
                     poller.collect_vpns(d, cl)   # re-read, so the dashboard shows the result straight away
                 except (RouterError, ValueError) as e:
-                    return {**res, "detail": f"The router refused it: {e}"}
+                    return st("failed", f"The router refused it: {e}")
                 label = healthdash.FIXES[fix][0]
                 db.event(d["id"], d["org_id"], "security fix", f"{label} (by {s['email']}, backed up first)")
                 db.audit(s["email"], "security fix", f"{d['name']}: {label}", ip, org_id=d["org_id"])
-                return {**res, "ok": True, "detail": "Fixed."}
+                st("done", "Fixed.")
 
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(6) as ex:
-                results = list(ex.map(one, items))
-            return self.json({"ok": True, "results": results})
+            def run():
+                from concurrent.futures import ThreadPoolExecutor
+                try:
+                    with ThreadPoolExecutor(6) as ex:
+                        list(ex.map(one, items))
+                except Exception:  # noqa: BLE001 - never leave the job "running"
+                    traceback.print_exc()
+                for it in items:
+                    if it["state"] not in ("done", "failed"):
+                        it["state"], it["detail"] = "failed", "Stopped unexpectedly - check the server log."
+                job["finished"] = time.time()
+
+            threading.Thread(target=run, daemon=True, name="health-fix").start()
+            return self.json({"ok": True, "job": job["id"]})
         if path == "/api/vpn-inventory/refresh":   # re-read the VPNs on some routers (or every online one) now
             s = self.require_vpn()
             if s["kind"] == "client" and not router_act_limit.allow(s["email"]):

@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.9 - 2026-10-16
+
+- **One-click fixes show their progress**: **Fix** / **Fix all** now starts a background job and a progress box lists
+  every router with its step - waiting, backing up, changing, re-checking, done or failed (with the reason) - and a
+  progress bar, updated every 1.5 seconds; up to 6 routers at a time. The findings refresh when it finishes. The box
+  comes back after a page reload or when you return to the page (for 10 minutes after it finishes) until you
+  **Dismiss** it.
+- Borders on the remote access warning box and the one-click fixes box now show (they used an undefined colour).
+
 ## 1.46.0-beta.8 - 2026-10-16
 
 - **One-click fixes on Performance & security**: findings that come down to one setting get a **Fix** button, and a

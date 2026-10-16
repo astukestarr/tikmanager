@@ -3852,7 +3852,33 @@ async function subnetsPage() {
   draw();
 }
 // --- Performance & Security dashboard (healthdash.py) ------------------------------------------------------------------
-const hView = { cat: "", sev: "", org: "", q: "", busy: false, msg: "" };
+const hView = { cat: "", sev: "", org: "", q: "", busy: false, job: null, jobData: null, dismissed: null };
+const FIX_STATE = { queued: ["Waiting", ""], backup: ["Backing up", "up-run"], applying: ["Changing", "up-run"], checking: ["Re-checking", "up-run"],
+  done: ["Done", "up-done"], failed: ["Failed", "up-failed"] };
+// the progress box for a one-click fix job: one line per router, updated every 1.5 s while it runs
+function fixJobBox() {
+  const j = hView.jobData;
+  if (!j) return "";
+  const n = j.items.length, fin = j.items.filter((y) => y.state === "done" || y.state === "failed").length, bad = j.items.filter((y) => y.state === "failed").length;
+  return `<div class="h-job"><div class="row"><b>${esc(j.label)}</b><span class="small ${j.finished ? (bad ? "status warn" : "status ok") : "muted"}">
+      ${j.finished ? `finished - ${n - bad} of ${n} done${bad ? `, ${bad} failed` : ""}` : `${fin} of ${n} finished · up to 6 routers at a time`}</span>
+      <span class="spacer"></span>${j.finished ? `<button class="btn small" type="button" id="hJobClose">Dismiss</button>` : ""}</div>
+    <div class="bar"><i data-pct="${n ? Math.round(100 * fin / n) : 100}"></i></div>
+    <div class="table-wrap"><table class="h-job-list"><tbody>${j.items.map((y) => `<tr><td><a href="#router/${y.device_id}">${esc(y.router)}</a></td>
+      <td><span class="pill ${FIX_STATE[y.state]?.[1] || ""}">${FIX_STATE[y.state]?.[0] || esc(y.state)}</span></td>
+      <td class="small ${y.state === "failed" ? "status err" : "muted"}">${esc(y.detail || "")}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+async function followFixJob() {
+  clearTimeout(hView.poll);
+  if (!hView.job) return;
+  try { hView.jobData = await api(`/api/health-dash/fix/${hView.job}`); } catch (e) { hView.job = hView.jobData = null; hView.busy = false; return; }
+  hView.busy = !hView.jobData.finished;
+  if (view !== "health") return;
+  if ($("hJob")) { $("hJob").innerHTML = fixJobBox(); setBars($("hJob")); $("hJobClose")?.addEventListener("click", closeFixJob); }
+  if (hView.jobData.finished) { if (!hView.shownDone) { hView.shownDone = true; healthPage().catch(() => {}); } return; }   // refresh the findings once
+  hView.poll = setTimeout(followFixJob, 1500);
+}
+function closeFixJob() { hView.dismissed = hView.job; hView.job = hView.jobData = null; hView.busy = false; if ($("hJob")) $("hJob").innerHTML = ""; }
 const SEV_PILL = { critical: "up-failed", high: "up-failed", medium: "up-run", low: "" };
 async function healthPage() {
   const x = await api("/api/health-dash");
@@ -3881,7 +3907,7 @@ async function healthPage() {
       ${orgs.length > 1 ? `<select id="hOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option>${esc(o)}</option>`).join("")}</select>` : ""}
       <input id="hQ" type="search" placeholder="Search routers and findings" value="${esc(hView.q)}">
       <span class="spacer"></span><span class="small muted" id="hCount"></span></div>
-      ${hView.msg ? `<div class="small u-my8">${hView.msg}</div>` : ""}
+      <div id="hJob">${fixJobBox()}</div>
       <div id="hFixes"></div>
       <div class="table-wrap"><table><thead><tr><th>Severity</th><th>Router</th><th>Finding</th><th>Details</th><th>How to fix</th></tr></thead><tbody id="hRows"></tbody></table></div></div>`;
   const draw = () => {
@@ -3911,15 +3937,15 @@ async function healthPage() {
     const label = x.fixes[fix].label;
     if (!confirm(`${label} on ${routers.length === 1 ? routers[0][1] : `${routers.length} routers`}?\n\nEach router is backed up first. ${x.fixes[fix].effect}`)) return;
     hView.busy = true;
-    $("hFixes").innerHTML = `<p class="status">${esc(label)} on ${routers.length} router${routers.length === 1 ? "" : "s"} - backing up and changing…</p>`;
+    document.querySelectorAll("[data-hfixall], [data-hfix]").forEach((b) => { b.disabled = true; });
     try {
       const r = await post("/api/health-dash/fix", { items: routers.map(([id]) => ({ device_id: id, fix })) });
-      const bad = r.results.filter((y) => !y.ok);
-      hView.msg = `<span class="status ${bad.length ? "warn" : "ok"}">${esc(label)}: ${r.results.length - bad.length} of ${r.results.length} done.</span>`
-        + (bad.length ? `<ul class="small">${bad.map((y) => `<li><b>${esc(y.router)}</b>: ${esc(y.detail)}</li>`).join("")}</ul>` : "");
-    } catch (e) { hView.msg = `<span class="status err">${esc(e.message)}</span>`; }
-    hView.busy = false;
-    healthPage().catch(() => {});
+      hView.job = r.job; hView.shownDone = false;
+      hView.jobData = { label, finished: null, items: routers.map(([id, name]) => ({ device_id: id, router: name, state: "queued", detail: "" })) };
+      $("hJob").innerHTML = fixJobBox(); setBars($("hJob"));
+      $("hJob").scrollIntoView({ block: "nearest" });
+      followFixJob();
+    } catch (e) { hView.busy = false; $("hJob").innerHTML = `<p class="status err">${esc(e.message)}</p>`; draw(); }
   };
   ["hSev", "hCat", "hOrg"].forEach((id) => { const el = $(id); if (!el) return; const k = { hSev: "sev", hCat: "cat", hOrg: "org" }[id]; el.value = hView[k];
     el.addEventListener("change", (e) => { hView[k] = e.target.value; draw(); document.querySelectorAll("[data-hcat]").forEach((t) => t.classList.toggle("sel", t.dataset.hcat === hView.cat)); }); });
@@ -3928,6 +3954,11 @@ async function healthPage() {
     hView.cat = hView.cat === t.dataset.hcat ? "" : t.dataset.hcat; $("hCat").value = hView.cat; draw();
     document.querySelectorAll("[data-hcat]").forEach((b) => b.classList.toggle("sel", b.dataset.hcat === hView.cat)); }));
   draw();
+  setBars($("hJob"));
+  $("hJobClose")?.addEventListener("click", closeFixJob);
+  // a fix job still running (or just finished) - also after a reload or coming back to the page
+  if (!hView.job && x.fix_job && x.fix_job !== hView.dismissed) { hView.job = x.fix_job; hView.shownDone = true; }
+  if (hView.job && !hView.poll_on) { hView.poll_on = true; followFixJob().finally(() => { hView.poll_on = false; }); }
 }
 
 // --- remote access: WireGuard for Windows (etc.) into this router (remoteaccess.py) ------------------------------------
