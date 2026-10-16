@@ -59,7 +59,8 @@ class Entra:
 
     def hint(self, detail: str) -> str:
         """Plain-English fix for the Microsoft errors people hit while setting TikManager up (shown under the error)."""
-        env = "ENTRA_CLIENT_SECRET in /etc/tikmanager/tikmanager.env, then sudo systemctl restart tikmanager"
+        env = ("Admin > Settings > Microsoft sign-in (sign in with the first administrator's password account; "
+               "it's stored encrypted, and overrides ENTRA_CLIENT_SECRET in /etc/tikmanager/tikmanager.env)")
         for code, text in (
                 ("AADSTS7000215", "TikManager has the wrong client secret - usually the secret's ID instead of its Value. In Entra > "
                                   "App registrations > (TikManager's app) > Certificates & secrets, add a new client secret and copy "
@@ -67,9 +68,9 @@ class Entra:
                 ("AADSTS7000222", f"The client secret has expired. Add a new one in Entra (Certificates & secrets), put its Value in {env}."),
                 ("AADSTS50011", f"The app's redirect URI doesn't match. In Entra > App registrations > Authentication, add a Web "
                                 f"redirect URI of exactly {self.redirect_uri}"),
-                ("AADSTS700016", "Entra can't find the app in this tenant - check ENTRA_CLIENT_ID (the Application (client) ID) and "
-                                 "ENTRA_TENANT_ID (the Directory (tenant) ID) in /etc/tikmanager/tikmanager.env."),
-                ("AADSTS90002", "Entra doesn't know that tenant - check ENTRA_TENANT_ID (the Directory (tenant) ID)."),
+                ("AADSTS700016", "Entra can't find the app in this tenant - check the Application (client) ID and the Directory "
+                                 "(tenant) ID on Admin > Settings > Microsoft sign-in."),
+                ("AADSTS90002", "Entra doesn't know that tenant - check the Directory (tenant) ID on Admin > Settings > Microsoft sign-in."),
                 ("AADSTS65001", "The app hasn't been granted consent - an Entra administrator grants it under API permissions.")):
             if code in detail:
                 return " How to fix: " + text

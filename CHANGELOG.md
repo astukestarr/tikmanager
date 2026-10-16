@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.18 - 2026-10-16
+
+- Sign-in error hints point to the right place: the Microsoft client secret, client ID and tenant ID are set on
+  **Admin > Settings > Microsoft sign-in** (stored encrypted; reach it with the first administrator's password
+  account when Microsoft sign-in is broken), which overrides the settings file - not by editing tikmanager.env.
+
 ## 1.46.0-beta.17 - 2026-10-16
 
 - **What's new tour**: when you open TikManager after an update, a short tour shows everything since the last full release
