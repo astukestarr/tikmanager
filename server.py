@@ -1026,6 +1026,7 @@ class Handler(BaseHTTPRequestHandler):
             d["sec_info"] = json.loads(d.get("sec_info") or "null")
             d["health"] = json.loads(d.get("health") or "{}")
             d["isp_state"] = json.loads(d.get("isp_state") or "{}")
+            d["bgp_state"] = json.loads(d.get("bgp_state") or "null")
             d["isp_ifaces"] = json.loads(d.get("isp_ifaces") or "null")
             d["tags"] = json.loads(d.get("tags") or "[]")
             d["kind"] = device_kind(d.get("model"), d.get("board"), d.get("kind_override"))

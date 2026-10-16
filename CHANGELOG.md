@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.1-beta.3 - 2026-10-16
+
+- **BGP monitoring** - only on routers running BGP (an enabled BGP instance on RouterOS 7.20+; on older RouterOS 7, configured
+  connections). Each enabled BGP connection (the configured peer, not a listening range) is checked every minute against
+  /routing/bgp/session: established, or down - including a peer that never answers, which has no session at all. A **BGP**
+  card on the router's Overview (peer, remote address and AS, established / down, for how long, prefixes), router events
+  when a peer drops or comes back, a **BGP peer down** alert (Alerts settings, after 3 minutes by default - ticket, Teams,
+  email like the others) and a high finding on Performance & security. New peers appear with the next settings read
+  (within 15 minutes).
+
 ## 1.46.1-beta.2 - 2026-10-16
 
 - **What's new in past releases** (Admin > Settings > Version & updates): this release line and the 5 before it, each

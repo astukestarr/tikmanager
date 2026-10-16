@@ -120,6 +120,13 @@ class RouterOS:
     def get(self, path):
         return self._req("GET", path)
 
+    BGP_SESSION = ("name", "remote.address", "remote.as", "established", "uptime", "prefix-count", "local.role")
+
+    def bgp_sessions(self):
+        """Live BGP sessions (/routing/bgp/session) - whitelisted fields. Raises RouterError if the router can't be read."""
+        rows = self.get("/routing/bgp/session") or []
+        return [{k: r[k] for k in self.BGP_SESSION if k in r} for r in rows if isinstance(r, dict)]
+
     def reachable(self):
         """Raises RouterError unless the router answers over the tunnel now (strict - unlike optional() reads)."""
         self._req("GET", "/system/identity", timeout=10)
@@ -602,6 +609,9 @@ class RouterOS:
         "/radius": ("service", "address", "disabled"),
         "/snmp/community": ("security", "authentication-protocol", "encryption-protocol", "addresses", "disabled"),   # never the name (on v1/v2c it is the password)
         "/system/note": ("show-at-login", "note"),
+        # BGP: what's configured (the live session state is read every minute - bgp_sessions)
+        "/routing/bgp/instance": ("name", "as", "router-id", "disabled"),   # RouterOS 7.20+
+        "/routing/bgp/connection": ("name", "instance", "remote.address", "remote.as", "as", "local.role", "disabled", "comment"),
     }
 
     def vpn_inventory(self) -> dict:
@@ -1030,6 +1040,15 @@ class SimRouter:
     def reachable(self):
         return True
 
+    def bgp_sessions(self):
+        if self.id % 2:
+            return []
+        core_up = not (self.id == 4 and int(time.time() // 300) % 2)
+        out = [{"name": "isp-a-1", "remote.address": "203.0.113.1", "remote.as": "64500", "established": "true", "uptime": "3d2h", "prefix-count": "1"}]
+        if core_up:
+            out.append({"name": "core-1", "remote.address": "10.10.7.100", "remote.as": "65001", "established": "true", "uptime": "41m", "prefix-count": "12"})
+        return out
+
     def https_setup(self, tm_ip):
         time.sleep(0.5)
         port = 8443 if self.id % 3 == 0 else 443   # some simulated routers have SSTP on 443
@@ -1324,6 +1343,11 @@ class SimRouter:
         inv["/snmp"] = [{"enabled": "true" if self.id % 3 == 1 else "false"}]
         inv["/snmp/community"] = [{"security": "none", "disabled": "false"}]
         inv["/system/note"] = [{"show-at-login": "true" if self.id % 2 == 0 else "false", "note": "Authorized use only." if self.id % 2 == 0 else ""}]
+        if self.id % 2 == 0:   # BGP on even-numbered simulated routers
+            inv["/routing/bgp/instance"] = [{"name": "default", "as": "65010", "router-id": f"10.255.0.{self.id}", "disabled": "false"}]
+            inv["/routing/bgp/connection"] = [
+                {"name": "isp-a", "instance": "default", "remote.address": "203.0.113.1", "remote.as": "64500", "local.role": "ebgp", "disabled": "false"},
+                {"name": "core", "instance": "default", "remote.address": "10.10.7.100", "remote.as": "65001", "local.role": "ibgp", "disabled": "false"}]
         for path, body in self._sim().get("set", {}).items():   # one-click fixes made here (post)
             menu, body = path.split("#")[0].rsplit("/set", 1)[0], dict(body)
             name = body.pop("numbers", None)

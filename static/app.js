@@ -414,6 +414,7 @@ async function router(id) {
       </div>
       <div class="health" id="health"></div>
       ${ispCard(d)}
+      ${bgpCard(d)}
       ${secCard(d)}
       ${Object.keys(d.health || {}).length ? `<div class="card" id="hwCard"><h2>Hardware health</h2><p class="muted small">Loading…</p></div>` : ""}
       ${lteCard(d.interfaces || [])}
@@ -822,6 +823,21 @@ function ispCard(d) {
       <td class="mono small">${esc(l.addr || "")}</td><td class="small nowrap">${l.since ? durShort(now - l.since) : ""}</td>
       <td>${l.active ? `<span class="pill" title="The default route uses this link now">carrying traffic</span>` : ""}</td></tr>`).join("")}</tbody></table></div>
     <p class="small muted">Events and an alert when a link goes down, comes back or changes address. Which interfaces count is set on the Settings tab.</p></div>`;
+}
+// BGP peers - only on routers running BGP (poller.track_bgp): each configured connection and whether its session is up
+function bgpCard(d) {
+  const peers = Object.entries(d.bgp_state || {});
+  if (!peers.length) return "";
+  const now = Date.now() / 1000, down = peers.filter(([, p]) => !p.up).length;
+  return `<div class="card"><div class="row"><h2>BGP</h2><span class="spacer"></span>
+      ${down ? `<span class="status warn small">${down} down</span>` : `<span class="status ok small">all established</span>`}</div>
+    <div class="table-wrap"><table><thead><tr><th>Peer</th><th>Remote</th><th>Session</th><th>For</th><th>Prefixes</th></tr></thead><tbody>
+    ${peers.map(([n, p]) => `<tr><td><b>${esc(n)}</b>${p.role ? ` <span class="muted small">${esc(p.role)}</span>` : ""}${p.comment ? `<div class="small muted">${esc(p.comment)}</div>` : ""}</td>
+      <td class="mono small">${esc(p.remote || "")}${p.as ? `<div class="muted">AS ${esc(String(p.as))}</div>` : ""}</td>
+      <td>${p.up ? `<span class="dot on"></span>established` : `<span class="dot off"></span><b class="status err">down</b>`}</td>
+      <td class="small nowrap">${p.since ? durShort(now - p.since) : ""}</td><td class="small">${esc(String(p.prefixes || ""))}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small muted">Each configured BGP connection and whether its session is established - checked every minute. Events and an alert
+      (Alerts > BGP peer down) when one drops.</p></div>`;
 }
 function ispSettings(d) {
   const ifs = (d.interfaces || []).filter((i) => !["wg", "bridge", "vlan", "loopback"].includes(i.type) && i.name !== "tikmanager");

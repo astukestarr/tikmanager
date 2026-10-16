@@ -211,6 +211,15 @@ def build(rows, metrics, flaps, now=None):
         if down:
             add(d, "high", "Internet", "Internet link down", f"{', '.join(down)} down - running on {', '.join(n for n, s in isp.items() if s.get('up')) or 'another path'}.",
                 "Call the ISP or check the modem; the router is on its backup link meanwhile.")
+        try:
+            bgp = json.loads(d.get("bgp_state") or "{}") or {}
+        except ValueError:
+            bgp = {}
+        for n, p in bgp.items():
+            if not p.get("up"):
+                add(d, "high", "Internet", "BGP peer down",
+                    f"{n} ({p.get('remote', '')}" + (f", AS {p['as']}" if p.get("as") else "") + f") - no established session for {_ago(now - (p.get('since') or now))}.",
+                    "Check the peer and the link to it (/routing/bgp/session on the router shows the last error); the router's events say when it dropped.")
         if (flaps.get(d["id"]) or 0) >= 3:
             add(d, "medium", "Internet", "Unstable internet link", f"{flaps[d['id']]} link drops in the last 24 hours.",
                 "Check the modem / cabling and ask the ISP to check the line.")

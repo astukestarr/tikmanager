@@ -79,6 +79,45 @@ class Poller:
                       "comment": i.get("comment") or "", "type": i.get("type") or "", "active": bool(i.get("default_route"))}
         self.db.run("UPDATE devices SET isp_state=? WHERE id=?", (json.dumps(new), d["id"]))
 
+    def track_bgp(self, d, cl, now):
+        """Only on routers that run BGP: an enabled BGP instance (RouterOS 7.20+), or - on versions without instances -
+        configured connections. For each enabled connection to one peer (not a listening range), is a session
+        established? (A connection is the configured peer; its session is the live state, missing while the peer never
+        answers.) Events when one goes down or comes back; NULL state when the router has no BGP."""
+        try:
+            inv = json.loads(d.get("vpn_inv") or "null") or {}
+            old = json.loads(d.get("bgp_state") or "{}") or {}
+        except ValueError:
+            inv, old = {}, {}
+        yes = lambda v: str(v).lower() in ("true", "yes")
+        inst = inv.get("/routing/bgp/instance") or []
+        conns = [c for c in inv.get("/routing/bgp/connection") or [] if not yes(c.get("disabled")) and "/" not in str(c.get("remote.address") or "")]
+        live = {i.get("name") for i in inst if not yes(i.get("disabled"))}
+        if inst:   # 7.20+: only connections of an enabled instance count
+            conns = [c for c in conns if not c.get("instance") or c.get("instance") in live]
+        if not conns or (inst and not live):
+            if d.get("bgp_state"):
+                self.db.run("UPDATE devices SET bgp_state=NULL WHERE id=?", (d["id"],))
+            return
+        try:
+            sessions = cl.bgp_sessions()
+        except RouterError:
+            return   # keep the last known state
+        new = {}
+        for c in conns:
+            name, ra = c.get("name") or str(c.get("remote.address")), str(c.get("remote.address") or "")
+            s = next((x for x in sessions if x.get("name") == name or str(x.get("name") or "").startswith(name + "-")), None) \
+                or next((x for x in sessions if ra and str(x.get("remote.address") or "").split(":")[0] == ra), None)
+            up = bool(s) and yes(s.get("established"))
+            o = old.get(name)
+            peer = f"{name} ({ra}" + (f", AS {c.get('remote.as')}" if c.get("remote.as") else "") + ")"
+            if o and o.get("up") != up:
+                self.db.event(d["id"], d["org_id"], "bgp up" if up else "bgp down", f"BGP peer {peer} is {'established again' if up else 'down'}")
+            new[name] = {"up": up, "remote": ra, "as": c.get("remote.as") or (s or {}).get("remote.as") or "", "role": c.get("local.role") or "",
+                         "since": o["since"] if o and o.get("up") == up and o.get("since") else now, "uptime": (s or {}).get("uptime") or "",
+                         "prefixes": (s or {}).get("prefix-count") or "", "comment": c.get("comment") or ""}
+        self.db.run("UPDATE devices SET bgp_state=? WHERE id=?", (json.dumps(new), d["id"]))
+
     def check_reboot(self, d, st, now):
         """A restart between two polls shows as uptime going back (also when it was too quick to look offline)."""
         new, old = _dur_s(st.get("uptime")), _dur_s(d.get("uptime"))
@@ -160,6 +199,8 @@ class Poller:
                 self.db.run("INSERT INTO iface_metrics (device_id, ts, name, rx_bps, tx_bps) VALUES (?,?,?,?,?)", (d["id"], now, n, irx, itx))
         if now - (d.get("vpn_inv_at") or 0) > INVENTORY_SECONDS:   # VPNs configured on the router (read-only)
             self.collect_vpns(d, cl)
+            d = self.db.one("SELECT * FROM devices WHERE id=?", (d["id"],)) or d   # the fresh inventory (BGP connections)
+        self.track_bgp(d, cl, now)
         if now - (d.get("neighbors_at") or 0) > INVENTORY_SECONDS and hasattr(cl, "mikrotik_neighbors"):   # for Discovered
             try:
                 self.db.run("UPDATE devices SET neighbors=?, neighbors_at=? WHERE id=?", (json.dumps(cl.mikrotik_neighbors()), now, d["id"]))

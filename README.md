@@ -212,6 +212,11 @@ on its channel (read from MikroTik's changelogs) and lists known CVEs for its ve
 daily); the Upgrades page badges them, the Security page lists the fleet, and an alert can open a ticket. **What's new**
 shows MikroTik's release notes for a version, security lines first, before you upgrade.
 
+**BGP:** on routers running BGP (an enabled instance on RouterOS 7.20+, or configured connections on older 7.x), every
+BGP connection is checked each minute against its session: a BGP card on the router's Overview, events when a peer drops
+or comes back, a **BGP peer down** alert and a finding on Performance & security. Listening ranges (dynamic peers) are
+left out.
+
 **Flagged routers:** RouterOS 7.13+ flags itself when it finds signs of unauthorized access in its configuration
 (device-mode); MikroTik says to treat such a router as compromised. TikManager reads the flag hourly and shows it on the
 router's page (with what to do), in the routers list and on the Dashboard, and raises an alert.

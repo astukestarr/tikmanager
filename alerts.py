@@ -46,6 +46,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "temperature": ("Router too hot (3 readings in a row, 15 minutes)", False, "celsius", 70),
     "firmware": ("New RouterOS available for a router", False, None, None),
     "unifi": ("UniFi / UISP site has offline devices (one alert per site)", True, "minutes", 10),
+    "bgp": ("BGP peer down (a configured BGP connection without an established session)", True, "minutes", 3),
     "remote_access": ("Remote access: someone connected from a new address, or their key was used from two places (clears after an hour)", True, None, None),
 }
 DEFAULTS = {"kinds": {k: {"on": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
@@ -153,6 +154,22 @@ class Alerts:
                         out[f"isp:{d['id']}:{n}"] = ("isp", d["id"], d["org_id"], f"{label(d)}: internet link {name} is down",
                                                      f"Down since {time.strftime('%Y-%m-%d %H:%M', time.localtime(l.get('since') or now))}. "
                                                      + (f"Running on {', '.join(others)}." if others else "No other internet link is up - reachable some other way."))
+        if k.get("bgp", {}).get("on"):
+            limit = now - k["bgp"]["minutes"] * 60
+            for d in devs:
+                if not d["online"] or d["id"] in upgrading:
+                    continue
+                try:
+                    peers = json.loads(d.get("bgp_state") or "{}") or {}
+                except ValueError:
+                    peers = {}
+                for n, p in peers.items():
+                    if not p.get("up") and (p.get("since") or now) < limit:
+                        up = [x for x, y in peers.items() if y.get("up")]
+                        out[f"bgp:{d['id']}:{n}"] = ("bgp", d["id"], d["org_id"], f"{label(d)}: BGP peer {n} is down",
+                            f"BGP peer {n} ({p.get('remote', '')}" + (f", AS {p['as']}" if p.get("as") else "") + ") has had no established session since "
+                            f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(p.get('since') or now))}. "
+                            + (f"Still up: {', '.join(up)}." if up else "No other BGP peer on this router is up."))
         if k["flagged"]["on"]:
             for d in devs:
                 if d.get("dm_flagged"):
