@@ -646,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
             j = FIX_JOBS.get(m.group(1))
             if not j or j["user"] != s["email"]:
                 raise HttpError(404, "That fix job has finished and was cleared.")
-            return self.json({"id": j["id"], "label": j["label"], "started": j["started"], "finished": j["finished"], "items": j["items"]})
+            return self.json({"id": j["id"], "label": j["label"], "started": j["started"], "finished": j["finished"], "items": j["items"], "now": time.time()})
         if m := re.fullmatch(r"/api/devices/(\d+)/vpns", path):   # router page > VPNs: every VPN found on this router
             s = self.require_vpn()
             d = self.device_for(s, m.group(1))
@@ -1632,7 +1632,7 @@ class Handler(BaseHTTPRequestHandler):
 
             def one(it):
                 def st(state, detail=""):
-                    it["state"], it["detail"] = state, detail
+                    it["state"], it["detail"], it["since"] = state, detail, time.time()
                 d, fix = rows.get(it["device_id"]), it["fix"]
                 if it["state"] != "queued":
                     return

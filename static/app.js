@@ -3866,7 +3866,8 @@ function fixJobBox() {
     <div class="bar"><i data-pct="${n ? Math.round(100 * fin / n) : 100}"></i></div>
     <div class="table-wrap"><table class="h-job-list"><tbody>${j.items.map((y) => `<tr><td><a href="#router/${y.device_id}">${esc(y.router)}</a></td>
       <td><span class="pill ${FIX_STATE[y.state]?.[1] || ""}">${FIX_STATE[y.state]?.[0] || esc(y.state)}</span></td>
-      <td class="small ${y.state === "failed" ? "status err" : "muted"}">${esc(y.detail || "")}</td></tr>`).join("")}</tbody></table></div></div>`;
+      <td class="small ${y.state === "failed" ? "status err" : "muted"}">${esc(y.detail || "")}${FIX_STATE[y.state]?.[1] === "up-run" && y.since && j.now
+        ? ` ${Math.max(0, Math.round(j.now - y.since))} s${y.state === "backup" && j.now - y.since > 30 ? " - a large router's backup can take up to 3 minutes" : ""}` : ""}</td></tr>`).join("")}</tbody></table></div></div>`;
 }
 async function followFixJob() {
   clearTimeout(hView.poll);

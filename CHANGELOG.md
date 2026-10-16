@@ -10,6 +10,8 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
   cipher list to aes-ctr, aes-gcm together with strong-crypto (a second try - routers that don't need it are left as
   they were). The dashboard also reads the SSH cipher list and says when null is allowed. Routers that failed: run
   **Fix all** again.
+- The fix progress box shows how long each router has been on its current step (a large router's backup can take up to
+  3 minutes - it says so after 30 seconds).
 
 ## 1.46.0-beta.9 - 2026-10-16
 
