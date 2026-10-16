@@ -591,17 +591,17 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, column="d.org_id")
             rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                             WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
-            now = time.time()
+            t_now = time.time()
             metrics = {r["device_id"]: {"lat": r["lat"], "loss": r["loss"], "cpu": r["cpu"], "mem": r["mem"]} for r in db.q(
                 """SELECT device_id, AVG(latency) AS lat, AVG(loss) AS loss, AVG(cpu) AS cpu, AVG(mem_pct) AS mem FROM metrics
-                   WHERE ts > ? GROUP BY device_id""", (now - 3600,))}
+                   WHERE ts > ? GROUP BY device_id""", (t_now - 3600,))}
             flaps = {r["device_id"]: r["n"] for r in db.q("SELECT device_id, COUNT(*) AS n FROM events WHERE kind='link down' AND ts > ? GROUP BY device_id",
-                                                          (now - 86400,))}
-            found = healthdash.build(rows, metrics, flaps, now)
+                                                          (t_now - 86400,))}
+            found = healthdash.build(rows, metrics, flaps, t_now)
             unread = sum(1 for r in rows if r["online"] and not r.get("vpn_inv"))
             return self.json({"findings": found, "routers": len(rows), "online": sum(1 for r in rows if r["online"]),
                               "clean": len({r["id"] for r in rows} - {f["device_id"] for f in found}), "unread": unread,
-                              "categories": healthdash.CATEGORIES, "checked_at": now})
+                              "categories": healthdash.CATEGORIES, "checked_at": t_now})
         if path == "/api/vpn-inventory":   # VPNs found on the routers (configured outside TikManager); a client admin: their own
             s = self.require_vpn()
             where, args = self.org_scope(s, column="d.org_id")

@@ -1441,6 +1441,6 @@ class SimRouter:
             st["version"] = sim["version"]
         if st["fw_current"]:
             st["fw_upgrade"] = st["version"].split(" ")[0]   # RouterOS ships the matching RouterBOARD firmware
-            if sim.get("fw"):
+            if isinstance(sim.get("fw"), str):   # (the simulated firewall also lives under "fw" - only a version string is firmware)
                 st["fw_current"] = sim["fw"]
         return st

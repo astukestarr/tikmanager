@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.3 - 2026-10-16
+
+- **Fix: router pages showed "Something went wrong on the server"** (the traffic / CPU graphs failed to load) in
+  1.46.0-beta.2 - a variable in the new dashboard code clashed with a helper the graphs use.
+
 ## 1.46.0-beta.2 - 2026-10-16
 
 - **Remote access with WireGuard for Windows** (router page > Remote access, technicians) - an SSTP replacement. Set it
