@@ -24,11 +24,13 @@ cp /opt/tikmanager/deploy/tikmanager-check.service /opt/tikmanager/deploy/tikman
 cp /opt/tikmanager/deploy/tikmanager-authlog.service /opt/tikmanager/deploy/tikmanager-authlog.timer /etc/systemd/system/
 # moving WireGuard to another UDP port from Admin > Settings (the web app drops a request; this root unit applies it)
 cp /opt/tikmanager/deploy/tikmanager-wgport.path /opt/tikmanager/deploy/tikmanager-wgport.service /etc/systemd/system/
+# Security page > Unblock on this server (fail2ban): the web app drops a request; this root unit applies it
+cp /opt/tikmanager/deploy/tikmanager-unban.path /opt/tikmanager/deploy/tikmanager-unban.service /etc/systemd/system/
 systemctl daemon-reload
 # Winbox relay port pool (winbox.py; each port only answers the technician who opened it) - ufw skips it if already there
 ufw status 2>/dev/null | grep -q "Status: active" && ufw allow 40000:40049/tcp comment 'Winbox relay (each port only for the technician who opened it)' >/dev/null 2>&1 || true
 systemctl enable --now tikmanager-update.path >/dev/null 2>&1 || true
-systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer tikmanager-wgport.path >/dev/null 2>&1 || true
+systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer tikmanager-wgport.path tikmanager-unban.path >/dev/null 2>&1 || true
 systemctl restart tikmanager
 sleep 2
 systemctl start --no-block tikmanager-check.service >/dev/null 2>&1 || true

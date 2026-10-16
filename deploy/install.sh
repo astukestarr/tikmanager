@@ -151,10 +151,12 @@ cp /opt/tikmanager/deploy/tikmanager-check.service /opt/tikmanager/deploy/tikman
 cp /opt/tikmanager/deploy/tikmanager-authlog.service /opt/tikmanager/deploy/tikmanager-authlog.timer /etc/systemd/system/
 # moving WireGuard to another UDP port from Admin > Settings (the web app drops a request; this root unit applies it)
 cp /opt/tikmanager/deploy/tikmanager-wgport.path /opt/tikmanager/deploy/tikmanager-wgport.service /etc/systemd/system/
+# Security page > Unblock on this server (fail2ban): the web app drops a request; this root unit applies it
+cp /opt/tikmanager/deploy/tikmanager-unban.path /opt/tikmanager/deploy/tikmanager-unban.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable tikmanager
 systemctl enable --now tikmanager-update.path
-systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer tikmanager-wgport.path
+systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer tikmanager-wgport.path tikmanager-unban.path
 
 echo "== Caddy (HTTPS front door)"
 sed "s|__HOST__|$HOST|g" /opt/tikmanager/deploy/Caddyfile > /etc/caddy/Caddyfile

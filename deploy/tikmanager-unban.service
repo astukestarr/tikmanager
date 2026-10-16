@@ -1,0 +1,11 @@
+[Unit]
+Description=Unban an address in fail2ban, or list the banned ones (requested from TikManager's Security page)
+
+[Service]
+Type=oneshot
+# root: fail2ban-client needs it. It reads only "unban <ip> <id>" / "list - <id>" and checks the address first.
+ExecStart=/bin/bash /opt/tikmanager/deploy/f2b-unban.sh
+TimeoutStartSec=1min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes

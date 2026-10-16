@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for TikManager unblock requests (Security page > Unblock on this server)
+
+[Path]
+# the web app (user tikmanager) can only write its data folder; it drops "unban <ip> <id>" or "list - <id>" here
+PathExists=/var/lib/tikmanager/unban-request
+
+[Install]
+WantedBy=multi-user.target

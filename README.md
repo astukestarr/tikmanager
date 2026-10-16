@@ -199,8 +199,12 @@ light levels every 5 minutes for 30 days; alerts can fire when a router runs hot
 
 **Auto-block:** addresses that keep failing to sign in to your routers (counted across the fleet) can be listed
 (audit) or blocked on every router automatically, via the `tikmanager-blocklist` address list with a RouterOS timeout.
-Each router needs one rule that drops the list - the Security page shows which routers lack it and can add it.
-Non-public addresses, TikManager, your routers and a whitelist are never blocked. Off until an administrator turns it on.
+Each router needs one rule that drops the list - **without it the address is only listed, not dropped**; the Security
+page says so at the top, shows "dropped on N of M" per blocked address, and adds the rule (one router, or all). A block
+stops connections from that address straight to a router; Winbox through TikManager's relay comes from TikManager's own
+address and isn't affected. **Unblock** (Top addresses, or Auto-block > Blocked now) releases it at once and takes it off
+the routers in the background. Non-public addresses, TikManager, your routers and a whitelist are never blocked. Off
+until an administrator turns it on.
 
 **RouterOS security:** each router's page says whether MikroTik has released a security fix newer than its RouterOS
 on its channel (read from MikroTik's changelogs) and lists known CVEs for its version (NIST's vulnerability database,
@@ -396,7 +400,9 @@ changed router configuration:
 - **TikManager**: failed passwords and MFA codes, failed Microsoft sign-ins, lock-outs, addresses refused for too many
   attempts, wrong adoption commands, and successful sign-ins.
 - **Ubuntu server**: SSH sign-ins, sudo password failures and fail2ban blocks - read every 5 minutes by
-  `tikmanager-authlog.timer` (root, read-only: the web app can't read the system journal itself).
+  `tikmanager-authlog.timer` (root, read-only: the web app can't read the system journal itself). An address fail2ban
+  has banned right now shows "blocked: server SSH" (it guards SSH to the server only) with **Unblock**, done by
+  `tikmanager-unban.path` / `deploy/f2b-unban.sh` (root; it accepts only "unban <IP address>").
 - **Routers**: login failures and logins (Winbox, SSH, WebFig, API) and "changed by" lines from the log each router sends
   TikManager over its tunnel (set up at adoption; received on the tunnel address only). TikManager's own routine
   REST logins are left out.

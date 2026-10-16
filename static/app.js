@@ -3631,7 +3631,7 @@ function logRuleDialog(r, devs, orgs, sevs) {
 const secView = { hours: 24, source: "", kind: "", q: "" };
 const SEC_SOURCE = { tikmanager: "TikManager", server: "Ubuntu server", router: "Router" };
 const SEC_KIND = { login_failed: "Failed sign-in", mfa_failed: "Wrong MFA code", sudo_failed: "sudo password wrong", locked: "Account locked",
-  rate_limited: "Too many attempts", adoption_rejected: "Bad adoption command", login_ok: "Signed in", banned: "Blocked (fail2ban)", config_change: "Config changed", remote_session: "Winbox session opened",
+  rate_limited: "Too many attempts", adoption_rejected: "Bad adoption command", login_ok: "Signed in", banned: "Blocked", unbanned: "Unblocked", config_change: "Config changed", remote_session: "Winbox session opened",
   remote_rejected: "Winbox: wrong address" };
 
 async function rosSecCard() {
@@ -3660,6 +3660,8 @@ async function autoBlockCard() {
   const c = x.settings, admin = me.role === "admin";
   const modeText = { off: "Off", audit: "Audit - list them, block by hand", block: "Block automatically" };
   $("abCard").innerHTML = `<div class="row"><h2>Auto-block</h2><span class="pill ${c.mode === "block" ? "ab-on" : ""}">${esc(modeText[c.mode])}</span></div>
+    <p class="small muted">A block stops connections from that address straight to a router - only on routers with the drop rule below. Winbox through
+      TikManager's relay comes from TikManager's own address, so it isn't affected (that's also the way in if you block yourself).</p>
     <p class="small muted">An address with ${c.threshold} failed sign-ins to your routers within ${c.minutes} minutes - across the whole fleet - is
       ${c.mode === "block" ? "blocked" : "listed"}; blocking puts it on the <span class="mono">${esc(x.list)}</span> address list of <b>every</b> router for ${c.hours} hours
       (RouterOS removes it by itself). Private addresses, TikManager, your routers' own addresses and the whitelist are never blocked.</p>
@@ -3670,7 +3672,7 @@ async function autoBlockCard() {
     <h3>Blocked now (${x.blocked.length})</h3>
     ${x.blocked.length ? `<div class="table-wrap"><table><thead><tr><th>Address</th><th>Why</th><th>Since</th><th>Until</th><th>On routers</th><th></th></tr></thead><tbody>
       ${x.blocked.map((b) => `<tr><td class="mono">${esc(b.ip)}</td><td class="small">${esc(b.reason || b.by || "")}</td><td class="small nowrap">${ago(b.blocked_at)}</td>
-        <td class="small nowrap">${when(b.until)}</td><td>${b.routers} / ${x.routers_total}</td>
+        <td class="small nowrap">${when(b.until)}</td><td class="small">dropped on <b>${b.enforced}</b>${b.enforced < x.routers_total ? ` <span class="muted">(listed on ${b.routers}; ${x.routers_total - b.enforced} without the drop rule)</span>` : ""} / ${x.routers_total}</td>
         <td>${canWrite() ? `<button class="btn" type="button" data-abrel="${esc(b.ip)}">Unblock</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
       : `<p class="muted small">Nothing is blocked.</p>`}
     <h3>Over the threshold now (${x.candidates.length})</h3>
@@ -3690,10 +3692,14 @@ async function autoBlockCard() {
   const msg = (m, ok) => { $("abMsg").textContent = m; $("abMsg").className = `status small ${ok ? "ok" : "err"}`; };
   const act = async (fn) => { try { await fn(); autoBlockCard(); } catch (e) { msg(e.message); } };
   $("abCard").querySelectorAll("[data-abblock]").forEach((b) => b.addEventListener("click", () => act(() => post("/api/security/autoblock/block", { ip: b.dataset.abblock }))));
-  $("abCard").querySelectorAll("[data-abrel]").forEach((b) => b.addEventListener("click", () => act(async () => {
-    const r = await post("/api/security/autoblock/release", { ip: b.dataset.abrel });
-    if (r.failed.length) throw new Error(`Unblocked, but not removed from: ${r.failed.join("; ")} (it expires there by itself).`);
-  })));
+  $("abCard").querySelectorAll("[data-abrel]").forEach((b) => b.addEventListener("click", () => {
+    b.disabled = true; b.textContent = "Unblocking…";
+    act(async () => {   // released at once; the routers are cleaned up in the background (events say if one couldn't be)
+      const r = await post("/api/security/autoblock/release", { ip: b.dataset.abrel });
+      msg(`${b.dataset.abrel} unblocked - being taken off ${r.routers ?? "the"} router${r.routers === 1 ? "" : "s"} now.`, true);
+      securityPage().catch(() => {});
+    });
+  }));
   $("abCard").querySelectorAll("[data-abrule]").forEach((b) => b.addEventListener("click", () => { b.disabled = true; act(() => post("/api/security/autoblock/rule", { device_id: b.dataset.abrule })); }));
   $("abRuleAll")?.addEventListener("click", async (e) => {
     e.target.disabled = true;
@@ -3711,6 +3717,18 @@ async function autoBlockCard() {
   });
 }
 
+// what "blocked" means for one address right now - each with its own Unblock (fail2ban here guards SSH to TikManager's
+// server only; the routers' block list only drops on routers that have the drop rule)
+function secBlocks(s, a) {
+  const srv = s.blocks?.server?.banned?.[a.ip], rt = s.blocks?.routers?.[a.ip];
+  const btn = (where) => canWrite() ? ` <button class="btn small" type="button" data-secunban="${where}" data-ip2="${esc(a.ip)}">Unblock</button>` : "";
+  const out = [];
+  if (srv !== undefined) out.push(`<div><span class="pill up-failed" title="fail2ban on the TikManager server (${esc(srv || "sshd")}) - it blocks SSH to the server only, not the web app, the Winbox relay or your routers">blocked: server SSH</span>${btn("server")}</div>`);
+  if (rt) out.push(`<div><span class="pill ${rt.enforced ? "up-failed" : "up-run"}" title="On the block list of ${rt.routers} of ${rt.total} routers; dropped only on the ${rt.enforced} that have the drop rule (Auto-block below). Winbox through TikManager's relay comes from TikManager's own address, so it isn't affected.">blocked on routers: dropped on ${rt.enforced} of ${rt.total}</span>${btn("routers")}</div>`);
+  if (!out.length && a.banned) out.push(`<div><span class="pill up-cancelled" title="It was blocked during this period; the block has ended or been lifted">was blocked</span></div>`);
+  return out.join("");
+}
+
 async function securityPage() {
   const s = await api(`/api/security?hours=${secView.hours}&source=${encodeURIComponent(secView.source)}&kind=${encodeURIComponent(secView.kind)}&q=${encodeURIComponent(secView.q)}`);
   const tile = (src, icon) => {
@@ -3723,6 +3741,10 @@ async function securityPage() {
       and who changed router configuration. Kept 90 days.</p>
     <div class="row"><div class="seg" role="group" aria-label="Period">${[[24, "24 hours"], [168, "7 days"], [720, "30 days"]].map(([h, l]) =>
       `<button type="button" data-h="${h}" class="${secView.hours === h ? "on" : ""}">${l}</button>`).join("")}</div></div>
+    ${(() => { const rb = Object.values(s.blocks?.routers || {}); const gap = rb.filter((b) => b.enforced < b.total);
+      return gap.length ? `<div class="ab-warn"><b>${gap.length} blocked address${gap.length === 1 ? " isn't" : "es aren't"} being dropped everywhere</b> -
+        auto-block puts addresses on every router's auto-block address list, but only routers with the drop rule act on it
+        (${Math.min(...gap.map((b) => b.enforced))} of ${gap[0].total} have it). <a href="#" id="secToRule">Add the drop rule</a></div>` : ""; })()}
     <div class="tiles sec-kpis">${tile("tikmanager")}${tile("server")}${tile("router")}</div>
     <div class="card" id="rosSec"><h2>RouterOS vulnerabilities</h2><p class="muted small">Loading…</p></div>
     <div class="card" id="abCard"><h2>Auto-block</h2><p class="muted small">Loading…</p></div>
@@ -3730,7 +3752,7 @@ async function securityPage() {
       `<li class="flag-${esc(f.level)}">${esc(f.text)}${f.ip ? ` <button class="linkish" type="button" data-ip="${esc(f.ip)}">show</button>` : ""}</li>`).join("")}</ul></div>` : ""}
     <div class="grid2">
       <div class="card"><h2>Top addresses trying to get in</h2>${s.top_ips.length ? `<div class="table-wrap"><table><thead><tr><th>Address</th><th>Attempts</th><th>Tried</th><th>Usernames</th><th>Last</th></tr></thead><tbody>
-        ${s.top_ips.map((a) => `<tr><td class="mono"><button class="linkish mono" type="button" data-ip="${esc(a.ip)}">${esc(a.ip)}</button>${a.banned ? ` <span class="pill">blocked</span>` : ""}</td>
+        ${s.top_ips.map((a) => `<tr><td class="mono"><button class="linkish mono" type="button" data-ip="${esc(a.ip)}">${esc(a.ip)}</button>${secBlocks(s, a)}</td>
           <td>${a.count}</td><td class="small">${esc(a.targets.join(", "))}</td><td class="small mono">${esc(a.users.join(", "))}</td><td class="small nowrap">${ago(a.last)}</td></tr>`).join("")}
         </tbody></table></div>` : `<p class="muted">No failed attempts in this period.</p>`}</div>
       <div class="card"><h2>Routers with failed sign-ins</h2>${s.routers.length ? `<table><tbody>${s.routers.map((r) =>
@@ -3753,6 +3775,16 @@ async function securityPage() {
         ${s.total_events > s.events.length ? `<p class="small muted">Newest 500 of ${s.total_events.toLocaleString()} - narrow it down with the filters.</p>` : ""}`
         : `<p class="muted">Nothing in this period.</p>`}</div>`;
   const reload = () => securityPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
+  $("secToRule")?.addEventListener("click", (e) => { e.preventDefault(); const c = $("abCard"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.classList.add("sec-flash"); });
+  // Unblock from Top addresses: fail2ban on this server, or the routers' block list
+  $("main").querySelectorAll("[data-secunban]").forEach((b) => b.addEventListener("click", async () => {
+    const [where, ip] = [b.dataset.secunban, b.dataset.ip2];
+    b.disabled = true; b.textContent = "Unblocking…";
+    try {
+      await (where === "server" ? post("/api/security/unban", { ip }) : post("/api/security/autoblock/release", { ip }));
+      reload();
+    } catch (e) { b.disabled = false; b.textContent = "Unblock"; alert(e.message); }
+  }));
   $("main").querySelectorAll("[data-h]").forEach((b) => b.addEventListener("click", () => { secView.hours = +b.dataset.h; reload(); }));
   // "show" / an address: filter the Events list to it and jump there (it's at the bottom of the page)
   $("main").querySelectorAll("[data-ip]").forEach((b) => b.addEventListener("click", () => {

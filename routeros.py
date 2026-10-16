@@ -815,6 +815,10 @@ class RouterOS:
         """The entries of one address list (like /ip firewall address-list print where list=...)."""
         return self.get(f"/ip/firewall/address-list?list={urllib.parse.quote(name)}") or []
 
+    def al_find(self, name, address):
+        """The entries for one address on one list (without reading the whole list)."""
+        return self.get(f"/ip/firewall/address-list?list={urllib.parse.quote(name)}&address={urllib.parse.quote(address)}") or []
+
     def fw_add(self, section, props, before=None):
         body = dict(props)
         if before:
@@ -1130,6 +1134,9 @@ class SimRouter:
 
     def al_entries(self, name):
         return [dict(x) for x in self._fw()["fw"]["address-list"] if x.get("list") == name]
+
+    def al_find(self, name, address):
+        return [x for x in self.al_entries(name) if x.get("address") == address]
 
     def fw_options(self):
         counts = {}

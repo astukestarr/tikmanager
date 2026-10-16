@@ -76,7 +76,8 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Ports and VLANs | `ports.py` (`build`, `plan`, `undo_script`, `apply/keep/undo`), `RouterOS.port_data/br_*`, `portsTab/portEditor/ptChange` in `app.js` |
 | Router logs and log alert rules | `routerlogs.py` (`parse`, `query`, `conditions`), `logsPage/logViewer/logRulesCard` in `app.js` |
 | Webhooks (alert destinations) | `webhooks.py` (`build`, `send_all`, `check_url`), `alerts._hooks`, `webhooksCard/webhookDialog` in `app.js` |
-| Auto-block (fleet-wide blocklist) | `autoblock.py` (`candidates`, `block`, `release`, `push`, `add_rule`), `autoBlockCard()` in `app.js` |
+| Auto-block (fleet-wide blocklist) | `autoblock.py` (`candidates`, `block`, `release` + `_remove_everywhere`, `push`, `add_rule`, `blocks`), `autoBlockCard()` / `secBlocks()` in `app.js` |
+| Unblock on this server (fail2ban) | `f2b.py`, `deploy/f2b-unban.sh` + `tikmanager-unban.path/.service` (root; installed by `install.sh` / `update.sh`), `/api/security/unban` |
 | RouterOS security (CVEs, security releases, What's new) | `rossec.py` (`security_items`, `releases_between`, `cves_for`), `secState/secCard/notesDialog/rosSecCard` in `app.js` |
 | Router lifecycle (age, discontinued, replacements) | `lifecycle.py` (`REPLACEMENTS`, overrides in setting `lifecycle_suggest`), `lcYears/lcMade/lcFlag/lcSuggest/lifecycleCard/lcAdminCard` in `app.js` |
 | Performance & Security dashboard | `healthdash.py` (`build`, `exposure`, `CATEGORIES`), extra fields in `RouterOS.INVENTORY`, `/api/health-dash`, `healthPage()` in `app.js` |

@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0-beta.20 - 2026-10-16
+
+- **Fix: Auto-block's Unblock seemed to do nothing** - it took the address off every router one after another before
+  answering (minutes with many routers), and if any router couldn't be reached the card didn't refresh. Unblock now
+  releases the address at once (the row goes away) and takes it off the routers in the background, 8 at a time, asking
+  each router only for that address; a router it can't reach gets an event (the entry expires there by itself).
+- **Unblock on Security > Top addresses**, and "blocked" now says what it is: **blocked on routers: dropped on N of M**
+  (auto-block - only routers with the drop rule actually drop it), **blocked: server SSH** (fail2ban on TikManager's
+  server, which guards SSH to the server only), or **was blocked** (the block has ended). Each current block has its
+  own **Unblock**. Unblocking a fail2ban ban uses a new root helper (tikmanager-unban.path, installed by this update;
+  it accepts only "unban <IP address>").
+- **A warning at the top of the Security page** when blocked addresses aren't dropped everywhere because routers lack the
+  drop rule (they were only being listed), with a link to add it. The Auto-block card also explains that Winbox through
+  TikManager's relay comes from TikManager's own address, so a block on your address doesn't stop it.
+
 ## 1.46.0-beta.19 - 2026-10-16
 
 - **Fix: backups over HTTPS could fail with "IncompleteRead"** - some routers cut a large answer (the backup's export)

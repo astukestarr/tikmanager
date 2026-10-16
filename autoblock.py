@@ -117,22 +117,28 @@ class AutoBlock:
         self.secev.record("router", "banned", "", ip, "auto-block", f"blocked on every router for {cfg['hours']} h ({reason or by})")
         self.db.audit(by, "address blocked on all routers", ip, detail=reason)
 
-    def release(self, ip: str, by: str) -> list:
-        """Unblock: take the address off every router it was put on. Returns the routers it couldn't be removed from."""
+    def release(self, ip: str, by: str) -> int:
+        """Unblock: released at once (it leaves the list and isn't pushed again); taken off the routers it was put on in
+        the background, 8 at a time. Returns how many routers it's being removed from."""
         self.db.run("UPDATE autoblock SET released_at=? WHERE ip=? AND released_at IS NULL", (time.time(), ip))
-        failed = []
-        for p in self.db.q("""SELECT p.device_id, d.* FROM autoblock_push p JOIN devices d ON d.id = p.device_id
-                              WHERE p.ip=? AND p.error IS NULL""", (ip,)):
-            try:
-                cl = self.client(p)
-                for e in cl.al_entries(LIST):
-                    if e.get("address") == ip:
-                        cl.fw_remove("address-list", e[".id"])
-            except RouterError as e:
-                failed.append(f"{p['name']}: {e}")
+        rows = self.db.q("""SELECT p.device_id, d.* FROM autoblock_push p JOIN devices d ON d.id = p.device_id
+                            WHERE p.ip=? AND p.error IS NULL""", (ip,))
         self.db.run("DELETE FROM autoblock_push WHERE ip=?", (ip,))
         self.db.audit(by, "address unblocked on all routers", ip)
-        return failed
+        self.secev.record("router", "unbanned", "", ip, "auto-block", f"unblocked by {by}")
+        threading.Thread(target=self._remove_everywhere, args=(ip, rows), daemon=True, name="autoblock-release").start()
+        return len(rows)
+
+    def _remove_everywhere(self, ip, rows):
+        def one(p):
+            try:
+                cl = self.client(p)
+                for e in cl.al_find(LIST, ip):
+                    cl.fw_remove("address-list", e[".id"])
+            except RouterError as e:   # offline / unreachable: the entry expires there by itself (it has a timeout)
+                self.db.event(p["id"], p.get("org_id"), "auto-block", f"Couldn't take {ip} off the block list ({str(e)[:150]}) - it expires there by itself")
+        with ThreadPoolExecutor(8) as ex:
+            list(ex.map(one, rows))
 
     def push(self):
         """Put every active block on every online router that doesn't have it yet."""
@@ -209,6 +215,16 @@ class AutoBlock:
                         (now, now - KEEP_DAYS * 86400))
             self.db.run("DELETE FROM autoblock_push WHERE ip NOT IN (SELECT ip FROM autoblock WHERE released_at IS NULL AND until > ?)", (now,))
 
+    def blocks(self) -> dict:
+        """Addresses on the block list now: {ip: {routers: put on, enforced: of those, the ones with a rule that drops the
+        list (last known - see rule_status), total}}. Without the rule a router only lists the address."""
+        on = {}
+        for r in self.db.q("SELECT ip, device_id FROM autoblock_push WHERE error IS NULL"):
+            on.setdefault(r["ip"], set()).add(r["device_id"])
+        total = self.db.one("SELECT COUNT(*) AS n FROM devices WHERE state='adopted'")["n"]
+        return {b["ip"]: {"routers": len(on.get(b["ip"], ())), "total": total,
+                          "enforced": sum(1 for i in on.get(b["ip"], ()) if self.rules.get(i, (0, None))[1])} for b in self.active()}
+
     def info(self, rule_check=True) -> dict:
         cfg = self.settings()
         rules = self.rule_status() if rule_check and cfg["mode"] != "off" else {}
@@ -217,7 +233,7 @@ class AutoBlock:
         for r in self.db.q("SELECT ip, COUNT(*) AS n FROM autoblock_push WHERE error IS NULL GROUP BY ip"):
             pushed[r["ip"]] = r["n"]
         return {"settings": cfg, "list": LIST, "candidates": self.candidates(cfg), "routers_total": len(names),
-                "blocked": [{**b, "routers": pushed.get(b["ip"], 0)} for b in self.active()],
+                "blocked": [{**b, "routers": pushed.get(b["ip"], 0), "enforced": self.blocks().get(b["ip"], {}).get("enforced", 0)} for b in self.active()],
                 "recent": self.db.q("SELECT * FROM autoblock WHERE released_at IS NOT NULL OR until <= ? ORDER BY COALESCE(released_at, until) DESC LIMIT 50",
                                     (time.time(),)),
                 "no_rule": [{"id": i, "name": names[i]["name"]} for i, ok in rules.items() if ok is False and i in names],

@@ -55,6 +55,7 @@ import healthdash
 healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManager" uses it
 import compliance
 import whatsnew
+from f2b import F2b
 from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
@@ -176,6 +177,7 @@ def switch_https(d, user, cl=None):
     return f"TikManager now uses {what}. HTTP still works as a fallback until you turn it off."
 
 
+f2b = F2b(settings)   # fail2ban on this server: Security page > Unblock
 FIX_JOBS, FIX_LOCK = {}, threading.Lock()
 GUARD_UNDO = "tikmanager-fix-undo"   # router script + scheduler that undo a guarded one-click fix unless TikManager cancels them   # Performance & security one-click fixes in progress (and the last hour's)
 router_act_limit = RateLimiter(20, 300)   # VPN reconnects / re-reads per person (each one works a router)     # release-note lookups per technician (each may fetch from MikroTik)
@@ -917,7 +919,10 @@ class Handler(BaseHTTPRequestHandler):
                 hours = max(1, min(24 * 90, int(q.get("hours") or 24)))
             except ValueError:
                 hours = 24
-            return self.json(secev.summary(hours, q.get("source", "")[:20], q.get("kind", "")[:20], q.get("q", "")[:100]))
+            out = secev.summary(hours, q.get("source", "")[:20], q.get("kind", "")[:20], q.get("q", "")[:100])
+            # what "blocked" means right now, per address: fail2ban on this server (SSH) and/or the routers' block list
+            out["blocks"] = {"server": f2b.status(), "routers": autoblock.blocks()}
+            return self.json(out)
         if path == "/api/discovered":   # MikroTik neighbours of your routers that aren't in TikManager yet
             self.require(tech=True)
             devs = db.q("""SELECT id, name, identity, org_id, state, interfaces, networks, wan_ip, tunnel_ip, public_ip, neighbors, neighbors_at
@@ -2304,6 +2309,18 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "auto-block settings", cfg["mode"], self.client_ip(), json.dumps(cfg))
             return self.json(cfg)
+        if path == "/api/security/unban":   # {ip}: lift fail2ban's ban on this server (SSH)
+            s = self.require(tech=True, write=True)
+            ip = str(self.body().get("ip") or "").strip()[:64]
+            try:
+                r = f2b.unban(ip)
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            if r["ok"]:
+                secev.record("server", "unbanned", "", ip, "fail2ban", f"unblocked by {s['email']}")
+                db.audit(s["email"], "address unblocked on the server (fail2ban)", ip, self.client_ip())
+                return self.json({"ok": True})
+            raise HttpError(400, f"fail2ban didn't unblock it: {r['detail']}")
         if path in ("/api/security/autoblock/block", "/api/security/autoblock/release"):
             s = self.require(tech=True, write=True)
             ip = str(self.body().get("ip") or "").strip()[:64]
@@ -2312,7 +2329,7 @@ class Handler(BaseHTTPRequestHandler):
                     autoblock.block(ip, s["email"], reason="blocked by hand")
                     threading.Thread(target=autoblock.push, daemon=True, name="autoblock-push").start()
                     return self.json({"ok": True})
-                return self.json({"ok": True, "failed": autoblock.release(ip, s["email"])})
+                return self.json({"ok": True, "failed": [], "routers": autoblock.release(ip, s["email"])})
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
         if path == "/api/security/autoblock/rule":   # add the raw drop rule for the block list to one router
