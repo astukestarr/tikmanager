@@ -3,6 +3,42 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.0 - 2026-10-16
+
+The full release of the 1.46.0 betas (beta.1 to beta.23) - a minor version: existing data and settings keep working,
+upgrade with the button. Details of each change are in the beta sections below.
+
+- **Remote access with WireGuard for Windows** (router page > Remote access) - an SSTP replacement: per-person keys and
+  configs, the router's MikroTik Cloud DNS name as the address, office DNS with the domain (search suffix, and a name
+  rule pinning it to the office DNS server), per-person access limits enforced by the router, expiry dates, disable /
+  enable, a one-time config download or an **RMM install script** (installs WireGuard and the tunnel as a service), a
+  400-day connection log with CSV export, unusual-connection alerts (new address, key used from two places) and a
+  warnings box on handing out access safely.
+- **Performance & security dashboard** (Monitoring) - every router checked for internet problems, performance, exposed
+  services, weak encryption and old VPNs, VPN problems, updates and CVEs, backups and hygiene.
+- **One-click fixes** - backed up first, one setting changed, re-checked; Fix all with per-router progress in the
+  background, Copy failures / Copy results, and **Show routers - pick which** to fix only some. Fixes that touch how
+  TikManager reaches a router arm an undo on the router first.
+- **Accept a finding** with a reason - it leaves the dashboard and shows in compliance as met with a documented exception.
+- **Compliance** (Monitoring) - CIS Controls v8, NIST SP 800-171 / CMMC Level 2, PCI DSS 4.0 and HIPAA, with a branded
+  **client report** (print / save as PDF) and a CSV for auditors.
+- **HTTPS management connection** - Switch to HTTPS (router Settings, or Fix all): keeps a router's www-ssl port and
+  certificate (8443 when SSTP holds 443), never leaves www-ssl open to the internet, switches only once HTTPS answers,
+  and falls back to HTTP safely (reads only; never a repeated change). Then WebFig over plain HTTP can be turned off -
+  only after a backup is proven over HTTPS alone. WebFig is never disabled while TikManager depends on it.
+- **Security page and auto-block** - "blocked" says what it is (routers: dropped on N of M; server SSH via fail2ban; was
+  blocked), **Unblock** on Top addresses (routers, and fail2ban on TikManager's server through a new root helper),
+  instant Unblock, and blocking now adds the drop rule to routers that lack it (a setting can turn that off).
+- **VPNs tab** on every router page; **paste coordinates** from Google Maps into a router's location; **What's new
+  tour** after updates (once per full release).
+- **Fixes**: router pages failing to load (beta.2), SSH strong-crypto and MAC Telnet fixes on routers that refused them,
+  HTTPS certificate signing ("CA not found"), backups cut off over HTTPS, Logs > Export CSV, Security "show", a finished
+  fix box that kept coming back, router pages scrolling sideways on narrow screens, and RouterOS 7.20+ (renamed
+  "available-from", and dynamic connection entries no longer read as open services). Sign-in errors during setup now
+  say how to fix them.
+- **Faster**: indexed queries for the dashboard's recent events, Performance & security, the remote access log, and a
+  lighter VPNs tab.
+
 ## 1.46.0-beta.23 - 2026-10-16
 
 - **Fix: services already limited kept showing as open** (e.g. "Limit WebFig over HTTPS" listed a router whose www-ssl
