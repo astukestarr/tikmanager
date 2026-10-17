@@ -253,11 +253,14 @@ function dashNetwork(x) {
       ${dTile(`${x.online}/${x.total}`, "Routers online", x.online < x.total ? "warn" : "good", "", "routers/router")}
       ${dTile(x.links_down.length, "Internet links down", x.links_down.length ? "bad" : "good", `of ${x.links_total}`, "@dnLinks")}
       ${x.bgp_total ? dTile(x.bgp_down.length, "BGP peers down", x.bgp_down.length ? "bad" : "good", `of ${x.bgp_total}`, "@dnBgp") : ""}
+      ${x.checks_total ? dTile(x.checks_down.length, "Critical checks down", x.checks_down.length ? "bad" : "good", `of ${x.checks_total}`, "@dnChecks") : ""}
       ${dTile(x.avg_latency != null ? `${x.avg_latency} ms` : "—", "Average latency", "", "last hour", "@dnLat")}
       ${dTile(x.lossy.length, "Routers with packet loss", x.lossy.length ? "warn" : "good", "last hour", "@dnLoss")}</div>
     <div class="dash-grid">
       ${dCard("Internet links down", dTable(x.links_down, [["name", "Router", dRouter], ["link", "Link", (v, r) => `<span class="mono">${esc(v)}</span> <span class="muted">${esc(r.comment)}</span>`], ["since", "Down for", down]], "Every internet link is up."), "", "dnLinks")}
       ${x.bgp_total ? dCard("BGP peers down", dTable(x.bgp_down, [["name", "Router", dRouter], ["peer", "Peer"], ["remote", "Address", (v) => `<span class="mono">${esc(v)}</span>`], ["since", "Down for", down]], "Every BGP peer is established."), "", "dnBgp") : ""}
+      ${x.checks_total ? dCard("Critical checks down", dTable(x.checks_down, [["name", "Router", dRouter], ["check_name", "Can't reach", (v, r) => `${esc(v)} <span class="mono muted">${esc(r.target)}</span>`],
+        ["since", "Since", (v) => v ? durShort(Date.now() / 1000 - v) : ""]], "Every router reaches its critical addresses."), `<a class="small" href="#checks">Critical checks</a>`, "dnChecks") : ""}
       ${dCard("Highest latency (last hour)", dTable(x.latency, [["name", "Router", dRouter], ["value", "Average", (v) => `${v} ms`]], "No latency readings yet."), "", "dnLat")}
       ${dCard("Packet loss (last hour)", dTable(x.lossy, [["name", "Router", dRouter], ["value", "Worst", (v) => `${v}%`]], "No packet loss."), "", "dnLoss")}
       ${dCard("Busiest CPUs (last hour)", dTable(x.cpu, [["name", "Router", dRouter], ["value", "Average", (v) => `<div class="row"><div class="bar"><i data-pct="${v}"></i></div>${v}%</div>`]], "No readings yet."))}
@@ -596,6 +599,7 @@ async function router(id) {
       </div>
       <div class="health" id="health"></div>
       ${ispCard(d)}
+      ${isTech() && adopted ? `<div id="ckRoot"></div>` : ""}
       ${secCard(d)}
       ${Object.keys(d.health || {}).length ? `<div class="card" id="hwCard"><h2>Hardware health</h2><p class="muted small">Loading…</p></div>` : ""}
       ${lteCard(d.interfaces || [])}
@@ -739,6 +743,7 @@ async function router(id) {
   $("mgHttp")?.addEventListener("click", () => mg(false));
   if ($("rvRoot")) rvTab(d).catch(() => {});
   if ($("rtRoot")) routingTab(d).catch(() => {});
+  if ($("ckRoot")) routerChecks(d).catch(() => {});
   if ($("flRoot")) flowsTab(d).catch((e) => { if ($("flRoot")) $("flRoot").innerHTML = `<div class="card"><h2>Flows</h2><p class="status err">${esc(e.message)}</p></div>`; });
   if ($("wbBox")) loadWinbox(d);
   loadLocation(d);
@@ -1547,6 +1552,116 @@ async function adminTechs() {
   document.querySelectorAll("[data-rdel]").forEach((b) => b.addEventListener("click", async () => {
     if (!confirm(`Delete the role ${byId[b.dataset.rdel].name}?`)) return;
     try { await post(`/api/roles/${b.dataset.rdel}/delete`); adminTechs(); } catch (e) { msg("rStatus", e.message); }
+  }));
+}
+
+// --- Critical checks (checks.py): addresses a client's routers must reach, pinged from each router ------------------------
+const ckView = { org: "", open: null };
+const ckState = (r) => !r.online ? ["", "router offline"] : r.up === 1 ? ["up-done", "reachable"] : r.up === 0 ? ["up-failed", "unreachable"]
+  : r.fails ? ["up-sched", `failing (${r.fails})`] : ["up-cancelled", "waiting"];
+const ckScope = (c, routers) => {
+  const ex = c.exclude.length ? ` · ${c.exclude.length} excluded` : "";
+  if (c.scope === "all") return `all routers${ex}`;
+  if (c.scope === "tag") return `routers tagged ${esc(c.tag)}${ex}`;
+  return c.routers.map((id) => esc((routers || []).find((r) => r.id === id)?.name || `#${id}`)).join(", ");
+};
+async function checkEditor(c, preset = {}) {
+  const x = await api(`/api/checks${(c?.org_id || preset.org_id) ? `?org_id=${c?.org_id || preset.org_id}` : ""}`);
+  const cur = { org_id: c?.org_id || preset.org_id || x.orgs[0]?.id, name: c?.name || "", target: c?.target || "", scope: c?.scope || preset.scope || "all",
+    tag: c?.tag || "", routers: c?.routers || preset.routers || [], exclude: c?.exclude || [], from_lan: c ? !!c.from_lan : false, fail_after: c?.fail_after || 3,
+    enabled: c ? !!c.enabled : true, notes: c?.notes || "" };
+  const draw = async () => {
+    const all = (await api(`/api/checks?org_id=${cur.org_id}`)).routers;
+    const tags = [...new Set(all.flatMap((r) => r.tags))].sort();
+    const box = (name, list) => `<div class="ck-routers">${all.map((r) => `<label class="chk"><input type="checkbox" name="${name}" value="${r.id}" ${list.includes(r.id) ? "checked" : ""}>
+      <span class="dot ${r.online ? "on" : "off"}"></span>${esc(r.name)}${r.tags.length ? ` <span class="muted small">${r.tags.map(esc).join(", ")}</span>` : ""}</label>`).join("") || `<span class="small muted">This client has no routers.</span>`}</div>`;
+    dialog(`<h2>${c ? "Edit critical check" : "New critical check"}</h2>
+      <div class="grid2"><label class="field">Client <select id="ckOrg" ${preset.org_id ? "disabled" : ""}>${x.orgs.map((o) => `<option value="${o.id}" ${o.id === +cur.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>
+        <label class="field">Name <input id="ckName" maxlength="80" value="${esc(cur.name)}" placeholder="File server"></label>
+        <label class="field">Address to reach <input id="ckTarget" maxlength="120" value="${esc(cur.target)}" placeholder="192.168.100.5" spellcheck="false"></label>
+        <label class="field">Down after <select id="ckFail">${[1, 2, 3, 5, 10].map((n) => `<option value="${n}" ${cur.fail_after === n ? "selected" : ""}>${n} failed round${n === 1 ? "" : "s"} (${n} min)</option>`).join("")}</select></label></div>
+      <div class="small muted">Which routers must reach it</div>
+      <div class="seg ck-scope" role="group">${[["all", "All the client's routers"], ["tag", "Routers with a tag"], ["routers", "Chosen routers"]].map(([k, l]) =>
+        `<button type="button" data-ckscope="${k}" class="${cur.scope === k ? "on" : ""}">${l}</button>`).join("")}</div>
+      ${cur.scope === "tag" ? `<label class="field">Tag <select id="ckTag"><option value="">Pick a tag…</option>${tags.map((t) => `<option ${t === cur.tag ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
+        ${tags.length ? "" : `<p class="small muted">None of this client's routers has a tag yet - add tags on the router pages (Settings).</p>`}` : ""}
+      ${cur.scope === "routers" ? `<div class="small muted">Routers</div>${box("ckR", cur.routers)}` : `<details ${cur.exclude.length ? "open" : ""}><summary class="small">Exclusions - routers that don't need it (${cur.exclude.length})</summary>${box("ckX", cur.exclude)}</details>`}
+      <label class="chk"><input type="checkbox" id="ckLan" ${cur.from_lan ? "checked" : ""}> Ping from the router's LAN address (for site-to-site VPNs that only carry LAN-to-LAN traffic)</label>
+      <label class="chk"><input type="checkbox" id="ckOn" ${cur.enabled ? "checked" : ""}> Checking (untick to pause it)</label>
+      <label class="field">Notes <input id="ckNotes" maxlength="300" value="${esc(cur.notes)}" placeholder="Why it matters, who to call"></label>
+      <div class="actions"><button class="btn primary" type="button" id="ckSave">Save check</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="ckMsg"></span></div>`);
+    const keep = () => Object.assign(cur, { org_id: +$("ckOrg").value, name: $("ckName").value, target: $("ckTarget").value, fail_after: +$("ckFail").value,
+      tag: $("ckTag")?.value ?? cur.tag, from_lan: $("ckLan").checked, enabled: $("ckOn").checked, notes: $("ckNotes").value,
+      routers: $("ckTag") || document.querySelector("[name=ckX]") ? cur.routers : [...document.querySelectorAll("[name=ckR]:checked")].map((i) => +i.value),
+      exclude: document.querySelector("[name=ckX]") ? [...document.querySelectorAll("[name=ckX]:checked")].map((i) => +i.value) : cur.exclude });
+    document.querySelectorAll("[data-ckscope]").forEach((b) => b.addEventListener("click", () => { keep(); cur.scope = b.dataset.ckscope; draw(); }));
+    $("ckOrg").addEventListener("change", () => { keep(); cur.routers = []; cur.exclude = []; draw(); });
+    $("ckSave").addEventListener("click", async () => {
+      keep();
+      try { await post("/api/checks", { ...cur, id: c?.id || 0 }); $("dlg").close(); if (view === "checks") checksPage(); else if ($("ckRoot")) routerChecks(preset.device); }
+      catch (e) { $("ckMsg").textContent = e.message; $("ckMsg").className = "status err"; }
+    });
+  };
+  draw();
+}
+
+async function checksPage() {
+  const x = await api(`/api/checks${ckView.org ? `?org_id=${ckView.org}` : ""}`);
+  const down = x.checks.reduce((n, c) => n + c.down, 0);
+  $("main").innerHTML = `<div class="row"><div><h1>Critical checks</h1><p class="muted">Addresses a client's routers must be able to reach - a file server, a phone
+      system, the other end of a VPN. Each router pings them every minute; one that stops answering raises an alert (Alerts &gt; Critical check down).</p></div>
+      <span class="spacer"></span>${x.can_edit ? `<button class="btn primary" type="button" id="ckNew">New check</button>` : ""}</div>
+    <div class="card"><div class="row"><select id="ckOrgF" aria-label="Client"><option value="">All clients</option>${x.orgs.map((o) => `<option value="${o.id}" ${String(o.id) === ckView.org ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
+        <span class="spacer"></span><span class="small ${down ? "status err" : "muted"}">${down ? `${down} router${down === 1 ? " can't" : "s can't"} reach a critical address` : `${x.checks.length} check${x.checks.length === 1 ? "" : "s"}${x.checks.length ? " - all reachable" : ""}`}</span></div>
+      ${x.checks.length ? `<div class="ck-list">${x.checks.map((c) => `<div class="ck ${ckView.open === c.id ? "open" : ""}">
+          <button type="button" class="ck-head" data-ckopen="${c.id}" aria-expanded="${ckView.open === c.id}">
+            <span class="ck-name"><b>${esc(c.name)}</b> <span class="mono small">${esc(c.target)}</span>${c.enabled ? "" : ` <span class="pill">paused</span>`}
+              <span class="small muted">· ${esc(c.org || "")} · ${ckScope(c, x.routers)}</span></span>
+            <span class="ck-sum">${c.down ? `<span class="pill up-failed">${c.down} down</span>` : ""}<span class="pill up-done">${c.up} up</span>${c.waiting ? `<span class="pill">${c.waiting} waiting</span>` : ""}</span></button>
+          ${ckView.open === c.id ? `<div class="ck-body">${c.notes ? `<p class="small">${esc(c.notes)}</p>` : ""}
+            ${c.results.length ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Status</th><th>Reply</th><th>Since</th><th>Checked</th><th></th></tr></thead><tbody>
+              ${c.results.map((r) => { const [cls, l] = ckState(r); return `<tr><td><a href="#router/${r.device_id}">${esc(r.name)}</a></td><td><span class="pill ${cls}">${l}</span>${r.up === 0 && r.detail ? `<div class="small muted">${esc(r.detail)}</div>` : ""}</td>
+                <td class="small">${[r.latency != null ? `${r.latency} ms` : "", r.loss ? `${r.loss}% lost` : ""].filter(Boolean).join(" · ")}</td><td class="small nowrap">${r.since && r.up != null ? ago(r.since) : ""}</td>
+                <td class="small nowrap">${r.last_at ? ago(r.last_at) : ""}</td>
+                <td>${x.can_edit ? `<button class="linkish small" type="button" data-ckex="${c.id}:${r.device_id}">Exclude</button>` : ""}</td></tr>`; }).join("")}</tbody></table></div>`
+              : `<p class="small muted">No router this check applies to.</p>`}
+            ${x.can_edit ? `<div class="actions"><button class="btn small" type="button" data-ckedit="${c.id}">Edit</button><button class="btn small" type="button" data-ckrun="${c.id}">Check now</button>
+              <button class="btn small danger" type="button" data-ckdel="${c.id}">Delete</button></div>` : ""}</div>` : ""}</div>`).join("")}</div>`
+        : `<p class="muted">No critical checks${ckView.org ? " for this client" : ""} yet.${x.can_edit ? " New check adds one - for all of a client's routers, the ones with a tag, or chosen routers." : ""}</p>`}</div>`;
+  const again = () => checksPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
+  $("ckNew")?.addEventListener("click", () => checkEditor(null, ckView.org ? { org_id: +ckView.org } : {}));
+  $("ckOrgF").addEventListener("change", (e) => { ckView.org = e.target.value; again(); });
+  $("main").querySelectorAll("[data-ckopen]").forEach((b) => b.addEventListener("click", () => { const id = +b.dataset.ckopen; ckView.open = ckView.open === id ? null : id; again(); }));
+  $("main").querySelectorAll("[data-ckedit]").forEach((b) => b.addEventListener("click", () => checkEditor(x.checks.find((c) => c.id === +b.dataset.ckedit))));
+  $("main").querySelectorAll("[data-ckrun]").forEach((b) => b.addEventListener("click", async () => { b.disabled = true; b.textContent = "Checking…"; await post(`/api/checks/${b.dataset.ckrun}/run`); setTimeout(again, 4000); }));
+  $("main").querySelectorAll("[data-ckdel]").forEach((b) => b.addEventListener("click", async () => { if (!confirm("Delete this critical check?")) return; await post(`/api/checks/${b.dataset.ckdel}/delete`); again(); }));
+  $("main").querySelectorAll("[data-ckex]").forEach((b) => b.addEventListener("click", async () => {
+    const [cid, did] = b.dataset.ckex.split(":");
+    try { await post(`/api/checks/${cid}/exclude`, { device_id: +did }); again(); } catch (e) { alert(e.message); }
+  }));
+}
+
+// router page > Overview: the critical checks this router runs
+async function routerChecks(d) {
+  const x = await api(`/api/devices/${d.id}/checks`);
+  const root = $("ckRoot");
+  if (!root) return;
+  if (!x.checks.length && !x.can_edit) { root.innerHTML = ""; return; }
+  root.innerHTML = `<div class="card"><div class="row"><h2>Critical checks</h2><span class="spacer"></span>
+      ${x.can_edit && d.org_id ? `<button class="btn small" type="button" id="ckAddHere">Add a check</button>` : ""}</div>
+    ${x.checks.length ? `<div class="table-wrap"><table><thead><tr><th>Check</th><th>Status</th><th>Reply</th><th></th></tr></thead><tbody>
+      ${x.checks.map((c) => { const r = c.results[0] || {}; const [cls, l] = ckState({ ...r, online: d.online });
+        return `<tr><td><b>${esc(c.name)}</b> <span class="mono small">${esc(c.target)}</span>${c.enabled ? "" : ` <span class="pill">paused</span>`}<div class="small muted">${c.scope === "routers" && c.routers.length === 1 ? "this router" : c.scope === "all" ? "all of the client's routers" : c.scope === "tag" ? `routers tagged ${esc(c.tag)}` : "chosen routers"}</div></td>
+          <td><span class="pill ${cls}">${l}</span>${r.up === 0 ? `<div class="small muted">${esc(r.detail || "")}${r.since ? ` · since ${ago(r.since)}` : ""}</div>` : ""}</td>
+          <td class="small">${r.latency != null ? `${r.latency} ms ` : ""}${r.last_at ? `<span class="muted">${r.latency != null ? "· " : "checked "}${ago(r.last_at)}</span>` : ""}</td>
+          <td class="nowrap">${x.can_edit ? `${c.scope !== "routers" || c.routers.length > 1 ? `<button class="linkish small" type="button" data-ckx="${c.id}" title="This router doesn't need it">Exclude this router</button>` : `<button class="linkish small" type="button" data-cke="${c.id}">Edit</button>`}` : ""}</td></tr>`; }).join("")}
+      </tbody></table></div>` : `<p class="small muted">None. Add a check to make sure this router can always reach an address - a server, a phone system, the far end of a VPN.
+      It's pinged every minute and alerts when it stops answering.</p>`}</div>`;
+  $("ckAddHere")?.addEventListener("click", () => checkEditor(null, { org_id: d.org_id, scope: "routers", routers: [d.id], device: d }));
+  root.querySelectorAll("[data-cke]").forEach((b) => b.addEventListener("click", () => checkEditor(x.checks.find((c) => c.id === +b.dataset.cke), { device: d })));
+  root.querySelectorAll("[data-ckx]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Exclude this router from the check? The other routers keep checking.")) return;
+    try { await post(`/api/checks/${b.dataset.ckx}/exclude`, { device_id: d.id }); routerChecks(d); } catch (e) { alert(e.message); }
   }));
 }
 
@@ -5364,7 +5479,8 @@ const NAV = [
     { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
     { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
-    { view: "health", label: "Router health", who: "tech" }, { view: "alerts", label: "Alerts", who: "tech", count: "alerts" },
+    { view: "health", label: "Router health", who: "tech" }, { view: "checks", label: "Critical checks", who: "tech" },
+    { view: "alerts", label: "Alerts", who: "tech", count: "alerts" },
     { view: "logs", label: "Logs", who: "tech" }] },
   { group: "Security", icon: "security", items: [
     { view: "security", label: "Sign-ins & events", who: "tech" }, { view: "blocking", label: "Blocking", who: "tech" },
@@ -5510,7 +5626,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

@@ -31,6 +31,10 @@ SLIDES_2_0 = [
     {"id": "dashboards", "title": "Dashboards", "img": None, "view": "dashboard", "who": "tech",
      "text": "The Dashboard has tabs, like Report Center: Overview, Network, Security and Maintenance. Click any tile to jump "
              "to its list or open the page that deals with it."},
+    {"id": "critical-checks", "title": "Critical checks", "img": None, "view": "checks", "who": "tech",
+     "text": "Monitoring > Critical checks: make sure a client's routers can always reach an address - a server, a phone system, "
+             "the far end of a VPN. Every router pings it each minute (with exclusions, tags or chosen routers) and an alert "
+             "fires when one can't."},
     {"id": "roles", "title": "Your own technician roles", "img": None, "view": "admin", "who": "tech",
      "text": "Admin > Technicians > Roles: build roles from individual permissions (upgrades, backups, Winbox, firewall changes, "
              "blocking, clients, settings...) and pick the role new Microsoft sign-ins get - or make them wait for you."},

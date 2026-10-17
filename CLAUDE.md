@@ -76,6 +76,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Ports and VLANs | `ports.py` (`build`, `plan`, `undo_script`, `apply/keep/undo`), `RouterOS.port_data/br_*`, `portsTab/portEditor/ptChange` in `app.js` |
 | Router logs and log alert rules | `routerlogs.py` (`parse`, `query`, `conditions`), `logsPage/logViewer/logRulesCard` in `app.js` |
 | Webhooks (alert destinations) | `webhooks.py` (`build`, `send_all`, `check_url`), `alerts._hooks`, `webhooksCard/webhookDialog` in `app.js` |
+| Critical checks | `checks.py` (`Checks.save` / `applies` / `run_once` / `status` / `down`), `ping_check` in `routeros.py`, `critical` in `alerts.py`, `checksPage()` / `routerChecks()` / `checkEditor()` in `app.js` |
 | Technician roles & permissions | `roles.py` (`PERMS`, `RULES` path->permission, `Roles`), `require(perm=)` / `can()` in `server.py`, `can()` / `adminTechs()` in `app.js` |
 | Message Center (the bell) | `messages.py` (`sync_releases`, `list`, `ack`, `post`), `bellPop()` / `messagesPage()` in `app.js` |
 | App install (PWA) | `/manifest.webmanifest` in `server.py`, icons from `deploy/make_icons.py`, head tags in `index.html` / `login.html` |

@@ -16,7 +16,7 @@ import time
 ADMIN, NONE = "admin", "none"
 # id, group, what it allows
 PERMS = [
-    ("devices", "Routers", "Adopt, approve, rename, move and delete devices; edit their details, tags, location and internet links"),
+    ("devices", "Routers", "Adopt, approve, rename, move and delete devices; edit their details, tags, location and internet links; critical checks"),
     ("config", "Routers", "Change router configuration: firewall and NAT, ports, one-click fixes, HTTPS management, accepted findings, run scripts"),
     ("winbox", "Routers", "Open Winbox to routers through TikManager (full access - without this, read-only Winbox)"),
     ("upgrades", "Routers", "Upgrade RouterOS and firmware, now or scheduled"),

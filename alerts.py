@@ -47,6 +47,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "firmware": ("New RouterOS available for a router", False, None, None),
     "unifi": ("UniFi / UISP site has offline devices (one alert per site)", True, "minutes", 10),
     "bgp": ("BGP peer down (a configured BGP connection without an established session)", True, "minutes", 3),
+    "critical": ("Critical check down (a router can't reach an address it must - Monitoring > Critical checks)", True, "minutes", 2),
     "remote_access": ("Remote access: someone connected from a new address, or their key was used from two places (clears after an hour)", True, None, None),
 }
 DEFAULTS = {"kinds": {k: {"on": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
@@ -170,6 +171,16 @@ class Alerts:
                             f"BGP peer {n} ({p.get('remote', '')}" + (f", AS {p['as']}" if p.get("as") else "") + ") has had no established session since "
                             f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(p.get('since') or now))}. "
                             + (f"Still up: {', '.join(up)}." if up else "No other BGP peer on this router is up."))
+        checks = getattr(self, "checks", None)
+        if k.get("critical", {}).get("on") and checks:
+            limit = now - k["critical"]["minutes"] * 60
+            byid = {d["id"]: d for d in devs}
+            for x in checks.down():
+                d = byid.get(x["device_id"])
+                if d and (x["since"] or now) <= limit:
+                    out[f"critical:{x['check_id']}:{d['id']}"] = ("critical", d["id"], d["org_id"], short(f"{label(d)} can't reach {x['check_name']} ({x['target']})"),
+                        f"Critical check {x['check_name']}: {label(d)} has had no reply from {x['target']} since "
+                        f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(x['since'] or now))} ({x['detail']}). The router itself is online.")
         if k["flagged"]["on"]:
             for d in devs:
                 if d.get("dm_flagged"):

@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.16 - 2026-10-17
+
+- **Critical checks** (Monitoring > Critical checks, and a card on each router's page) - addresses a client's routers must
+  always reach (a file server, a phone system, the far end of a VPN). A check applies to all of a client's routers, the
+  ones with a tag, or chosen routers - with exclusions for routers that don't need it (**Exclude** on the check, or
+  **Exclude this router** on the router page). **Add a check** on a router page makes one for that router.
+  - Each online router pings the address every minute (3 pings), optionally **from its LAN address** for site-to-site
+    VPNs that only carry LAN-to-LAN traffic. It's **down** after the chosen number of failed rounds in a row (default 3) -
+    a router event, and the new **Critical check down** alert (Alerts; after 2 minutes by default; Teams, email,
+    ConnectWise and webhooks like the others), resolved when it answers again. An offline router's checks aren't judged.
+  - Shown on the Network dashboard (a tile and a list) and the phone dashboard's Needs attention.
+  - Editing checks needs the "devices" permission (renamed to include critical checks).
+
 ## 2.0.0-beta.15 - 2026-10-17
 
 - **Your own technician roles** (Admin > Technicians > Roles) - a role is a set of permissions, ticked one by one: adopt and

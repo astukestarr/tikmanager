@@ -196,6 +196,14 @@ dashboard: what needs attention, a router search, alerts and events).
 It's the same TikManager: everything stays on your server, sign-in works as in the browser, and updates arrive with
 the server's - there's nothing to update on the phone.
 
+## Critical checks
+
+**Monitoring > Critical checks**: addresses a client's routers must reach - "every router at Acme can get to
+192.168.100.5". A check applies to all of the client's routers, routers with a tag, or chosen routers, with exclusions.
+Each router pings the address every minute (optionally from its LAN address, for VPNs that only carry LAN traffic); after
+the chosen number of failed rounds it's down - a router event and the **Critical check down** alert, cleared when it
+answers again. Router pages show their checks, with **Add a check** and **Exclude this router**.
+
 ## Technician roles
 
 **Admin > Technicians**: each technician has a role, and a role is a set of permissions - what they can *change*

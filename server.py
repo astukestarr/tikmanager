@@ -60,6 +60,7 @@ healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManag
 import compliance
 import dashboards
 from messages import Messages
+from checks import CheckError, Checks
 from roles import ADMIN as ROLE_ADMIN, LABEL as PERM_LABEL, NONE as ROLE_NONE, Roles, rule_for
 import whatsnew
 from f2b import F2b
@@ -153,7 +154,9 @@ threats = ThreatLists(settings.data_dir, dev=settings.dev)   # known bad network
 region = RegionBlock(db, settings, poller.client, geo, autoblock, threats)   # region (country) blocking + known bad networks per client
 flowlog = Flows(db, settings, geo, poller.client, routerlogs)
 msgs = Messages(db)
-roles = Roles(db, settings.tech_admins.split(","))   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
+roles = Roles(db, settings.tech_admins.split(","))
+checks = Checks(db, poller.client)   # critical checks: addresses a client's routers must reach (pinged from each router)
+alerts.checks = checks   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -997,6 +1000,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/rules":
             self.require(tech=True)
             return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
+        if path == "/api/checks":   # Monitoring > Critical checks: checks with each router's result (?org_id=)
+            s = self.require(tech=True)
+            org = int(q["org_id"]) if str(q.get("org_id") or "").isdigit() else None
+            routers = db.q("SELECT d.id, d.name, d.org_id, d.tags, d.online FROM devices d WHERE d.state='adopted'" + (" AND d.org_id=?" if org else "") + " ORDER BY d.name",
+                           (org,) if org else ())
+            for r in routers:
+                r["tags"] = json.loads(r["tags"] or "[]")
+            return self.json({"checks": checks.status(org), "routers": routers, "orgs": db.q("SELECT id, name FROM orgs ORDER BY name"),
+                              "can_edit": self.can(s, "devices")})
+        if m := re.fullmatch(r"/api/devices/(\d+)/checks", path):   # router page: the critical checks that apply to this router
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            return self.json({"checks": checks.status(d["org_id"], d["id"]), "can_edit": self.can(s, "devices")})
         if path == "/api/roles":   # technician roles, their permissions and the default for new sign-ins
             s = self.require(tech=True)
             return self.json({**roles.public(), "can_edit": self.can(s, "techs"), "is_admin": roles.is_admin(s)})
@@ -2475,6 +2491,29 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "webhook saved", h["name"], self.client_ip(), detail=h["format"])
             return self.json({"ok": True, "id": h["id"]})
+        if path == "/api/checks":   # add / change a critical check
+            s = self.require(tech=True, perm="devices")
+            try:
+                cid = checks.save(self.body(), s["email"])
+            except CheckError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "critical check saved", str(self.body().get("name") or self.body().get("target") or cid), self.client_ip())
+            checks.run_now(cid)
+            return self.json({"ok": True, "id": cid})
+        if m := re.fullmatch(r"/api/checks/(\d+)/(delete|run|exclude|include)", path):   # exclude / include need {device_id}
+            s = self.require(tech=True, perm="devices")
+            cid, act = int(m.group(1)), m.group(2)
+            try:
+                if act == "delete":
+                    checks.delete(cid)
+                elif act == "run":
+                    checks.run_now(cid)
+                else:
+                    checks.exclude(cid, int(self.body().get("device_id") or 0), act == "exclude")
+            except CheckError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], f"critical check {act}", str(cid), self.client_ip())
+            return self.json({"ok": True})
         if path == "/api/roles":   # add / change a custom role {id?, name, perms, about}
             s = self.require(tech=True, perm="techs")
             b = self.body()
@@ -3001,6 +3040,7 @@ def main():
     unifi.start()
     region.start()
     flowlog.start()
+    checks.start()
     try:
         msgs.sync_releases()   # this version's release notes in everyone's Message Center
         msgs.seed_guides()     # built-in guides (putting TikManager on your phone), once

@@ -196,6 +196,18 @@ CREATE TABLE IF NOT EXISTS sec_events (
   user TEXT, ip TEXT, device_id INTEGER, via TEXT, detail TEXT, uid TEXT UNIQUE          -- uid: de-duplicates imported events
 );
 CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
+CREATE TABLE IF NOT EXISTS check_defs (             -- critical checks (checks.py): an address a client's routers must reach
+  id INTEGER PRIMARY KEY, org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE, name TEXT NOT NULL, target TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'all', tag TEXT NOT NULL DEFAULT '',   -- all / tag / routers
+  routers TEXT NOT NULL DEFAULT '[]', exclude TEXT NOT NULL DEFAULT '[]',   -- JSON device ids
+  from_lan INTEGER NOT NULL DEFAULT 0, fail_after INTEGER NOT NULL DEFAULT 3, enabled INTEGER NOT NULL DEFAULT 1, notes TEXT NOT NULL DEFAULT '',
+  created_by TEXT, created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS check_state (            -- each router's latest result for each check that applies to it
+  check_id INTEGER NOT NULL REFERENCES check_defs(id) ON DELETE CASCADE, device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  up INTEGER, fails INTEGER NOT NULL DEFAULT 0, since REAL, last_at REAL, latency REAL, loss REAL, detail TEXT,
+  PRIMARY KEY (check_id, device_id)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS messages (               -- Message Center (messages.py): release notes and notices
   id INTEGER PRIMARY KEY, ts REAL NOT NULL, kind TEXT NOT NULL,   -- release / notice
   title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', version TEXT, audience TEXT NOT NULL DEFAULT 'tech',   -- tech / all

@@ -321,6 +321,28 @@ class RouterOS:
                 "fw_factory": rb.get("factory-firmware") or "",
                 "wan_ip": wan, "networks": nets, "interfaces": out}
 
+    def ping_check(self, target, src=None, count=3):
+        """Critical checks: ping target from the router (from src when given). {sent, received, avg ms, error} - or
+        {router_down: True} when the router itself didn't answer."""
+        body = {"address": target, "count": str(count), "interval": "0.3"}
+        if src:
+            body["src-address"] = src
+        try:
+            r = self._req("POST", "/ping", body, timeout=15)
+        except (NoConnection, CutOff):
+            return {"router_down": True}
+        except RouterError as e:
+            return {"sent": 0, "received": 0, "avg": None, "error": str(e)[:200]}
+        sent = received = 0
+        times = []
+        for row in r if isinstance(r, list) else []:
+            if "sent" in row:
+                sent, received = int(row.get("sent") or 0), int(row.get("received") or 0)
+            ms = _duration_ms(str(row.get("time") or ""))
+            if ms is not None:
+                times.append(ms)
+        return {"sent": sent or count, "received": received, "avg": round(sum(times) / len(times), 1) if times else None}
+
     def ping(self, target="1.1.1.1", count=3):
         """WAN health from the router's own point of view: (average latency ms, packet loss %), like UniFi's latency line."""
         r = self.optional(lambda: self._req("POST", "/ping", {"address": target, "count": str(count), "interval": "0.2"}, timeout=10), []) or []
@@ -1154,6 +1176,13 @@ class SimRouter:
 
     def https_revert(self, info):
         self.post("/ip/service/set", {"numbers": "www-ssl", "disabled": "yes", "port": "443", "certificate": "none", "address": ""})
+
+    def ping_check(self, target, src=None, count=3):
+        time.sleep(0.2)
+        if target.endswith(".99") or (target == "192.168.100.5" and self.id == 3):
+            return {"sent": count, "received": 0, "avg": None}
+        r = random.Random(int(time.time() // 60) * 11 + self.id + len(target))
+        return {"sent": count, "received": count, "avg": round(4 + self.id + r.random() * 3, 1)}
 
     def ping(self, target="1.1.1.1", count=3):
         r = random.Random(int(time.time() // 60) * 7 + self.id)

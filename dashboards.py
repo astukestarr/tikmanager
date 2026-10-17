@@ -23,6 +23,20 @@ def _brief(r):
     return {"id": r["id"], "name": r["name"], "org": r.get("org") or "", "online": bool(r["online"])}
 
 
+def _checks_down(db, rows):
+    ids = [r["id"] for r in rows if r["online"]]
+    if not ids:
+        return [], 0
+    ph = ",".join("?" * len(ids))
+    down = db.q(f"""SELECT s.device_id AS id, s.since, s.detail, c.name AS check_name, c.target, d.name, o.name AS org FROM check_state s
+                    JOIN check_defs c ON c.id = s.check_id JOIN devices d ON d.id = s.device_id LEFT JOIN orgs o ON o.id = d.org_id
+                    WHERE s.up = 0 AND c.enabled = 1 AND s.device_id IN ({ph}) ORDER BY s.since""", ids)
+    total = db.one(f"SELECT COUNT(*) AS n FROM check_state s JOIN check_defs c ON c.id = s.check_id WHERE c.enabled = 1 AND s.device_id IN ({ph})", ids)["n"]
+    for x in down:
+        x["online"] = True
+    return down, total
+
+
 def network(db, rows, now=None):
     now = now or time.time()
     ids = [r["id"] for r in rows]
@@ -46,7 +60,9 @@ def network(db, rows, now=None):
     lats = [m[i]["lat"] for i in m if m[i]["lat"] is not None]
     flaps = db.q(f"""SELECT e.device_id AS id, d.name, COUNT(*) AS n FROM events e JOIN devices d ON d.id = e.device_id
                      WHERE e.device_id IN ({ph}) AND e.ts > ? AND e.kind='link down' GROUP BY e.device_id ORDER BY n DESC LIMIT 10""", (*ids, now - 86400)) if ids else []
-    return {"online": sum(1 for r in rows if r["online"]), "total": len(rows), "links_total": links_total, "links_down": links_down,
+    cdown, ctotal = _checks_down(db, rows)
+    return {"checks_down": cdown, "checks_total": ctotal,
+            "online": sum(1 for r in rows if r["online"]), "total": len(rows), "links_total": links_total, "links_down": links_down,
             "bgp_total": bgp_total, "bgp_down": bgp_down, "avg_latency": round(sum(lats) / len(lats), 1) if lats else None,
             "lossy": [x for x in stat("loss") if x["value"] > 0], "latency": stat("lat"), "cpu": stat("cpu"), "mem": stat("mem"), "flaps": flaps}
 
@@ -138,6 +154,8 @@ def mobile(db, rows, tech, now=None):
                 add(r, 1, "BGP peer down", f"{n} {p.get('remote') or ''}".strip(), p.get("since"))
         if tech and (r.get("last_backup_error") or (r.get("last_backup_at") and now - r["last_backup_at"] > BACKUP_STALE)):
             add(r, 3, "Backup problem", r.get("last_backup_error") or "no backup for over 2 days", r.get("last_backup_at"))
+    for x in _checks_down(db, rows)[0]:
+        add(x, 1, "Critical check down", f"can't reach {x['check_name']} ({x['target']})", x["since"])
     alerts = []
     if tech and ids:
         alerts = db.q(f"""SELECT a.title, a.detail, a.opened_at, a.device_id AS id, d.name, o.name AS org FROM alerts a
