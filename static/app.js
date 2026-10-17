@@ -2465,7 +2465,12 @@ async function versionCard() {
     if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = `Click again to upgrade to ${u.latest}`; return; }
     e.target.disabled = true;
     try { await post("/api/admin/upgrade", { version: u.latest }); versionCard(); }
-    catch (err) { e.target.disabled = false; $("verStatus").textContent = err.message; $("verStatus").className = "status err"; }
+    catch (err) {
+      if (/newer version came out/.test(err.message)) {   // the offer was out of date: redraw with the newest, keep the message
+        await versionCard(); if ($("verStatus")) { $("verStatus").textContent = err.message; $("verStatus").className = "status warn"; } return;
+      }
+      e.target.disabled = false; $("verStatus").textContent = err.message; $("verStatus").className = "status err";
+    }
   });
   if (busy || u.security?.running || u.reachability?.running) setTimeout(versionCard, 4000);
 }

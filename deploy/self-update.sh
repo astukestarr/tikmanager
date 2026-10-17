@@ -98,7 +98,7 @@ if [[ "$FROM_WEB" == 1 && "$VER" == *-beta.* ]]; then
 import json
 b = [x["name"].lstrip("v") for x in json.load(sys.stdin) if k(x["name"]) and "-beta." in x["name"]]
 print(max(b, key=k) if b else "")')
-  [[ "$VER" == "$NEWEST" ]] || { status failed "$VER isn't the newest beta ($NEWEST) - not installed"; exit 1; }
+  [[ "$VER" == "$NEWEST" ]] || { status failed "$VER isn't the newest beta ($NEWEST) - not installed. Click Check for updates, then Upgrade now"; exit 1; }
 fi
 # never downgrade from the web request (an older release may have known problems); by hand, only with TM_ALLOW_DOWNGRADE=1
 if [[ "$FROM" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] \

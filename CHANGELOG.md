@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.6 - 2026-10-16
+
+- **Upgrade now checks for updates first** - when a newer version came out after the last hourly check (e.g. beta.5
+  published while beta.4 was on offer), the page now offers the newest one straight away instead of the updater
+  refusing the older one ("isn't the newest beta - not installed"). That message now also says what to do: Check for
+  updates, then Upgrade now.
+
 ## 2.0.0-beta.5 - 2026-10-16
 
 - **Block known bad networks** (Security > Region blocking, per client, with or without region blocking) - hijacked and

@@ -217,6 +217,11 @@ class Updates:
             raise ValueError("One-click upgrade needs a Linux installation made with deploy/install.sh. Upgrade manually (see README).")
         if not vtuple(version):
             raise ValueError("Pick a version like 1.2.3 or 1.2.3-beta.1.")
+        if getattr(self.s, "update_check", True):   # a newer version may have come out since the last hourly check
+            self.check()
+        if self.latest.get("version") != version and vtuple(self.latest.get("version")) and vtuple(self.latest["version"]) > vtuple(version):
+            raise ValueError(f"A newer version came out since the last check: {self.latest['version']}. The page now offers that one - "
+                             "click Upgrade now again to install it.")
         if self.latest.get("version") != version or not self.info()["available"]:
             raise ValueError("That isn't the newest released version - check for updates first.")
         if self.status().get("state") in ("requested", "running"):
