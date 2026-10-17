@@ -317,16 +317,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, p.read_bytes(), ctype, headers=[("Cache-Control", "no-cache")])
 
     def body(self) -> dict:
+        """The request body, parsed. Kept for the rest of this request: reading the socket a second time would wait for
+        data that never comes (the request hangs)."""
+        cached = getattr(self, "_body", None)
+        if cached and cached[0] is self.raw_requestline:   # the same request (a kept-alive connection reuses this object)
+            return cached[1]
         n = int(self.headers.get("Content-Length") or 0)
         if n > MAX_BODY:
             raise HttpError(413, "Request too large.")
         raw = self.rfile.read(n) if n else b""
         if (self.headers.get("Content-Type") or "").startswith("application/json"):
             try:
-                return json.loads(raw or b"{}")
+                out = json.loads(raw or b"{}")
             except ValueError:
                 raise HttpError(400, "Invalid JSON.") from None
-        return {k: v[0] for k, v in urllib.parse.parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
+        else:
+            out = {k: v[0] for k, v in urllib.parse.parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
+        self._body = (self.raw_requestline, out)
+        return out
 
     def session(self):
         return sessions.get(read_cookie(self.headers.get("Cookie"), SESSION_COOKIE))
@@ -2415,7 +2423,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"ok": True, "id": h["id"]})
         if path == "/api/region/token":   # {token}: the IPinfo Lite token (stored encrypted, never sent back)
             s = self.require(tech=True, admin=True)
-            integ.save("ipinfo", {"token": str(self.body().get("token") or "").strip(), "clear": ["token"] if self.body().get("clear") else []})
+            b = self.body()   # read once - the request body can't be read twice
+            integ.save("ipinfo", {"token": str(b.get("token") or "").strip(), "clear": ["token"] if b.get("clear") else []})
             db.audit(s["email"], "integration settings changed", "IPinfo (region blocking)", self.client_ip())
             if integ.config("ipinfo").get("token"):
                 threading.Thread(target=lambda: geo.update() if not geo.state["running"] else None, daemon=True, name="geo-update").start()

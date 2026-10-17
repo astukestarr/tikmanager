@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.10 - 2026-10-17
+
+- **Region blocking: Save token did nothing** - the request read its body twice and the second read waited forever, so
+  the IPinfo token was never stored and no answer came back. Fixed, and the server now keeps a request's body after the
+  first read, so no other page can hang the same way.
+
 ## 2.0.0-beta.9 - 2026-10-17
 
 - **Region blocking: the country box said nothing when there was no country data** - with the known-bad-network lists
