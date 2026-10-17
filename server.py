@@ -59,6 +59,7 @@ import healthdash
 healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManager" uses it
 import compliance
 import dashboards
+from messages import Messages
 import whatsnew
 from f2b import F2b
 from remoteaccess import RemoteAccess, RaError
@@ -149,7 +150,8 @@ autoblock = AutoBlock(db, settings, poller.client, secev)   # addresses guessing
 geo = GeoIP(settings.data_dir, lambda: integ.config("ipinfo").get("token", ""), dev=settings.dev)   # IPinfo Lite, per country
 threats = ThreatLists(settings.data_dir, dev=settings.dev)   # known bad networks (Spamhaus DROP + FireHOL Level 1)
 region = RegionBlock(db, settings, poller.client, geo, autoblock, threats)   # region (country) blocking + known bad networks per client
-flowlog = Flows(db, settings, geo, poller.client, routerlogs)   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
+flowlog = Flows(db, settings, geo, poller.client, routerlogs)
+msgs = Messages(db)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -479,6 +481,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.static(f"map/{m.group(1)}.json")
         if re.fullmatch(r"/[a-z]+\.(js|css|svg)", path):
             return self.static(path[1:])
+        if path in ("/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"):   # app icons (deploy/make_icons.py)
+            return self.static(path[1:])
+        if path == "/manifest.webmanifest":   # lets phones and Chrome / Edge install TikManager as an app
+            name = (brand.get().get("company") or "").strip()
+            body = {"name": f"{name} TikManager".strip() if name else "TikManager", "short_name": "TikManager", "start_url": "/#dashboard",
+                    "scope": "/", "display": "standalone", "background_color": "#13233a", "theme_color": "#13233a",
+                    "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                              {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                              {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]}
+            return self.send(200, json.dumps(body).encode(), "application/manifest+json", headers=[("Cache-Control", "no-cache")])
         if m := re.fullmatch(r"/whatsnew/([a-z0-9-]+)\.jpg", path):   # What's new screenshots (dev-mode data only)
             return self.static(f"whatsnew/{m.group(1)}.jpg")
         if path == "/auth/login":
@@ -963,6 +975,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/rules":
             self.require(tech=True)
             return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
+        if path == "/api/messages":   # the Message Center: unread (or all, ?all=1) messages for this person
+            s = self.require()
+            return self.json({"messages": msgs.list(s, q.get("all") == "1"), "unread": msgs.unread(s), "can_post": s["kind"] == "tech" and s["role"] == "admin"})
+        if path == "/api/messages/count":   # the bell's number (checked every 2 minutes)
+            s = self.require()
+            return self.json({"unread": msgs.unread(s)})
         if m := re.fullmatch(r"/api/dashboard/(network|security|maintenance|mobile)", path):   # Dashboard boards (and the phone dashboard)
             s = self.require(tech=m.group(1) not in ("network", "mobile"))
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
@@ -2432,6 +2450,29 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "webhook saved", h["name"], self.client_ip(), detail=h["format"])
             return self.json({"ok": True, "id": h["id"]})
+        if path == "/api/messages/ack":   # {ids: [...]} or {all: true}
+            s = self.require()
+            b = self.body()
+            n = msgs.ack(s, None if b.get("all") else [int(i) for i in b.get("ids") or [] if str(i).isdigit()][:500])
+            return self.json({"ok": True, "acked": n, "unread": msgs.unread(s)})
+        if path == "/api/messages/unack":   # {ids: [...]}: back to unread
+            s = self.require()
+            msgs.unack(s, [int(i) for i in self.body().get("ids") or [] if str(i).isdigit()][:500])
+            return self.json({"ok": True, "unread": msgs.unread(s)})
+        if path == "/api/messages/post":   # administrators: a notice to technicians or everyone {title, body, audience}
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            try:
+                mid = msgs.post(b.get("title"), b.get("body"), b.get("audience") or "tech", s["email"])
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "message posted", str(b.get("title") or "")[:80], self.client_ip(), detail=str(b.get("audience")))
+            return self.json({"ok": True, "id": mid})
+        if m := re.fullmatch(r"/api/messages/(\d+)/delete", path):   # administrators: remove a notice (or a release note)
+            s = self.require(tech=True, admin=True)
+            msgs.delete(int(m.group(1)))
+            db.audit(s["email"], "message deleted", m.group(1), self.client_ip())
+            return self.json({"ok": True})
         if path == "/api/region/token":   # {token}: the IPinfo Lite token (stored encrypted, never sent back)
             s = self.require(tech=True, admin=True)
             b = self.body()   # read once - the request body can't be read twice
@@ -2892,6 +2933,10 @@ def main():
     unifi.start()
     region.start()
     flowlog.start()
+    try:
+        msgs.sync_releases()   # this version's release notes in everyone's Message Center
+    except Exception:  # noqa: BLE001 - never stop the server over the Message Center
+        traceback.print_exc()
     lifecycle.start()
     rossec.start()
     autoblock.start()

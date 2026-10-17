@@ -4675,6 +4675,95 @@ async function wnHistory() {
     const n = $(`wnN${b.dataset.wnnotes}`); n.hidden = !n.hidden; b.textContent = n.hidden ? "Release notes" : "Hide notes"; }));
 }
 
+// --- Message Center (messages.py): the bell, top right - release notes and notices, acknowledged per person -------------
+const msgView = { all: false, open: null, sel: new Set(), ackOpen: false };   // ackOpen: the open message was just clicked - acknowledge it
+const msgDay = (t) => new Date(t * 1000).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+const blocksHtml = (blocks) => { let out = "", ul = false; for (const b of blocks) {
+  if (b.kind === "li") { if (!ul) { out += "<ul>"; ul = true; } out += `<li>${mdInline(b.text)}</li>`; }
+  else { if (ul) { out += "</ul>"; ul = false; } out += `<p>${mdInline(b.text)}</p>`; } }
+  return out + (ul ? "</ul>" : ""); };
+function setBell(n) {
+  const el = $("bellN");
+  if (!el) return;
+  el.textContent = n > 99 ? "99+" : String(n);
+  el.classList.toggle("hidden", !n);
+  $("bellBtn").title = n ? `${n} unread message${n === 1 ? "" : "s"}` : "Messages";
+}
+async function refreshBell() { try { setBell((await api("/api/messages/count")).unread); } catch (e) { /* signed out or offline */ } }
+async function bellPop() {
+  const pop = $("bellPop");
+  if (!pop.classList.contains("hidden")) return closeBell();
+  pop.classList.remove("hidden");
+  $("bellBtn").setAttribute("aria-expanded", "true");
+  pop.innerHTML = `<p class="small muted">Loading…</p>`;
+  let x;
+  try { x = await api("/api/messages"); } catch (e) { pop.innerHTML = `<p class="small status err">${esc(e.message)}</p>`; return; }
+  setBell(x.unread);
+  pop.innerHTML = `<div class="row bell-head"><b>Messages</b><span class="spacer"></span>${x.unread ? `<button class="linkish small" type="button" id="bellAll">Acknowledge all (${x.unread})</button>` : ""}</div>
+    ${x.messages.length ? `<div class="bell-list">${x.messages.slice(0, 6).map((m) => `<button type="button" class="bell-item" data-bmsg="${m.id}">
+        <span class="bell-t">${esc(m.title)}</span><span class="small muted">${m.kind === "release" ? "Release notes" : "Notice"} · ${msgDay(m.ts)}</span></button>`).join("")}</div>
+      ${x.messages.length > 6 ? `<p class="small muted">${x.messages.length - 6} more unread</p>` : ""}` : `<p class="small muted">You're all caught up.</p>`}
+    <div class="bell-foot"><button class="btn small" type="button" id="bellCenter">Message Center</button></div>`;
+  pop.querySelectorAll("[data-bmsg]").forEach((b) => b.addEventListener("click", () => { closeBell(); msgView.all = false; msgView.open = +b.dataset.bmsg; msgView.ackOpen = true; go("messages"); }));
+  $("bellCenter").addEventListener("click", () => { closeBell(); go("messages"); });
+  $("bellAll")?.addEventListener("click", async () => { const r = await post("/api/messages/ack", { all: true }); setBell(r.unread); closeBell(); if (view === "messages") messagesPage(); });
+}
+function closeBell() { $("bellPop")?.classList.add("hidden"); $("bellBtn")?.setAttribute("aria-expanded", "false"); }
+
+async function messagesPage() {
+  const x = await api(`/api/messages${msgView.all ? "?all=1" : ""}`);
+  setBell(x.unread);
+  msgView.sel = new Set([...msgView.sel].filter((id) => x.messages.some((m) => m.id === id)));
+  const opened = msgView.open;
+  if (msgView.ackOpen && opened && x.messages.some((m) => m.id === opened && !m.acked)) {   // clicking a message open acknowledges it (once)
+    const r = await post("/api/messages/ack", { ids: [opened] }); setBell(r.unread); x.unread = r.unread;
+    x.messages.forEach((m) => { if (m.id === opened) m.acked = true; });
+  }
+  msgView.ackOpen = false;
+  $("main").innerHTML = `<div class="row"><div><h1>Message Center</h1><p class="muted">News about TikManager: each new version's release notes${x.can_post ? " and notices you post" : " and notices from your administrators"}.
+      Acknowledge a message and it stops counting on the bell; it stays here under All.</p></div></div>
+    <div class="card">
+      <div class="row msg-bar"><div class="seg" role="group" aria-label="Show"><button type="button" data-mall="0" class="${msgView.all ? "" : "on"}">Unread (${x.unread})</button>
+          <button type="button" data-mall="1" class="${msgView.all ? "on" : ""}">All</button></div>
+        <span class="spacer"></span>
+        ${x.messages.length ? `<label class="chk small"><input type="checkbox" id="msgSelAll" ${msgView.sel.size && msgView.sel.size === x.messages.length ? "checked" : ""}> Select all</label>` : ""}
+        <button class="btn small" type="button" id="msgAckSel" ${msgView.sel.size ? "" : "disabled"}>Acknowledge selected</button>
+        ${msgView.all ? `<button class="btn small" type="button" id="msgUnack" ${msgView.sel.size ? "" : "disabled"}>Mark unread</button>` : ""}
+        ${x.unread ? `<button class="btn primary small" type="button" id="msgAckAll">Acknowledge all (${x.unread})</button>` : ""}</div>
+      ${x.messages.length ? `<div class="msg-list">${x.messages.map((m) => `<div class="msg ${m.acked ? "" : "unread"} ${opened === m.id ? "open" : ""}">
+          <div class="msg-row"><input type="checkbox" data-msel="${m.id}" ${msgView.sel.has(m.id) ? "checked" : ""} aria-label="Select ${esc(m.title)}">
+            <button type="button" class="msg-title" data-mopen="${m.id}" aria-expanded="${opened === m.id}">${m.acked ? "" : `<span class="dot msg-dot"></span>`}${esc(m.title)}</button>
+            <span class="pill ${m.kind === "release" ? "up-run" : "up-sched"}">${m.kind === "release" ? "Release notes" : m.audience === "all" ? "Notice · everyone" : "Notice"}</span>
+            <span class="small muted nowrap">${msgDay(m.ts)}</span></div>
+          ${opened === m.id ? `<div class="msg-body">${blocksHtml(m.blocks) || `<p class="muted small">No details.</p>`}
+            <div class="row small muted">From ${esc(m.created_by || "TikManager")}<span class="spacer"></span>
+              ${x.can_post ? `<button class="linkish small" type="button" data-mdel="${m.id}">Delete for everyone</button>` : ""}</div></div>` : ""}</div>`).join("")}</div>`
+        : `<p class="muted">${msgView.all ? "No messages yet." : "You're all caught up - nothing unread."}</p>`}
+    </div>
+    ${x.can_post ? `<details class="card msg-post"><summary><b>Post a message</b> <span class="small muted">(administrators)</span></summary>
+      <label class="field">Title <input id="mpTitle" maxlength="150"></label>
+      <label class="field">Message <textarea id="mpBody" rows="5" placeholder="Plain text. Lines starting with '- ' become bullets; **bold** and \`code\` work."></textarea></label>
+      <label class="field">For <select id="mpAud"><option value="tech">Technicians</option><option value="all">Everyone (technicians and client users)</option></select></label>
+      <div class="actions"><button class="btn primary" type="button" id="mpSend">Post</button><span class="status small" id="mpMsg"></span></div></details>` : ""}`;
+  const again = () => messagesPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
+  $("main").querySelectorAll("[data-mall]").forEach((b) => b.addEventListener("click", () => { msgView.all = b.dataset.mall === "1"; msgView.sel.clear(); again(); }));
+  $("main").querySelectorAll("[data-mopen]").forEach((b) => b.addEventListener("click", () => { const id = +b.dataset.mopen; msgView.open = msgView.open === id ? null : id; msgView.ackOpen = !!msgView.open; again(); }));
+  $("main").querySelectorAll("[data-msel]").forEach((c) => c.addEventListener("change", () => { c.checked ? msgView.sel.add(+c.dataset.msel) : msgView.sel.delete(+c.dataset.msel); again(); }));
+  $("msgSelAll")?.addEventListener("change", (e) => { msgView.sel = e.target.checked ? new Set(x.messages.map((m) => m.id)) : new Set(); again(); });
+  $("msgAckSel")?.addEventListener("click", async () => { const r = await post("/api/messages/ack", { ids: [...msgView.sel] }); msgView.sel.clear(); setBell(r.unread); again(); });
+  $("msgUnack")?.addEventListener("click", async () => { const r = await post("/api/messages/unack", { ids: [...msgView.sel] }); msgView.sel.clear(); setBell(r.unread); again(); });
+  $("msgAckAll")?.addEventListener("click", async () => { const r = await post("/api/messages/ack", { all: true }); msgView.sel.clear(); setBell(r.unread); again(); });
+  $("main").querySelectorAll("[data-mdel]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Delete this message for everyone?")) return;
+    await post(`/api/messages/${b.dataset.mdel}/delete`); msgView.open = null; again();
+  }));
+  $("mpSend")?.addEventListener("click", async () => {
+    try { await post("/api/messages/post", { title: $("mpTitle").value, body: $("mpBody").value, audience: $("mpAud").value }); msgView.all = true; again(); }
+    catch (e) { $("mpMsg").textContent = e.message; $("mpMsg").className = "status small err"; }
+  });
+  if (opened) document.querySelector(".msg.open")?.scrollIntoView({ block: "nearest" });
+}
+
 // --- compliance: routers against CIS v8 / NIST 800-171 / PCI DSS 4.0 / HIPAA, and a client report (compliance.py) ------
 const cView = { fw: "cis8", org: "", open: null, failOnly: false };
 const C_PILL = { pass: "up-done", accepted: "up-done", fail: "up-failed", manual: "up-run", unknown: "up-cancelled", na: "up-cancelled" };
@@ -5367,7 +5456,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
@@ -5436,10 +5525,15 @@ async function init() {
       return;
     }
     const b = e.target.closest("[data-view]");
-    if (b) { $("nav").classList.remove("open"); go(b.dataset.view, b.dataset.arg); }
+    if (b) { $("nav").classList.remove("open"); window.scrollTo({ top: 0 }); go(b.dataset.view, b.dataset.arg); }   // a menu click starts at the top
   });
   refreshNavCounts();
   setInterval(refreshNavCounts, 60000);
+  refreshBell();
+  setInterval(refreshBell, 120000);
+  $("bellBtn").addEventListener("click", (e) => { e.stopPropagation(); bellPop(); });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".bell-wrap")) closeBell(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeBell(); });
   whatsNew(false);
   $("logout").addEventListener("click", async () => {
     const r = await post("/api/logout");
@@ -5447,7 +5541,7 @@ async function init() {
   });
   const route = () => {
     const [h, arg] = location.hash.slice(1).split("/");
-    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if ((h === "admin" || h === "routers") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
+    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if ((h === "admin" || h === "routers" || h === "dashboard") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
   };
   window.addEventListener("hashchange", route);   // links, typed URLs and Back (go() uses replaceState, which doesn't fire this)
   route();

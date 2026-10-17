@@ -760,3 +760,25 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 [data-mode="dark"] .m-status { color: #0f1319; }
 @media (prefers-color-scheme: dark) { [data-mode="system"] .m-status { color: #0f1319; } }
 .m-sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* the bell and the message centre */
+.bell-wrap { position: relative; display: inline-flex; }
+.bell-btn { position: relative; }
+.bell-n { position: absolute; top: -2px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad);
+  color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.bell-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; width: min(360px, calc(100vw - 24px)); padding: 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+.bell-head { margin-bottom: 6px; } .bell-list { display: flex; flex-direction: column; }
+.bell-item { all: unset; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 8px; cursor: pointer; }
+.bell-item:hover, .bell-item:focus-visible { background: var(--accent-soft); }
+.bell-t { font-weight: 600; font-size: 13px; }
+.bell-foot { margin-top: 8px; text-align: right; }
+.msg-bar { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.msg-list { display: flex; flex-direction: column; }
+.msg { border-top: 1px solid var(--border); } .msg:first-child { border-top: 0; }
+.msg-row { display: flex; align-items: center; gap: 10px; padding: 10px 2px; flex-wrap: wrap; }
+.msg-title { all: unset; flex: 1; min-width: 180px; cursor: pointer; font-weight: 500; }
+.msg.unread .msg-title { font-weight: 700; }
+.msg-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.msg-dot { background: var(--info); margin-right: 6px; }
+.msg-body { padding: 0 2px 12px 30px; } .msg-body ul { margin: 6px 0; padding-left: 20px; } .msg-body p { margin: 6px 0; }
+.msg-post summary { cursor: pointer; } .msg-post textarea { width: 100%; }

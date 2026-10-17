@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TikManager</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#13233a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="TikManager">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <script src="/theme.js"></script>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -30,6 +37,10 @@
           <button class="ver-check hidden" type="button" id="wnOpen" title="What's new since the last full release">What's new</button>
           <span class="pill hidden" id="devBadge">DEV · simulated routers</span>
           <span class="spacer"></span>
+          <span class="bell-wrap"><button class="icon-btn bell-btn" type="button" id="bellBtn" title="Messages" aria-label="Messages" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 20a1.9 1.9 0 0 0 3.4 0"/></svg>
+            <span class="bell-n hidden" id="bellN"></span></button>
+            <div class="bell-pop hidden" id="bellPop" role="dialog" aria-label="Messages"></div></span>
           <button class="icon-btn" type="button" id="appearanceBtn" title="Appearance: colours and light / dark mode" aria-label="Appearance">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H16a5 5 0 0 0 5-5c0-3.9-4-7-9-7z"/><circle cx="7.5" cy="11.5" r="1.2"/><circle cx="10.5" cy="7.5" r="1.2"/><circle cx="15" cy="7.5" r="1.2"/></svg></button>
           <span class="who small" id="who"></span>

@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.14 - 2026-10-17
+
+- **Message Center** - a bell, top right, with a count of unread messages: each new version's release notes (added by
+  itself when the server starts on a new version) and notices administrators post (to technicians or everyone). Click
+  the bell for the newest, or open the **Message Center**: Unread / All, open a message to read (and acknowledge) it,
+  select several and **Acknowledge selected** or **Mark unread**, or **Acknowledge all** at once. Each person has their
+  own. New accounts start with the last 14 days only.
+- **Install TikManager on a phone or computer** - TikManager now has an app manifest and icons, so Android (Chrome:
+  menu > Install app / Add to Home screen), iPhone and iPad (Safari: Share > Add to Home Screen) and Chrome / Edge on a
+  computer install it as an app with its own icon, opening straight to the Dashboard without the browser bars.
+- **Dashboard tabs didn't switch boards** - clicking Network, Security or Maintenance reloaded the board you were on.
+  Fixed. Clicking a page in the left menu (Dashboard included) now starts at the top of the page.
+
 ## 2.0.0-beta.13 - 2026-10-17
 
 - **Phone dashboard** - on a phone (a screen up to 700 px wide) the Dashboard opens a version made for it: a green /

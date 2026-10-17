@@ -179,6 +179,31 @@ the repository, point `TM_UPDATE_REPO` at your fork (or install with `get.sh --r
 tags (see [CLAUDE.md](CLAUDE.md#releasing-a-new-version)). `TM_UPDATE_CHECK=0` turns off the hourly check (the button
 still works).
 
+## TikManager on your phone (or as a desktop app)
+
+TikManager installs like an app - its own icon, no browser bars, opening on the Dashboard (on a phone, the phone
+dashboard: what needs attention, a router search, alerts and events).
+
+- **Android (Chrome):** open your TikManager address and sign in, then menu (⋮) > **Install app** (on some phones **Add to
+  Home screen**, then **Install**). Pick Install rather than Create shortcut if both are offered - the shortcut opens in
+  a browser tab instead of as an app.
+- **iPhone / iPad (Safari - it has to be Safari):** open your TikManager address and sign in, tap **Share** (the square
+  with the arrow) > **Add to Home Screen** > **Add**. Open it from the home screen; the first time, sign in again (iOS
+  keeps an installed app's sign-in separate from Safari's).
+- **Windows / Mac (Chrome or Edge):** the install icon at the right of the address bar, or menu > **Install TikManager**
+  (Edge: Apps > Install this site as an app).
+
+It's the same TikManager: everything stays on your server, sign-in works as in the browser, and updates arrive with
+the server's - there's nothing to update on the phone.
+
+## Message Center
+
+The bell at the top right shows how many messages you haven't read: each new version's release notes (added by
+themselves when the server starts on a new version) and notices administrators post to technicians or everyone. Click a
+message to read it - that acknowledges it - or open the **Message Center** to see Unread or All, select several and
+**Acknowledge selected** / **Mark unread**, or **Acknowledge all** at once. Each person has their own; a new account
+starts with the last 14 days.
+
 ## Devices (routers, switches, access points)
 
 The sidebar's **Devices** group lists All devices, Access points, Routers and Switches - the kind comes from the

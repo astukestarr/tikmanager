@@ -196,6 +196,15 @@ CREATE TABLE IF NOT EXISTS sec_events (
   user TEXT, ip TEXT, device_id INTEGER, via TEXT, detail TEXT, uid TEXT UNIQUE          -- uid: de-duplicates imported events
 );
 CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
+CREATE TABLE IF NOT EXISTS messages (               -- Message Center (messages.py): release notes and notices
+  id INTEGER PRIMARY KEY, ts REAL NOT NULL, kind TEXT NOT NULL,   -- release / notice
+  title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', version TEXT, audience TEXT NOT NULL DEFAULT 'tech',   -- tech / all
+  created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS message_acks (           -- who acknowledged which message
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  acked_at REAL NOT NULL, PRIMARY KEY (user_id, message_id)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS flows (                  -- Flows pilot (flows.py): conversations summed per 10 minutes, kept 7 days
   device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, ts INTEGER NOT NULL,
   local TEXT NOT NULL, remote TEXT NOT NULL, port INTEGER NOT NULL, proto INTEGER NOT NULL, dir TEXT NOT NULL,
