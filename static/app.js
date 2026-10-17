@@ -3940,7 +3940,8 @@ async function regionCard(local) {   // local: redraw from the data already read
     <div class="small muted">Countries</div>
     <div class="rg-chips">${dr.countries.map((c) => `<span class="rg-chip">${esc(byCode[c]?.name || c)} <span class="muted">${(byCode[c]?.entries || 0).toLocaleString()}</span>
         ${canWrite() ? `<button type="button" class="rg-x" data-rgdel="${c}" aria-label="Remove ${esc(byCode[c]?.name || c)}">×</button>` : ""}</span>`).join("") || `<span class="small muted">None picked.</span>`}
-      ${canWrite() ? `<span class="rg-pick"><input id="rgAdd" placeholder="Add a country…" aria-label="Add a country" autocomplete="off" spellcheck="false"></span>` : ""}</div>
+      ${canWrite() ? (x.countries.length ? `<span class="rg-pick"><input id="rgAdd" placeholder="Add a country…" aria-label="Add a country" autocomplete="off" spellcheck="false"></span>`
+        : `<span class="small status warn">No country data yet - ${g.error ? `the IPinfo download failed (${esc(g.error)})` : g.running ? "downloading now…" : g.token_set ? "click Update now above" : "save your IPinfo token above (IPinfo token)"}.</span>`) : ""}</div>
     <p class="small muted">About <b>${est.toLocaleString()}</b> address-list entries (${mb(est)} of router memory)${x.entries != null && !dirty ? ` - ${x.entries.toLocaleString()} after
       adding / cutting out the never-blocked addresses` : ""}.</p>
     <details class="rg-exc"><summary class="small">Also never block (addresses or networks)</summary>

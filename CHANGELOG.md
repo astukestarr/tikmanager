@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.9 - 2026-10-17
+
+- **Region blocking: the country box said nothing when there was no country data** - with the known-bad-network lists
+  downloaded but no IPinfo data yet, typing a country found nothing. The box is now replaced by why: the IPinfo token
+  isn't saved, the download is running, or the download failed (with IPinfo's error).
+
 ## 2.0.0-beta.8 - 2026-10-16
 
 - **Flows: Turn on Flows failed with `input does not match any value of version`** (RouterOS 7.24) - MikroTik's docs say
