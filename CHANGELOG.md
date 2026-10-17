@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.1 - 2026-10-16
+
+The full release of 1.46.1-beta.1 to beta.5 - a patch with new monitoring: existing data and settings keep working,
+upgrade with the button.
+
+- **BGP monitoring** - on routers running BGP (an enabled BGP instance on RouterOS 7.20+, or configured connections on
+  older 7.x), every BGP connection is checked each minute against its session: router events when a peer drops or comes
+  back, a **BGP peer down** alert (after 3 minutes by default) and a finding on Performance & security. Peers written with
+  a prefix (`remote.address=10.10.7.100/32`) count as one peer; listening ranges are left out.
+- **Routing tab** on the router page: BGP (peers, when last checked, **Check now**), OSPF (instances, areas, neighbors and
+  their state), RIP (instances, neighbors) and the route table (active routes by protocol, default routes), read live
+  with Refresh.
+- **Version & updates**: **Installed** and **Last checked** with dates and times, and **What's new in past releases** - the
+  release notes of this release line and the 5 before it, with their tours where they have one.
+- **Update checks read every version tag** (all pages, not only the first 100) - in TikManager, the one-click updater and
+  the installer.
+
 ## 1.46.1-beta.5 - 2026-10-16
 
 - **Version & updates shows dates and times**: **Installed** - when this version was installed (and the version it was
