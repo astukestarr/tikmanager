@@ -458,7 +458,7 @@ async function router(id) {
         <p class="small muted">How TikManager talks to this router's REST API - always inside its encrypted WireGuard tunnel.</p>
         ${d.api_tls_port ? `<p><span class="pill up-done">HTTPS</span> on port <b>${esc(String(d.api_tls_port))}</b>${d.api_tls_fp ? ` <span class="small muted mono" title="Certificate SHA-256 when it was switched">${esc(d.api_tls_fp.slice(0, 16))}…</span>` : ""}</p>
           <p class="small muted">If HTTPS ever stops answering, TikManager carries on over HTTP (while WebFig over HTTP is on) and records an event.
-            Once this works, Performance &amp; security offers to turn WebFig over HTTP off.</p>
+            Once this works, Router health offers to turn WebFig over HTTP off.</p>
           <div class="row"><button class="btn" type="button" id="mgHttp">Use HTTP again</button><span class="status" id="mgSt"></span></div>`
         : `<p><span class="pill up-run">HTTP</span> - the REST API on the router's www service.</p>
           <p class="small muted"><b>Switch to HTTPS</b> sets up www-ssl and moves TikManager to it only once HTTPS answers - HTTP keeps working meanwhile.
@@ -893,7 +893,7 @@ async function flowsTab(d) {
       ${x.fasttrack && !blocked ? `<p class="small status warn">This router uses FastTrack (MikroTik's default firewall), which skips Traffic Flow after the first
         packets of each connection - every conversation is listed, but download and upload are far lower than the real traffic. Turning FastTrack off
         would make them accurate at the cost of much more CPU, so TikManager leaves it alone.</p>` : ""}
-      ${x.geo ? "" : `<p class="small muted">Countries and organisations appear once the IPinfo data is downloaded (Security > Region blocking).</p>`}
+      ${x.geo ? "" : `<p class="small muted">Countries and organisations appear once the IPinfo data is downloaded (Security > Blocking > Region blocking).</p>`}
       <p class="small muted">Countries and organisations: IP address data powered by <a href="https://ipinfo.io" target="_blank" rel="noopener">IPinfo</a>.</p>
     </div></div>`;
   const again = () => flowsTab(d).catch(() => {});
@@ -1337,7 +1337,7 @@ const INTEGRATIONS = [
   { id: "ubnt", name: "UniFi & UISP", cat: "Network", color: "#006fff",
     about: "UniFi (unifi.ui.com) and UISP sites and devices - your accounts and clients' own - each site assigned to a client." },
   { id: "ipinfo", name: "IPinfo", cat: "Security", color: "#3f65f5", link: "region",
-    about: "Country data (IPinfo Lite, free) for region blocking - set up on the Security page." },
+    about: "Country data (IPinfo Lite, free) for region blocking - set up on Security > Blocking." },
   { id: "github", name: "GitHub script library", cat: "Scripts", color: "#24292f", test: true,
     about: "Browse the community RouterOS script library; share scripts with a token." },
   { id: "offsite", name: "Off-site backup", cat: "Backup", color: "#2e9d5b", link: "system",
@@ -1379,7 +1379,7 @@ async function adminIntegrations() {
     document.querySelectorAll("[data-iopen]").forEach((b) => b.addEventListener("click", () => {
       const x = INTEGRATIONS.find((y) => y.id === b.dataset.iopen);
       if (x.link === "alerts") return go("alerts");
-      if (x.link === "region") return go("security").then?.(() => setTimeout(() => $("rgCard")?.scrollIntoView({ block: "start" }), 600));
+      if (x.link === "region") return go("blocking").then?.(() => setTimeout(() => $("rgCard")?.scrollIntoView({ block: "start" }), 600));
       if (x.link === "system") return admin("system").then(() => setTimeout(() => (x.id === "offsite" ? $("offCard") : $("cfDomains")?.closest(".card"))?.scrollIntoView({ block: "start" }), 400));
       intView.open = x.id;
       adminIntegrations();
@@ -3853,7 +3853,6 @@ async function autoBlockCard() {
     act(async () => {   // released at once; the routers are cleaned up in the background (events say if one couldn't be)
       const r = await post("/api/security/autoblock/release", { ip: b.dataset.abrel });
       msg(`${b.dataset.abrel} unblocked - being taken off ${r.routers ?? "the"} router${r.routers === 1 ? "" : "s"} now.`, true);
-      securityPage().catch(() => {});
     });
   }));
   $("abCard").querySelectorAll("[data-abrule]").forEach((b) => b.addEventListener("click", () => { b.disabled = true; act(() => post("/api/security/autoblock/rule", { device_id: b.dataset.abrule })); }));
@@ -4032,6 +4031,26 @@ async function regionCard(local) {   // local: redraw from the data already read
   if (!local && (x.running || x.routers.some((r) => r.state === "loading") || g.running || tl.running)) setTimeout(() => { if ($("rgCard") && !rgView.dirty) reload(); }, 5000);
 }
 
+// Security > Blocking: auto-block (password guessers), region blocking and known bad networks
+async function blockingPage() {
+  $("main").innerHTML = `<h1>Blocking</h1>
+    <p class="muted">What your routers drop before it reaches them: addresses guessing router passwords (auto-block), whole countries (region
+      blocking) and known bad networks. TikManager, your routers and the addresses your people use are never blocked.</p>
+    <div class="card" id="abCard"><h2>Auto-block</h2><p class="muted small">Loading…</p></div>
+    <div class="card" id="rgCard"><h2>Region blocking</h2><p class="muted small">Loading…</p></div>`;
+  autoBlockCard();
+  regionCard();
+}
+
+// Security > Vulnerabilities: missed MikroTik security releases and known CVEs per router
+async function vulnsPage() {
+  $("main").innerHTML = `<h1>Vulnerabilities</h1>
+    <p class="muted">Routers whose RouterOS has a newer security fix on its channel (from MikroTik's changelogs) or known CVEs for its version
+      (NIST's vulnerability database, checked daily). Upgrade them on Maintenance &gt; Upgrades.</p>
+    <div class="card" id="rosSec"><h2>RouterOS vulnerabilities</h2><p class="muted small">Loading…</p></div>`;
+  rosSecCard();
+}
+
 // what "blocked" means for one address right now - each with its own Unblock (fail2ban here guards SSH to TikManager's
 // server only; the routers' block list only drops on routers that have the drop rule)
 function secBlocks(s, a) {
@@ -4051,7 +4070,7 @@ async function securityPage() {
     return `<div class="tile ${t.failed ? "warn" : "good"}"><div class="l">${esc(SEC_SOURCE[src])}</div><div class="v">${t.failed}</div>
       <div class="small muted">failed attempt${t.failed === 1 ? "" : "s"} · ${t.ok} sign-in${t.ok === 1 ? "" : "s"}${src === "server" ? ` · ${t.banned} blocked` : ""}${src === "router" ? ` · ${t.changes} change${t.changes === 1 ? "" : "s"}` : ""}</div></div>`;
   };
-  $("main").innerHTML = `<h1>Security</h1>
+  $("main").innerHTML = `<h1>Sign-ins &amp; events</h1>
     <p class="muted">Sign-in attempts on TikManager itself, its Ubuntu server (SSH, sudo, fail2ban) and your routers (Winbox, SSH, WebFig, API) -
       and who changed router configuration. Kept 90 days.</p>
     <div class="row"><div class="seg" role="group" aria-label="Period">${[[24, "24 hours"], [168, "7 days"], [720, "30 days"]].map(([h, l]) =>
@@ -4061,9 +4080,6 @@ async function securityPage() {
         auto-block puts addresses on every router's auto-block address list, but only routers with the drop rule act on it
         (${Math.min(...gap.map((b) => b.enforced))} of ${gap[0].total} have it). <a href="#" id="secToRule">Add the drop rule</a></div>` : ""; })()}
     <div class="tiles sec-kpis">${tile("tikmanager")}${tile("server")}${tile("router")}</div>
-    <div class="card" id="rosSec"><h2>RouterOS vulnerabilities</h2><p class="muted small">Loading…</p></div>
-    <div class="card" id="abCard"><h2>Auto-block</h2><p class="muted small">Loading…</p></div>
-    <div class="card" id="rgCard"><h2>Region blocking</h2><p class="muted small">Loading…</p></div>
     ${s.flags.length ? `<div class="card"><h2>Worth a look</h2><ul class="sec-flags">${s.flags.map((f) =>
       `<li class="flag-${esc(f.level)}">${esc(f.text)}${f.ip ? ` <button class="linkish" type="button" data-ip="${esc(f.ip)}">show</button>` : ""}</li>`).join("")}</ul></div>` : ""}
     <div class="grid2">
@@ -4091,7 +4107,7 @@ async function securityPage() {
         ${s.total_events > s.events.length ? `<p class="small muted">Newest 500 of ${s.total_events.toLocaleString()} - narrow it down with the filters.</p>` : ""}`
         : `<p class="muted">Nothing in this period.</p>`}</div>`;
   const reload = () => securityPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
-  $("secToRule")?.addEventListener("click", (e) => { e.preventDefault(); const c = $("abCard"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.classList.add("sec-flash"); });
+  $("secToRule")?.addEventListener("click", (e) => { e.preventDefault(); go("blocking"); });
   // Unblock from Top addresses: fail2ban on this server, or the routers' block list
   $("main").querySelectorAll("[data-secunban]").forEach((b) => b.addEventListener("click", async () => {
     const [where, ip] = [b.dataset.secunban, b.dataset.ip2];
@@ -4107,9 +4123,6 @@ async function securityPage() {
     secView.q = b.dataset.ip; secView.source = ""; secView.kind = ""; secView.jump = true; reload(); }));
   $("secClear")?.addEventListener("click", () => { secView.q = ""; secView.source = ""; secView.kind = ""; reload(); });
   if (secView.jump) { secView.jump = false; $("secEvents").scrollIntoView({ behavior: "smooth", block: "start" }); $("secEvents").classList.add("sec-flash"); }
-  rosSecCard();
-  autoBlockCard();
-  if (isTech()) regionCard();
   $("main").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
   $("secSrc").addEventListener("change", () => { secView.source = $("secSrc").value; reload(); });
   $("secKind").addEventListener("change", () => { secView.kind = $("secKind").value; reload(); });
@@ -4303,7 +4316,7 @@ async function healthPage() {
     return `<button type="button" class="tile ${n ? (worst === "critical" || worst === "high" ? "bad" : "warn") : "good"} h-tile ${hView.cat === cat ? "sel" : ""}" data-hcat="${cat}">
       <div class="l">${label}</div><div class="v">${n}</div><div class="small muted">${n ? `router${n === 1 ? "" : "s"} · ${count((y) => y.category === cat)} finding${count((y) => y.category === cat) === 1 ? "" : "s"}` : sub}</div></button>`; };
   const orgs = [...new Set(f.map((y) => y.org).filter(Boolean))].sort();
-  $("main").innerHTML = `<div class="row"><div><h1>Performance &amp; security</h1>
+  $("main").innerHTML = `<div class="row"><div><h1>Router health</h1>
       <p class="muted">Every router checked for internet problems, performance, open ports and exposed services, weak encryption and old VPN technologies,
         VPN problems, updates and backups - from what TikManager already reads (VPN and service settings every 15 minutes, read-only).</p></div>
       <span class="spacer"></span><span class="small muted">updates every minute</span></div>
@@ -4515,7 +4528,7 @@ async function compliancePage() {
         ${cView.open === c.id ? `<tr><td></td><td colspan="3"><table class="c-detail"><tbody>${x.routers.map((r) => { const p = c.routers[r.id];
           return p.checks.map((ch, i) => `<tr>${i === 0 ? `<td rowspan="${p.checks.length}" class="nowrap"><a href="#router/${r.id}">${esc(r.name)}</a>${r.org && !cView.org ? `<div class="small muted">${esc(r.org)}</div>` : ""}</td>` : ""}
             <td class="small">${esc(ch.title)}</td><td>${pill(ch.status)}</td><td class="small">${esc(ch.evidence)}
-            ${ch.status === "fail" && canWrite() && !["fips"].includes(ch.id) ? `<div class="row h-acts">${x.check_info[ch.id].fix_id ? `<a class="btn small" href="#health">Fix on Performance &amp; security</a>` : ""}
+            ${ch.status === "fail" && canWrite() && !["fips"].includes(ch.id) ? `<div class="row h-acts">${x.check_info[ch.id].fix_id ? `<a class="btn small" href="#health">Fix on Router health</a>` : ""}
               <button class="btn small" type="button" data-cacc="${esc(ch.id)}" data-cdev="${r.id}" title="Not a problem on this router - record why (shown in the report as a documented exception)">Accept…</button></div>` : ""}</td></tr>`).join(""); }).join("")}
           </tbody></table></td></tr>` : ""}`).join("")}</tbody></table></div></div>`;
   $("cFw").addEventListener("change", (e) => { cView.fw = e.target.value; cView.open = null; compliancePage(); });
@@ -5029,8 +5042,11 @@ const NAV = [
     { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
     { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
-    { view: "health", label: "Performance & security", who: "tech" }, { view: "compliance", label: "Compliance", who: "tech" },
-    { view: "alerts", label: "Alerts", who: "tech", count: "alerts" }, { view: "logs", label: "Logs", who: "tech" }, { view: "security", label: "Security", who: "tech" }] },
+    { view: "health", label: "Router health", who: "tech" }, { view: "alerts", label: "Alerts", who: "tech", count: "alerts" },
+    { view: "logs", label: "Logs", who: "tech" }] },
+  { group: "Security", icon: "security", items: [
+    { view: "security", label: "Sign-ins & events", who: "tech" }, { view: "blocking", label: "Blocking", who: "tech" },
+    { view: "vulns", label: "Vulnerabilities", who: "tech" }, { view: "compliance", label: "Compliance", who: "tech" }] },
   { group: "Maintenance", icon: "maint", items: [
     { view: "backups", label: "Backups", who: "tech" }, { view: "upgrades", label: "Upgrades", who: "tech", count: "updates" }, { view: "tasks", label: "Tasks", who: "tech" }] },
   { group: "Clients & users", icon: "clients", items: [{ view: "clients", label: "Clients", who: "tech" }, { view: "users", label: "Users", who: "admin" }] },
@@ -5172,7 +5188,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { health: healthPage, compliance: compliancePage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

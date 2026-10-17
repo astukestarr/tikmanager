@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.11 - 2026-10-17
+
+- **Security has its own heading in the menu**, with **Sign-ins & events** (the old Security page: sign-in attempts,
+  top addresses, events), **Blocking** (auto-block, region blocking, known bad networks), **Vulnerabilities** (RouterOS
+  security releases and CVEs) and **Compliance** (moved from Monitoring).
+- **Monitoring > Performance & security is now Router health** (same checks and one-click fixes), so there's one place
+  called Security.
+
 ## 2.0.0-beta.10 - 2026-10-17
 
 - **Region blocking: Save token did nothing** - the request read its body twice and the second read waited forever, so

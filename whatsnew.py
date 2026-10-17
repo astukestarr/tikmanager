@@ -17,18 +17,18 @@ SINCE = "1.46.1"     # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
-    {"id": "region-blocking", "title": "Region blocking", "img": "region", "view": "security", "who": "tech",
-     "text": "Security > Region blocking drops new connections from (or to) whole countries on a client's routers - Block or "
+    {"id": "region-blocking", "title": "Region blocking", "img": "region", "view": "blocking", "who": "tech",
+     "text": "Security > Blocking > Region blocking drops new connections from (or to) whole countries on a client's routers - Block or "
              "Allow only, Incoming, Outgoing or Both, like UniFi. Country data comes from IPinfo Lite (free token, updated "
              "daily). TikManager, your routers and addresses your people used in the last 90 days are never blocked."},
-    {"id": "region-safe", "title": "Safe on small routers", "img": None, "view": "security", "who": "tech",
+    {"id": "region-safe", "title": "Safe on small routers", "img": None, "view": "blocking", "who": "tech",
      "text": "The list lives in router memory only - no flash writes, not in backups - and is loaded a little at a time, slowing "
              "down when the CPU is busy. A router where it would take more than a quarter of its free memory is skipped, and "
              "after a restart the rules wait until TikManager has reloaded the list."},
-    {"id": "region-per-router", "title": "Different countries on one router", "img": None, "view": "security", "who": "tech",
+    {"id": "region-per-router", "title": "Different countries on one router", "img": None, "view": "blocking", "who": "tech",
      "text": "Leave a router out, or let some countries through on just that router (Let through here) - e.g. one site that "
              "works with China and the UK while the client's other sites block them."},
-    {"id": "known-bad", "title": "Block known bad networks", "img": None, "view": "security", "who": "tech",
+    {"id": "known-bad", "title": "Block known bad networks", "img": None, "view": "blocking", "who": "tech",
      "text": "One switch per client next to Region blocking: hijacked and criminal networks, botnet controllers and the worst "
              "attackers (Spamhaus DROP + FireHOL Level 1, updated daily) are dropped both ways. A few thousand entries - fine "
              "on every router - with the same safeguards as region blocking."},

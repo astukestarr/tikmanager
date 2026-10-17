@@ -25,7 +25,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
 - Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
-  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Performance & security](#performance--security-dashboard) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
+  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Router health](#router-health-dashboard) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
 - Running it: [Keeping it secure](#keeping-it-secure) · [Where things live](#where-things-live-on-the-server) ·
   [Troubleshooting adoption](#if-a-router-registers-but-never-comes-online)
@@ -222,7 +222,7 @@ the byte counts are low (FastTracked packets skip Traffic Flow).
 
 **RouterOS security:** each router's page says whether MikroTik has released a security fix newer than its RouterOS
 on its channel (read from MikroTik's changelogs) and lists known CVEs for its version (NIST's vulnerability database,
-daily); the Upgrades page badges them, the Security page lists the fleet, and an alert can open a ticket. **What's new**
+daily); the Upgrades page badges them, Security > Vulnerabilities lists the fleet, and an alert can open a ticket. **What's new**
 shows MikroTik's release notes for a version, security lines first, before you upgrade.
 
 **Routing tab** (router page): BGP, OSPF (neighbors and their state), RIP and the route table (active routes by protocol,
@@ -230,7 +230,7 @@ default routes), read live with Refresh.
 
 **BGP:** on routers running BGP (an enabled instance on RouterOS 7.20+, or configured connections on older 7.x), every
 BGP connection is checked each minute against its session: a BGP card on the router's Overview, events when a peer drops
-or comes back, a **BGP peer down** alert and a finding on Performance & security. Listening ranges (dynamic peers) are
+or comes back, a **BGP peer down** alert and a finding on Router health. Listening ranges (dynamic peers) are
 left out.
 
 **Flagged routers:** RouterOS 7.13+ flags itself when it finds signs of unauthorized access in its configuration
@@ -559,9 +559,9 @@ device in the router's bridge host table is shown (not only those with an IP in 
 router's location (in its tables) are shown, not the client's other locations. Alerts: **UniFi / UISP site has offline devices** (Alerts > Settings) - one alert per site, after 10
 minutes by default.
 
-## Performance & security dashboard
+## Router health dashboard
 
-**Monitoring > Performance & security** (technicians) checks every router and lists what needs fixing, worst first, each
+**Monitoring > Router health** (technicians) checks every router and lists what needs fixing, worst first, each
 with how to fix it. Tiles per category (click one to filter); filter by severity, client or text. It refreshes every
 minute and uses what TikManager already reads - nothing extra is polled. Findings that come down to one setting
 (SSH strong crypto, Telnet / FTP / plain-text API on, SOCKS, web proxy, UPnP, bandwidth test server, MAC Telnet on every
@@ -611,7 +611,7 @@ cryptography, which MikroTik can't provide (CUI needs a FIPS-validated VPN on to
   score, scope - it is evidence for these controls, not a certification - per-router results, each control with its
   evidence, a remediation plan, and documented exceptions. **CSV for auditors** has every router x control x check.
 - **Accept** a finding on a router when it isn't a problem there (e.g. FTP used to back up switches, port 21 blocked
-  from the internet), with the reason. It leaves the Performance & security list and its one-click fixes and shows in
+  from the internet), with the reason. It leaves the Router health list and its one-click fixes and shows in
   compliance as **Met with exception**, with the reason, who and when. Per item: accepting FTP doesn't excuse Telnet.
 
 TikManager manages routers over REST on the WebFig (www) service, inside its WireGuard tunnel. Unless that service is
@@ -619,7 +619,7 @@ limited to management addresses (/ip service set www address=...), "Management t
 answers plain HTTP on the LAN. **Never disable www while TikManager uses it** - switch the router to HTTPS first (router
 page > Settings > Management connection, or Fix all on "TikManager manages this router over HTTP"), then **Turn off
 WebFig over HTTP**. Use the one-click **Limit WebFig
-(HTTP) to TikManager** on Performance & security (you can also allow the client's admin addresses; www-ssl and Winbox
+(HTTP) to TikManager** on Router health (you can also allow the client's admin addresses; www-ssl and Winbox
 aren't touched, and the router undoes it by itself if TikManager loses contact), or accept it with the reason.
 
 ### HTTPS management connection
