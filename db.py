@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS devices (
   dm_mode TEXT, dm_flagged INTEGER, dm_info TEXT, dm_checked REAL,   -- RouterOS device-mode (hourly); flagged = possibly compromised
   sec_target TEXT, cve_n INTEGER, cve_max REAL, sec_info TEXT, sec_version TEXT, sec_checked REAL,   -- rossec.py: security releases / CVEs
   health TEXT, health_at REAL,             -- latest sensor readings {name: {value, unit}} (health_metrics has the history)
+  bgp_at REAL,                              -- when the BGP sessions were last read
   bgp_state TEXT,                           -- BGP peers (JSON {name: {up, remote, as, since, uptime, prefixes}}); NULL = no BGP
   isp_ifaces TEXT, isp_state TEXT,         -- internet links: chosen interfaces (JSON, null = automatic) and their state
   last_reboot REAL, last_reboot_why TEXT,  -- last restart TikManager noticed (uptime went back): upgrade / unexpected
@@ -304,7 +305,7 @@ class DB:
                              ("lc_suggest", "TEXT"), ("lc_suggest_name", "TEXT"), ("lc_suggest_why", "TEXT"),
                              ("dm_mode", "TEXT"), ("dm_flagged", "INTEGER"), ("dm_info", "TEXT"), ("dm_checked", "REAL"),
                              ("sec_target", "TEXT"), ("cve_n", "INTEGER"), ("cve_max", "REAL"), ("sec_info", "TEXT"), ("sec_version", "TEXT"),
-                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT"), ("bgp_state", "TEXT"),
+                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT"), ("bgp_state", "TEXT"), ("bgp_at", "REAL"),
                              ("last_reboot", "REAL"), ("last_reboot_why", "TEXT"), ("tags", "TEXT"), ("kind_override", "TEXT")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")

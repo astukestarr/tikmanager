@@ -212,6 +212,9 @@ on its channel (read from MikroTik's changelogs) and lists known CVEs for its ve
 daily); the Upgrades page badges them, the Security page lists the fleet, and an alert can open a ticket. **What's new**
 shows MikroTik's release notes for a version, security lines first, before you upgrade.
 
+**Routing tab** (router page): BGP, OSPF (neighbors and their state), RIP and the route table (active routes by protocol,
+default routes), read live with Refresh.
+
 **BGP:** on routers running BGP (an enabled instance on RouterOS 7.20+, or configured connections on older 7.x), every
 BGP connection is checked each minute against its session: a BGP card on the router's Overview, events when a peer drops
 or comes back, a **BGP peer down** alert and a finding on Performance & security. Listening ranges (dynamic peers) are

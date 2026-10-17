@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.1-beta.4 - 2026-10-16
+
+- **Fix: BGP didn't show on routers whose peers are written with a prefix** (`remote.address=10.10.7.100/32`, as RouterOS
+  7.20+ shows them) - those were taken for listening ranges and left out. A /32 (or /128) is one peer; only real ranges
+  (dynamic peers) are left out.
+- **Routing tab** on the router page (technicians): **BGP** (the monitored peers, when they were last checked, and
+  **Check now** - reads the router's BGP settings and sessions straight away), **OSPF** (instances, areas, neighbors with
+  their state - Full or not, up for, state changes), **RIP** (instances and neighbors) and **Routes** (active routes counted
+  by protocol and the default routes). Read live when the tab opens, with **Refresh**; the route table isn't listed when BGP
+  brings in more than 5,000 prefixes. The BGP card moved here from the Overview.
+
 ## 1.46.1-beta.3 - 2026-10-16
 
 - **BGP monitoring** - only on routers running BGP (an enabled BGP instance on RouterOS 7.20+; on older RouterOS 7, configured

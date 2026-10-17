@@ -121,6 +121,35 @@ class RouterOS:
         return self._req("GET", path)
 
     BGP_SESSION = ("name", "remote.address", "remote.as", "established", "uptime", "prefix-count", "local.role")
+    ROUTING = {   # router page > Routing, read live - menu: fields kept (whitelist)
+        "ospf_instances": ("/routing/ospf/instance", ("name", "version", "router-id", "disabled")),
+        "ospf_areas": ("/routing/ospf/area", ("name", "area-id", "instance", "type", "disabled")),
+        "ospf_neighbors": ("/routing/ospf/neighbor", ("instance", "area", "address", "router-id", "state", "adjacency", "state-changes", "interface")),
+        "rip_instances": ("/routing/rip/instance", ("name", "disabled")),
+        "rip_neighbors": ("/routing/rip/neighbor", ("instance", "address", "routes", "packets-total", "bad-packets", "timeout")),
+    }
+    ROUTE_FLAGS = ("static", "connect", "bgp", "ospf", "rip", "dhcp", "vpn", "modem", "copy")
+    ROUTE_LIMIT = 5000   # above this many BGP prefixes the route table isn't listed (a full table is far too big to read)
+
+    def routing(self, bgp_prefixes=0):
+        """Router page > Routing: OSPF and RIP instances / neighbors, and active routes counted by protocol (plus the
+        default routes) - unless BGP brings in more than ROUTE_LIMIT prefixes."""
+        out = {}
+        for key, (menu, keep) in self.ROUTING.items():
+            rows = self.optional(lambda menu=menu: self.get(menu), []) or []
+            out[key] = [{k: r[k] for k in keep if k in r} for r in rows if isinstance(r, dict)]
+        if bgp_prefixes > self.ROUTE_LIMIT:
+            out["routes"] = {"skipped": f"BGP brings in {bgp_prefixes:,} prefixes - the route table isn't listed here."}
+            return out
+        rows = self.optional(lambda: self.get("/ip/route?active=true&.proplist=dst-address,gateway,distance,routing-table," + ",".join(self.ROUTE_FLAGS)), []) or []
+        counts, defaults = {}, []
+        for r in rows if isinstance(rows, list) else []:
+            kind = next((f for f in self.ROUTE_FLAGS if str(r.get(f)).lower() == "true"), "other")
+            counts[kind] = counts.get(kind, 0) + 1
+            if r.get("dst-address") in ("0.0.0.0/0", "::/0"):
+                defaults.append({"gateway": r.get("gateway", ""), "distance": r.get("distance", ""), "kind": kind, "table": r.get("routing-table", "")})
+        out["routes"] = {"active": sum(counts.values()), "by_kind": counts, "defaults": defaults}
+        return out
 
     def bgp_sessions(self):
         """Live BGP sessions (/routing/bgp/session) - whitelisted fields. Raises RouterError if the router can't be read."""
@@ -1040,6 +1069,16 @@ class SimRouter:
     def reachable(self):
         return True
 
+    def routing(self, bgp_prefixes=0):
+        ospf = self.id % 3 == 1
+        return {"ospf_instances": [{"name": "default-v2", "version": "2", "router-id": f"10.255.0.{self.id}", "disabled": "false"}] if ospf else [],
+                "ospf_areas": [{"name": "backbone", "area-id": "0.0.0.0", "instance": "default-v2", "type": "default", "disabled": "false"}] if ospf else [],
+                "ospf_neighbors": [{"instance": "default-v2", "area": "backbone", "address": "10.30.0.2", "router-id": "10.255.0.9", "state": "Full",
+                                    "adjacency": "2d4h", "state-changes": "6", "interface": "ether3"}] if ospf else [],
+                "rip_instances": [], "rip_neighbors": [],
+                "routes": {"active": 14 + self.id, "by_kind": {"connect": 4, "static": 2, **({"bgp": 7} if self.id % 2 == 0 else {}), **({"ospf": 3} if ospf else {})},
+                           "defaults": [{"gateway": "203.0.113.1", "distance": "1", "kind": "static", "table": "main"}]}}
+
     def bgp_sessions(self):
         if self.id % 2:
             return []
@@ -1347,7 +1386,7 @@ class SimRouter:
             inv["/routing/bgp/instance"] = [{"name": "default", "as": "65010", "router-id": f"10.255.0.{self.id}", "disabled": "false"}]
             inv["/routing/bgp/connection"] = [
                 {"name": "isp-a", "instance": "default", "remote.address": "203.0.113.1", "remote.as": "64500", "local.role": "ebgp", "disabled": "false"},
-                {"name": "core", "instance": "default", "remote.address": "10.10.7.100", "remote.as": "65001", "local.role": "ibgp", "disabled": "false"}]
+                {"name": "core", "instance": "default", "remote.address": "10.10.7.100/32", "remote.as": "65001", "local.role": "ibgp", "disabled": "false"}]
         for path, body in self._sim().get("set", {}).items():   # one-click fixes made here (post)
             menu, body = path.split("#")[0].rsplit("/set", 1)[0], dict(body)
             name = body.pop("numbers", None)

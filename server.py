@@ -732,6 +732,18 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, column="d.org_id")
             return self.json(db.q(f"""SELECT e.*, d.name AS router, o.name AS org FROM exceptions e JOIN devices d ON d.id = e.device_id
                                      LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY e.created_at DESC""", args))
+        if m := re.fullmatch(r"/api/devices/(\d+)/routing", path):   # router page > Routing: BGP (monitored) + OSPF, RIP, routes (live)
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            bgp = json.loads(d.get("bgp_state") or "null")
+            out = {"online": d["online"], "bgp_state": bgp, "bgp_at": d.get("bgp_at"), "read_at": time.time()}
+            if d["online"]:
+                prefixes = sum(int(p.get("prefixes") or 0) for p in (bgp or {}).values() if str(p.get("prefixes") or "").isdigit())
+                try:
+                    out.update(poller.client(d).routing(prefixes))
+                except RouterError as e:
+                    out["error"] = str(e)
+            return self.json(out)
         if m := re.fullmatch(r"/api/devices/(\d+)/vpns", path):   # router page > VPNs: every VPN found on this router
             s = self.require_vpn()
             d = self.device_for(s, m.group(1))
@@ -1705,6 +1717,13 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **remote.info(d["id"])})
+        if m := re.fullmatch(r"/api/devices/(\d+)/bgp-check", path):   # BGP card > Check now
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            r = poller.check_bgp(d)
+            return self.json({"ok": True, "bgp_state": json.loads(r["bgp_state"] or "null"), "bgp_at": r["bgp_at"]})
         if m := re.fullmatch(r"/api/devices/(\d+)/mgmt-https", path):   # {on: true} switch TikManager to HTTPS; {on: false} back to HTTP
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))

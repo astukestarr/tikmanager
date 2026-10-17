@@ -91,13 +91,17 @@ class Poller:
             inv, old = {}, {}
         yes = lambda v: str(v).lower() in ("true", "yes")
         inst = inv.get("/routing/bgp/instance") or []
-        conns = [c for c in inv.get("/routing/bgp/connection") or [] if not yes(c.get("disabled")) and "/" not in str(c.get("remote.address") or "")]
+
+        def peer_ip(addr):   # "10.10.7.100/32" is one peer; "10.20.0.0/16" is a listening range (dynamic peers) - None
+            ip, _, pfx = str(addr or "").partition("/")
+            return ip if not pfx or pfx == ("128" if ":" in ip else "32") else None
+        conns = [c for c in inv.get("/routing/bgp/connection") or [] if not yes(c.get("disabled")) and peer_ip(c.get("remote.address"))]
         live = {i.get("name") for i in inst if not yes(i.get("disabled"))}
         if inst:   # 7.20+: only connections of an enabled instance count
             conns = [c for c in conns if not c.get("instance") or c.get("instance") in live]
         if not conns or (inst and not live):
             if d.get("bgp_state"):
-                self.db.run("UPDATE devices SET bgp_state=NULL WHERE id=?", (d["id"],))
+                self.db.run("UPDATE devices SET bgp_state=NULL, bgp_at=NULL WHERE id=?", (d["id"],))
             return
         try:
             sessions = cl.bgp_sessions()
@@ -105,7 +109,8 @@ class Poller:
             return   # keep the last known state
         new = {}
         for c in conns:
-            name, ra = c.get("name") or str(c.get("remote.address")), str(c.get("remote.address") or "")
+            ra = peer_ip(c.get("remote.address"))
+            name = c.get("name") or ra
             s = next((x for x in sessions if x.get("name") == name or str(x.get("name") or "").startswith(name + "-")), None) \
                 or next((x for x in sessions if ra and str(x.get("remote.address") or "").split(":")[0] == ra), None)
             up = bool(s) and yes(s.get("established"))
@@ -116,7 +121,15 @@ class Poller:
             new[name] = {"up": up, "remote": ra, "as": c.get("remote.as") or (s or {}).get("remote.as") or "", "role": c.get("local.role") or "",
                          "since": o["since"] if o and o.get("up") == up and o.get("since") else now, "uptime": (s or {}).get("uptime") or "",
                          "prefixes": (s or {}).get("prefix-count") or "", "comment": c.get("comment") or ""}
-        self.db.run("UPDATE devices SET bgp_state=? WHERE id=?", (json.dumps(new), d["id"]))
+        self.db.run("UPDATE devices SET bgp_state=?, bgp_at=? WHERE id=?", (json.dumps(new), now, d["id"]))
+
+    def check_bgp(self, d):
+        """Check now (router page): read the BGP settings and the sessions straight away instead of waiting for the poll."""
+        cl = self.client(d)
+        self.collect_vpns(d, cl)
+        d = self.db.one("SELECT * FROM devices WHERE id=?", (d["id"],)) or d
+        self.track_bgp(d, cl, time.time())
+        return self.db.one("SELECT bgp_state, bgp_at FROM devices WHERE id=?", (d["id"],))
 
     def check_reboot(self, d, st, now):
         """A restart between two polls shows as uptime going back (also when it was too quick to look offline)."""

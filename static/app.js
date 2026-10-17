@@ -343,7 +343,7 @@ async function router(id) {
   const adopted = d.state === "adopted";
   const radios = (d.interfaces || []).some(isRadio);
   const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["ports", "Ports"]] : []), ...(radios ? [["wireless", "Wireless"]] : []),
-    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(canVpn() ? [["vpns", "VPNs"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
+    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(isTech() ? [["routing", "Routing"]] : []), ...(canVpn() ? [["vpns", "VPNs"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
     ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
@@ -414,7 +414,6 @@ async function router(id) {
       </div>
       <div class="health" id="health"></div>
       ${ispCard(d)}
-      ${bgpCard(d)}
       ${secCard(d)}
       ${Object.keys(d.health || {}).length ? `<div class="card" id="hwCard"><h2>Hardware health</h2><p class="muted small">Loading…</p></div>` : ""}
       ${lteCard(d.interfaces || [])}
@@ -442,6 +441,7 @@ async function router(id) {
       ${adopted && tab === "logs" ? `<div class="card" id="rLogs"></div>` : ""}
       ${adopted && tab === "ports" ? `<div id="ptRoot"><div class="card"><h2>Ports</h2><p class="muted small">Reading the ports…</p></div></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
+      ${adopted && tab === "routing" ? `<div id="rtRoot"><div class="card"><h2>Routing</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "vpns" ? `<div id="rvRoot"><div class="card"><h2>VPNs</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "remote" ? `<div id="raRoot"><div class="card"><h2>Remote access</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "settings" ? `<div class="card" id="locCard"><h2>Location</h2></div>` : ""}
@@ -555,6 +555,7 @@ async function router(id) {
   $("mgHttps")?.addEventListener("click", () => mg(true));
   $("mgHttp")?.addEventListener("click", () => mg(false));
   if ($("rvRoot")) rvTab(d).catch(() => {});
+  if ($("rtRoot")) routingTab(d).catch(() => {});
   if ($("wbBox")) loadWinbox(d);
   loadLocation(d);
   api(`/api/devices/${d.id}/series?range=1h`).then((s) => sparkline($("spark"), s.traffic)).catch(() => {});
@@ -824,20 +825,60 @@ function ispCard(d) {
       <td>${l.active ? `<span class="pill" title="The default route uses this link now">carrying traffic</span>` : ""}</td></tr>`).join("")}</tbody></table></div>
     <p class="small muted">Events and an alert when a link goes down, comes back or changes address. Which interfaces count is set on the Settings tab.</p></div>`;
 }
+// router page > Routing: BGP (monitored every minute) and OSPF, RIP and the route table (read live when the tab opens)
+async function routingTab(d) {
+  const root = $("rtRoot");
+  const x = await api(`/api/devices/${d.id}/routing`);
+  if (!$("rtRoot")) return;
+  const when = (t) => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const kv = (rows, cols) => rows.length ? `<div class="table-wrap"><table><thead><tr>${cols.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead><tbody>
+      ${rows.map((r) => `<tr>${cols.map(([k, , f]) => `<td class="small">${f ? f(r[k], r) : esc(String(r[k] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+  const off = (v) => String(v) === "true" ? ` <span class="pill up-cancelled">disabled</span>` : "";
+  const ospfState = (v) => `${/^full$/i.test(v || "") ? `<span class="dot on"></span>` : `<span class="dot off"></span>`}${esc(v || "?")}`;
+  const ospf = x.ospf_instances || [], rip = x.rip_instances || [], rt = x.routes || {};
+  const kinds = { connect: "connected", static: "static", bgp: "BGP", ospf: "OSPF", rip: "RIP", dhcp: "DHCP", vpn: "VPN", modem: "modem", copy: "copy", other: "other" };
+  root.innerHTML = `<div class="row rt-head"><span class="small muted">${x.error ? `<span class="status err">${esc(x.error)}</span>` : `Read ${when(x.read_at)}`}</span>
+      <span class="spacer"></span><button class="btn small" type="button" id="rtRefresh">Refresh</button></div>
+    ${bgpCard({ ...d, bgp_state: x.bgp_state, bgp_at: x.bgp_at }) || `<div class="card"><h2>BGP</h2><p class="small muted">No BGP on this router (no enabled BGP
+      instance or connection). It's picked up within 15 minutes of being set up.</p></div>`}
+    <div class="card"><h2>OSPF</h2>${ospf.length ? `${kv(ospf, [["name", "Instance", (v, r) => esc(v || "") + off(r.disabled)], ["version", "Version"], ["router-id", "Router ID"]])}
+        ${kv(x.ospf_areas || [], [["name", "Area", (v, r) => esc(v || "") + off(r.disabled)], ["area-id", "Area ID"], ["instance", "Instance"], ["type", "Type"]])}
+        <h3>Neighbors</h3>${kv(x.ospf_neighbors || [], [["router-id", "Router ID"], ["address", "Address"], ["interface", "Interface"], ["area", "Area"],
+          ["state", "State", ospfState], ["adjacency", "Up for"], ["state-changes", "Changes"]]) || `<p class="small status warn">No OSPF neighbors.</p>`}`
+      : `<p class="small muted">No OSPF on this router.</p>`}</div>
+    <div class="card"><h2>RIP</h2>${rip.length ? `${kv(rip, [["name", "Instance", (v, r) => esc(v || "") + off(r.disabled)]])}
+        <h3>Neighbors</h3>${kv(x.rip_neighbors || [], [["address", "Address"], ["instance", "Instance"], ["routes", "Routes"], ["packets-total", "Packets"],
+          ["bad-packets", "Bad packets"], ["timeout", "Timeout"]]) || `<p class="small status warn">No RIP neighbors.</p>`}`
+      : `<p class="small muted">No RIP on this router.</p>`}</div>
+    <div class="card"><h2>Routes</h2>${rt.skipped ? `<p class="small muted">${esc(rt.skipped)}</p>` : rt.active != null ? `
+        <p class="small"><b>${rt.active}</b> active route${rt.active === 1 ? "" : "s"}: ${Object.entries(rt.by_kind || {}).sort((a, b) => b[1] - a[1])
+          .map(([k, n]) => `${n} ${esc(kinds[k] || k)}`).join(" · ")}</p>
+        ${(rt.defaults || []).length ? kv(rt.defaults, [["gateway", "Default route via"], ["kind", "Type", (v) => esc(kinds[v] || v || "")], ["distance", "Distance"], ["table", "Table"]])
+          : `<p class="small status warn">No active default route.</p>`}` : `<p class="small muted">${x.online ? "Couldn't read the route table." : "The router is offline."}</p>`}</div>`;
+  $("rtRefresh").addEventListener("click", () => { $("rtRefresh").disabled = true; routingTab(d).catch(() => {}); });
+  $("bgpCheck")?.addEventListener("click", async (e) => {
+    e.target.disabled = true; e.target.textContent = "Checking…";
+    try { await post(`/api/devices/${d.id}/bgp-check`); await routingTab(d); }
+    catch (err) { e.target.disabled = false; e.target.textContent = "Check now"; $("bgpAt").textContent = err.message; $("bgpAt").className = "small status err"; }
+  });
+}
+
 // BGP peers - only on routers running BGP (poller.track_bgp): each configured connection and whether its session is up
 function bgpCard(d) {
   const peers = Object.entries(d.bgp_state || {});
   if (!peers.length) return "";
   const now = Date.now() / 1000, down = peers.filter(([, p]) => !p.up).length;
   return `<div class="card"><div class="row"><h2>BGP</h2><span class="spacer"></span>
-      ${down ? `<span class="status warn small">${down} down</span>` : `<span class="status ok small">all established</span>`}</div>
+      ${down ? `<span class="status warn small">${down} down</span>` : `<span class="status ok small">all established</span>`}
+      ${isTech() && d.online ? `<button class="btn small" type="button" id="bgpCheck">Check now</button>` : ""}</div>
+    <p class="small muted" id="bgpAt">${d.bgp_at ? `Checked ${new Date(d.bgp_at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })} (${ago(d.bgp_at)})` : ""}</p>
     <div class="table-wrap"><table><thead><tr><th>Peer</th><th>Remote</th><th>Session</th><th>For</th><th>Prefixes</th></tr></thead><tbody>
     ${peers.map(([n, p]) => `<tr><td><b>${esc(n)}</b>${p.role ? ` <span class="muted small">${esc(p.role)}</span>` : ""}${p.comment ? `<div class="small muted">${esc(p.comment)}</div>` : ""}</td>
       <td class="mono small">${esc(p.remote || "")}${p.as ? `<div class="muted">AS ${esc(String(p.as))}</div>` : ""}</td>
       <td>${p.up ? `<span class="dot on"></span>established` : `<span class="dot off"></span><b class="status err">down</b>`}</td>
       <td class="small nowrap">${p.since ? durShort(now - p.since) : ""}</td><td class="small">${esc(String(p.prefixes || ""))}</td></tr>`).join("")}</tbody></table></div>
-    <p class="small muted">Each configured BGP connection and whether its session is established - checked every minute. Events and an alert
-      (Alerts > BGP peer down) when one drops.</p></div>`;
+    <p class="small muted">Each configured BGP connection and whether its session is established - checked every minute (new peers within 15
+      minutes, or at once with Check now). Events and an alert (Alerts > BGP peer down) when one drops.</p></div>`;
 }
 function ispSettings(d) {
   const ifs = (d.interfaces || []).filter((i) => !["wg", "bridge", "vlan", "loopback"].includes(i.type) && i.name !== "tikmanager");
