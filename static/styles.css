@@ -702,3 +702,10 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 #rgAdd { min-width: 180px; } #rgExc { width: 100%; }
 .rg-credit { margin-top: 10px; }
 .rg-rchips { margin: 0; } .rg-radd { width: 110px; padding: 2px 6px; font-size: 12px; }
+.rg-pick { position: relative; display: inline-block; }
+.rg-sugg { position: absolute; z-index: 30; top: 100%; left: 0; min-width: 240px; max-height: 280px; overflow-y: auto; margin-top: 2px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.15); }
+.rg-sugg.hidden { display: none; }
+.rg-sugg button { all: unset; display: block; box-sizing: border-box; width: 100%; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.rg-sugg button.on, .rg-sugg button:hover { background: var(--accent-soft); }
+.rg-sugg > span { display: block; padding: 5px 8px; }

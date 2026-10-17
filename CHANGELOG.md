@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.2 - 2026-10-16
+
+- **Region blocking: typing a country works** - the country boxes (Countries, and Let through here per router) now
+  suggest matches as you type (by name or 2-letter code, with entry counts); Enter or a click adds it, arrow keys move
+  through the list. Before, only an exact pick from the browser's list was accepted. Picking and removing countries no
+  longer re-reads the page from the server, so it's instant.
+
 ## 2.0.0-beta.1 - 2026-10-16
 
 TikManager 2 - a new major version for a big new feature. **No manual steps**: existing data and settings keep working,

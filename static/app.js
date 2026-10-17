@@ -3786,9 +3786,9 @@ async function autoBlockCard() {
 const rgView = { org: null, draft: null, msg: "" };
 const RG_STATE = { off: ["", "off"], loading: ["up-run", "loading"], synced: ["up-done", "active"], paused: ["up-sched", "paused (busy CPU)"],
   waiting: ["up-sched", "waiting"], too_big: ["up-failed", "not enough memory"], error: ["up-failed", "error"] };
-async function regionCard() {
+async function regionCard(local) {   // local: redraw from the data already read (edits not saved yet)
   let x;
-  try { x = await api(`/api/region${rgView.org ? `?org=${rgView.org}` : ""}`); }
+  try { x = local && rgView.x ? rgView.x : (rgView.x = await api(`/api/region${rgView.org ? `?org=${rgView.org}` : ""}`)); }
   catch (e) { if ($("rgCard")) $("rgCard").innerHTML = `<h2>Region blocking</h2><p class="status err">${esc(e.message)}</p>`; return; }
   if (!$("rgCard")) return;
   if (rgView.org !== x.org_id || !rgView.draft) {
@@ -3837,8 +3837,7 @@ async function regionCard() {
     <div class="small muted">Countries</div>
     <div class="rg-chips">${dr.countries.map((c) => `<span class="rg-chip">${esc(byCode[c]?.name || c)} <span class="muted">${(byCode[c]?.entries || 0).toLocaleString()}</span>
         ${canWrite() ? `<button type="button" class="rg-x" data-rgdel="${c}" aria-label="Remove ${esc(byCode[c]?.name || c)}">×</button>` : ""}</span>`).join("") || `<span class="small muted">None picked.</span>`}
-      ${canWrite() ? `<input id="rgAdd" list="rgList" placeholder="Add a country…" aria-label="Add a country"><datalist id="rgList">
-        ${x.countries.filter((c) => !dr.countries.includes(c.code)).map((c) => `<option value="${esc(c.name)} (${c.code})"></option>`).join("")}</datalist>` : ""}</div>
+      ${canWrite() ? `<span class="rg-pick"><input id="rgAdd" placeholder="Add a country…" aria-label="Add a country" autocomplete="off" spellcheck="false"></span>` : ""}</div>
     <p class="small muted">About <b>${est.toLocaleString()}</b> address-list entries (${mb(est)} of router memory)${x.entries != null && !dirty ? ` - ${x.entries.toLocaleString()} after
       adding / cutting out the never-blocked addresses` : ""}.</p>
     <details class="rg-exc"><summary class="small">Also never block (addresses or networks)</summary>
@@ -3853,21 +3852,20 @@ async function regionCard() {
           <td class="small">${r.skip ? `<span class="pill">left out</span>` : `<span class="pill ${cls}">${esc(label)}</span>`}${r.detail ? `<div class="small muted">${esc(r.detail)}</div>` : ""}</td>
           <td class="small"><div class="rg-chips rg-rchips">${(dr.router_allow[r.id] || []).map((c) => `<span class="rg-chip">${esc(byCode[c]?.name || c)}${canWrite()
               ? ` <button type="button" class="rg-x" data-rgrdel="${r.id}:${c}" aria-label="Stop letting ${esc(byCode[c]?.name || c)} through">×</button>` : ""}</span>`).join("")}
-            ${canWrite() ? `<input class="rg-radd" data-rgradd="${r.id}" list="rgListAll" placeholder="+ country" aria-label="Let a country through on ${esc(r.name)}">` : ""}</div></td>
+            ${canWrite() ? `<span class="rg-pick"><input class="rg-radd" data-rgradd="${r.id}" placeholder="+ country" autocomplete="off" spellcheck="false" aria-label="Let a country through on ${esc(r.name)}"></span>` : ""}</div></td>
           <td class="small">${r.entries != null && r.state && r.state !== "off" ? r.entries.toLocaleString() : ""}</td>
           <td class="small">${r.hits ? Number(r.hits).toLocaleString() : ""}</td>
           <td><input type="checkbox" data-rgskip="${r.id}" ${r.skip ? "" : "checked"} ${canWrite() ? "" : "disabled"} aria-label="Include ${esc(r.name)}"></td></tr>`; }).join("")}</tbody></table></div>`
       : `<p class="small muted">This client has no routers.</p>`}
-    <datalist id="rgListAll">${x.countries.map((c) => `<option value="${esc(c.name)} (${c.code})"></option>`).join("")}</datalist>
     <p class="small muted">Let through here: countries this one router lets through even though the client's policy doesn't - in Block mode they're
       left off its list, in Allow mode added to it.</p>` : ""}
     <p class="small muted rg-credit">IP address data powered by <a href="https://ipinfo.io" target="_blank" rel="noopener">IPinfo</a> (IPinfo Lite, CC BY-SA 4.0).</p>`;
-  const redraw = () => regionCard().catch(() => {});
+  const redraw = () => regionCard(true).catch(() => {}), reload = () => regionCard().catch(() => {});
   const keep = () => { if ($("rgExc")) dr.exceptions = $("rgExc").value; };
-  $("rgOrg").addEventListener("change", (e) => { rgView.org = +e.target.value; rgView.draft = null; rgView.msg = ""; redraw(); });
-  $("rgUpdate")?.addEventListener("click", async (e) => { e.target.disabled = true; try { await post("/api/region/update"); } catch (err) { rgView.msg = err.message; } setTimeout(redraw, 1500); });
+  $("rgOrg").addEventListener("change", (e) => { rgView.org = +e.target.value; rgView.draft = null; rgView.msg = ""; reload(); });
+  $("rgUpdate")?.addEventListener("click", async (e) => { e.target.disabled = true; try { await post("/api/region/update"); } catch (err) { rgView.msg = err.message; } setTimeout(reload, 1500); });
   $("rgTokenSave")?.addEventListener("click", async () => {
-    try { await post("/api/region/token", { token: $("rgToken").value }); $("rgTokenMsg").textContent = "Saved - downloading the country data…"; $("rgTokenMsg").className = "status small ok"; setTimeout(redraw, 3000); }
+    try { await post("/api/region/token", { token: $("rgToken").value }); $("rgTokenMsg").textContent = "Saved - downloading the country data…"; $("rgTokenMsg").className = "status small ok"; setTimeout(reload, 3000); }
     catch (e) { $("rgTokenMsg").textContent = e.message; $("rgTokenMsg").className = "status small err"; }
   });
   $("rgEnabled")?.addEventListener("change", (e) => { keep(); dr.enabled = e.target.checked; redraw(); });
@@ -3877,27 +3875,55 @@ async function regionCard() {
   $("rgCard").querySelectorAll("[data-rgskip]").forEach((c) => c.addEventListener("change", () => {
     keep(); const id = +c.dataset.rgskip; dr.skip = c.checked ? dr.skip.filter((i) => i !== id) : [...dr.skip, id]; redraw();
   }));
-  $("rgAdd")?.addEventListener("change", (e) => {
-    const m = /\(([A-Z]{2})\)\s*$/.exec(e.target.value) || [null, e.target.value.trim().toUpperCase()];
-    if (byCode[m[1]] && !dr.countries.includes(m[1])) { keep(); dr.countries = [...dr.countries, m[1]].sort((a, b) => (byCode[a].name).localeCompare(byCode[b].name)); redraw(); }
+  // type-ahead: matches by name (start of any word first) or the 2-letter code; click one, or Enter for the top match
+  const picker = (inp, taken, pick) => {
+    const box = document.createElement("div");
+    box.className = "rg-sugg hidden";
+    inp.after(box);
+    let hits = [], at = 0;
+    const show = () => {
+      const q = inp.value.trim().toLowerCase();
+      if (!q) { box.classList.add("hidden"); hits = []; return; }
+      const score = (c) => { const n = c.name.toLowerCase(); return c.code.toLowerCase() === q ? 0 : n.startsWith(q) ? 1 : n.split(/[\s(,-]+/).some((w) => w.startsWith(q)) ? 2 : n.includes(q) ? 3 : 9; };
+      hits = x.countries.filter((c) => !taken().includes(c.code)).map((c) => [score(c), c]).filter(([s]) => s < 9)
+        .sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name)).slice(0, 8).map(([, c]) => c);
+      at = 0;
+      box.innerHTML = hits.length ? hits.map((c, i) => `<button type="button" class="${i === at ? "on" : ""}" data-cc="${c.code}">${esc(c.name)} <span class="muted">${c.code} · ${c.entries.toLocaleString()}</span></button>`).join("")
+        : `<span class="small muted">No country matches.</span>`;
+      box.classList.remove("hidden");
+      box.querySelectorAll("[data-cc]").forEach((b) => b.addEventListener("mousedown", (e) => { e.preventDefault(); pick(b.dataset.cc); }));
+    };
+    inp.addEventListener("input", show);
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && hits.length) { e.preventDefault(); pick(hits[at].code); }
+      else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && hits.length) {
+        e.preventDefault(); at = (at + (e.key === "ArrowDown" ? 1 : hits.length - 1)) % hits.length;
+        box.querySelectorAll("[data-cc]").forEach((b, i) => b.classList.toggle("on", i === at));
+      } else if (e.key === "Escape") { inp.value = ""; box.classList.add("hidden"); }
+    });
+    inp.addEventListener("blur", () => setTimeout(() => box.classList.add("hidden"), 150));
+  };
+  const refocus = (sel) => document.querySelector(sel)?.focus();   // the local redraw has already replaced the card
+  if ($("rgAdd")) picker($("rgAdd"), () => dr.countries, (cc) => {
+    keep(); dr.countries = [...dr.countries, cc].sort((a, b) => (byCode[a].name).localeCompare(byCode[b].name)); redraw(); refocus("#rgAdd");
   });
   $("rgCard").querySelectorAll("[data-rgrdel]").forEach((b) => b.addEventListener("click", () => {
     keep(); const [id, c] = b.dataset.rgrdel.split(":"); const left = (dr.router_allow[id] || []).filter((y) => y !== c);
     if (left.length) dr.router_allow[id] = left; else delete dr.router_allow[id];
     redraw();
   }));
-  $("rgCard").querySelectorAll("[data-rgradd]").forEach((i) => i.addEventListener("change", () => {
-    const m = /\(([A-Z]{2})\)\s*$/.exec(i.value) || [null, i.value.trim().toUpperCase()], id = i.dataset.rgradd;
-    if (byCode[m[1]] && !(dr.router_allow[id] || []).includes(m[1])) { keep(); dr.router_allow[id] = [...(dr.router_allow[id] || []), m[1]].sort(); redraw(); }
-  }));
+  $("rgCard").querySelectorAll("[data-rgradd]").forEach((i) => { const id = i.dataset.rgradd; picker(i, () => dr.router_allow[id] || [], (cc) => {
+    keep(); dr.router_allow[id] = [...(dr.router_allow[id] || []), cc].sort(); redraw(); refocus(`[data-rgradd="${id}"]`);
+  }); });
   $("rgExc")?.addEventListener("input", () => { keep(); if ($("rgSave")) $("rgSave").disabled = false; });
   $("rgSave")?.addEventListener("click", async (e) => {
     keep(); e.target.disabled = true;
-    try { await post("/api/region/policy", { org_id: x.org_id, ...dr }); rgView.draft = null; rgView.msg = dr.enabled ? "Saved - the routers are being updated now." : "Saved."; redraw(); }
+    try { await post("/api/region/policy", { org_id: x.org_id, ...dr }); rgView.draft = null; rgView.msg = dr.enabled ? "Saved - the routers are being updated now." : "Saved."; reload(); }
     catch (err) { e.target.disabled = false; $("rgMsg").textContent = err.message; $("rgMsg").className = "status small err"; }
   });
-  $("rgSync")?.addEventListener("click", async (e) => { e.target.disabled = true; await post("/api/region/sync", { org_id: x.org_id }).catch(() => {}); rgView.msg = "Syncing…"; setTimeout(redraw, 2500); });
-  if (x.running || x.routers.some((r) => r.state === "loading") || g.running) setTimeout(() => { if ($("rgCard") && !dirty) redraw(); }, 5000);
+  $("rgSync")?.addEventListener("click", async (e) => { e.target.disabled = true; await post("/api/region/sync", { org_id: x.org_id }).catch(() => {}); rgView.msg = "Syncing…"; setTimeout(reload, 2500); });
+  rgView.dirty = dirty;
+  if (!local && (x.running || x.routers.some((r) => r.state === "loading") || g.running)) setTimeout(() => { if ($("rgCard") && !rgView.dirty) reload(); }, 5000);
 }
 
 // what "blocked" means for one address right now - each with its own Unblock (fail2ban here guards SSH to TikManager's
