@@ -196,6 +196,16 @@ dashboard: what needs attention, a router search, alerts and events).
 It's the same TikManager: everything stays on your server, sign-in works as in the browser, and updates arrive with
 the server's - there's nothing to update on the phone.
 
+## Technician roles
+
+**Admin > Technicians**: each technician has a role, and a role is a set of permissions - what they can *change*
+(everyone can look at what their role lets them open). Built in: **Administrator** (everything), **Technician** (routers,
+security and clients - not the Admin pages) and **Read-only**. Add your own under **Roles** (or **Copy** a built-in one):
+devices, router configuration, Winbox, upgrades, backups, remote access, site-to-site VPNs, scripts and tasks, Flows,
+blocking, clients, technicians and roles, alerts, integrations, settings. **New Microsoft sign-ins get** the default role
+you pick - or **No access (waiting)**, so new people wait on this page until you give them a role. The server enforces
+every permission.
+
 ## Message Center
 
 The bell at the top right shows how many messages you haven't read: each new version's release notes (added by

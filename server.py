@@ -60,6 +60,7 @@ healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManag
 import compliance
 import dashboards
 from messages import Messages
+from roles import ADMIN as ROLE_ADMIN, LABEL as PERM_LABEL, NONE as ROLE_NONE, Roles, rule_for
 import whatsnew
 from f2b import F2b
 from remoteaccess import RemoteAccess, RaError
@@ -151,7 +152,8 @@ geo = GeoIP(settings.data_dir, lambda: integ.config("ipinfo").get("token", ""), 
 threats = ThreatLists(settings.data_dir, dev=settings.dev)   # known bad networks (Spamhaus DROP + FireHOL Level 1)
 region = RegionBlock(db, settings, poller.client, geo, autoblock, threats)   # region (country) blocking + known bad networks per client
 flowlog = Flows(db, settings, geo, poller.client, routerlogs)
-msgs = Messages(db)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
+msgs = Messages(db)
+roles = Roles(db, settings.tech_admins.split(","))   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -342,17 +344,31 @@ class Handler(BaseHTTPRequestHandler):
     def session(self):
         return sessions.get(read_cookie(self.headers.get("Cookie"), SESSION_COOKIE))
 
-    def require(self, tech=False, write=False, admin=False):
+    WAITING_OK = ("/api/me", "/api/logout", "/api/messages", "/api/messages/count", "/api/me/prefs", "/api/whats-new", "/api/whats-new/seen", "/api/branding")
+
+    def require(self, tech=False, write=False, admin=False, perm=None):
+        """The signed-in session, or an error. Technicians: write / admin / perm need a permission of their role - perm if
+        given, else the one roles.RULES gives this path (else config for write, settings for admin)."""
         s = self.session()
         if not s:
             raise HttpError(401, "Please sign in.")
         if tech and s["kind"] != "tech":
             raise HttpError(403, "Only technicians can do that.")
-        if write and s["kind"] == "tech" and s["role"] == "readonly":
-            raise HttpError(403, "Your account is read-only.")
-        if admin and s["role"] != "admin":
+        path = getattr(self, "route_path", "")
+        if s["kind"] == "tech":
+            if s["role"] == ROLE_NONE and not roles.is_admin(s) and path not in self.WAITING_OK:
+                raise HttpError(403, "Your account is waiting for an administrator to give it a role (Admin > Technicians).")
+            if write or admin or perm:
+                need = perm or rule_for(path) or ("settings" if admin else "config")
+                if need not in roles.perms(s):
+                    r = roles.get(s["role"])
+                    raise HttpError(403, f"Your role ({r['name'] if r else s['role']}) doesn't allow this - it needs: {PERM_LABEL[need]}.")
+        elif admin and s["role"] != "admin":
             raise HttpError(403, "Only administrators can do that.")
         return s
+
+    def can(self, s, perm):
+        return s["kind"] == "tech" and perm in roles.perms(s)
 
     def check_csrf(self, s):
         origin = self.headers.get("Origin")
@@ -399,8 +415,8 @@ class Handler(BaseHTTPRequestHandler):
         """Technicians (write needs a non-read-only account), or a client admin whose organization has VPNs turned on."""
         s = self.require()
         if s["kind"] == "tech":
-            if write and s["role"] == "readonly":
-                raise HttpError(403, "Your account is read-only.")
+            if write and not self.can(s, "vpn"):
+                raise HttpError(403, f"Your role doesn't allow this - it needs: {PERM_LABEL['vpn']}.")
             return s
         if s["role"] != "admin":
             raise HttpError(403, "Only your organization's admins can manage site-to-site VPNs.")
@@ -412,7 +428,9 @@ class Handler(BaseHTTPRequestHandler):
         """The Winbox router-login group this person gets on device d: 'read' / 'full'; refuses everyone else."""
         s = s or self.require()
         if s["kind"] == "tech":
-            return s, "read" if s["role"] == "readonly" else "full"
+            if s["role"] == ROLE_NONE and not roles.is_admin(s):
+                raise HttpError(403, "Your account is waiting for an administrator to give it a role.")
+            return s, "full" if self.can(s, "winbox") else "read"
         if s["role"] != "admin":
             raise HttpError(403, "Only your organization's admins can use Winbox.")
         level = self.client_access(s)[0]
@@ -452,6 +470,7 @@ class Handler(BaseHTTPRequestHandler):
     def dispatch(self, method):
         url = urllib.parse.urlparse(self.path)
         path, q = url.path, {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+        self.route_path = path
         try:
             if method == "GET":
                 self.route_get(path, q)
@@ -538,10 +557,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/me":
             s = self.require()
             org = db.one("SELECT name FROM orgs WHERE id=?", (s["org_id"],)) if s["org_id"] else None
+            rl = roles.get(s["role"]) if s["kind"] == "tech" else None
             return self.json({"email": s["email"], "name": s["name"], "kind": s["kind"], "role": s["role"], "org_id": s["org_id"],
+                              "perms": sorted(roles.perms(s)) if s["kind"] == "tech" else [], "is_admin": s["kind"] == "tech" and roles.is_admin(s),
+                              "role_name": rl["name"] if rl else s["role"],
                               "org": org["name"] if org else None, "csrf": s["csrf"], "dev": settings.dev, "version": __version__,
                               # admins see when a newer release is out (the banner with "Upgrade now")
-                              "update": updates.info() if s["kind"] == "tech" and s["role"] == "admin" else None,
+                              "update": updates.info() if self.can(s, "settings") else None,
                               "prefs": user_prefs(s["user_id"]),
                               "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1], "managed_vpn": settings.managed_vpn,
                               "viewing_as": {"by": s["real_email"]} if s.get("viewing_as") else None,
@@ -905,7 +927,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
         if path == "/api/alerts":   # open and recent alerts; the settings (admins change them)
             s = self.require(tech=True)
-            return self.json({**alerts.view(), "settings": alerts.settings(), "can_edit": s["role"] == "admin",
+            return self.json({**alerts.view(), "settings": alerts.settings(), "can_edit": self.can(s, "alerts"),
                               "cw_ready": integ.configured("cw"), "teams_ready": integ.configured("teams"), "mail_ready": mailer.configured()})
         if path == "/api/admin/alerts/cw-options":   # boards / statuses / priorities / companies for ticket settings
             self.require(tech=True, admin=True)
@@ -936,7 +958,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"service": svc, "error": err, "reachable": ok, "tunnel_ip": tip, "host": urllib.parse.urlparse(settings.public_url).hostname,
                               "your_ip": self.client_ip(), "sessions": [x for x in winbox.view(s) if x["device_id"] == d["id"]],
                               "ports": f"{winbox.ports.start}-{winbox.ports.stop - 1}",
-                              "can_fix": s["kind"] == "tech" and s["role"] != "readonly", "group": group})
+                              "can_fix": self.can(s, "config"), "group": group})
         if path == "/api/winbox":   # all open Winbox sessions (Security page)
             s = self.require(tech=True)
             return self.json({"sessions": winbox.view(s)})
@@ -975,9 +997,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/rules":
             self.require(tech=True)
             return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
+        if path == "/api/roles":   # technician roles, their permissions and the default for new sign-ins
+            s = self.require(tech=True)
+            return self.json({**roles.public(), "can_edit": self.can(s, "techs"), "is_admin": roles.is_admin(s)})
         if path == "/api/messages":   # the Message Center: unread (or all, ?all=1) messages for this person
             s = self.require()
-            return self.json({"messages": msgs.list(s, q.get("all") == "1"), "unread": msgs.unread(s), "can_post": s["kind"] == "tech" and s["role"] == "admin"})
+            return self.json({"messages": msgs.list(s, q.get("all") == "1"), "unread": msgs.unread(s), "can_post": self.can(s, "settings")})
         if path == "/api/messages/count":   # the bell's number (checked every 2 minutes)
             s = self.require()
             return self.json({"unread": msgs.unread(s)})
@@ -1092,7 +1117,7 @@ class Handler(BaseHTTPRequestHandler):
             if d["state"] != "adopted" or not d["online"]:
                 raise HttpError(400, "The router is offline.")
             try:
-                return self.json({**firewall.view(d), "can_edit": s["role"] != "readonly"})
+                return self.json({**firewall.view(d), "can_edit": self.can(s, "config")})
             except FirewallError as e:
                 raise HttpError(502, str(e)) from None
         if m := re.fullmatch(r"/api/devices/(\d+)/ports", path):   # ports, PoE, bridge VLANs, connected devices - read live
@@ -2356,8 +2381,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(403, "Winbox isn't turned on for your organization.")
             try:
                 if m.group(2) == "extend":
-                    return self.json({"ok": True, "session": winbox.extend(int(m.group(1)), s["email"], s["kind"] == "tech" and s["role"] == "admin")})
-                winbox.close(int(m.group(1)), s["email"], s["kind"] == "tech" and s["role"] == "admin", why=f"closed by {s['email']}")
+                    return self.json({"ok": True, "session": winbox.extend(int(m.group(1)), s["email"], s["kind"] == "tech" and roles.is_admin(s))})
+                winbox.close(int(m.group(1)), s["email"], s["kind"] == "tech" and roles.is_admin(s), why=f"closed by {s['email']}")
                 return self.json({"ok": True})
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
@@ -2450,6 +2475,34 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "webhook saved", h["name"], self.client_ip(), detail=h["format"])
             return self.json({"ok": True, "id": h["id"]})
+        if path == "/api/roles":   # add / change a custom role {id?, name, perms, about}
+            s = self.require(tech=True, perm="techs")
+            b = self.body()
+            if not roles.is_admin(s) and set(b.get("perms") or []) - roles.perms(s):
+                raise HttpError(403, "You can only give a role permissions you have yourself.")
+            try:
+                r = roles.save(b, s["email"])
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "role saved", r["name"], self.client_ip(), detail=",".join(r["perms"]))
+            return self.json({"ok": True, "role": r})
+        if m := re.fullmatch(r"/api/roles/([\w-]+)/delete", path):
+            s = self.require(tech=True, perm="techs")
+            try:
+                roles.delete(m.group(1))
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "role deleted", m.group(1), self.client_ip())
+            return self.json({"ok": True})
+        if path == "/api/roles/default":   # {role}: what new Microsoft sign-ins get
+            s = self.require(tech=True, perm="techs")
+            rid = str(self.body().get("role") or "")
+            try:
+                roles.set_default(rid)
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "default role for new sign-ins", rid, self.client_ip())
+            return self.json({"ok": True})
         if path == "/api/messages/ack":   # {ids: [...]} or {all: true}
             s = self.require()
             b = self.body()
@@ -2463,7 +2516,7 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require(tech=True, admin=True)
             b = self.body()
             try:
-                mid = msgs.post(b.get("title"), b.get("body"), b.get("audience") or "tech", s["email"])
+                mid = msgs.post(b.get("title"), b.get("body"), b.get("audience") or "tech", s["email"], bool(b.get("always")))
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "message posted", str(b.get("title") or "")[:80], self.client_ip(), detail=str(b.get("audience")))
@@ -2599,11 +2652,18 @@ class Handler(BaseHTTPRequestHandler):
             role = str(self.body().get("role") or "")
             if not u:
                 raise HttpError(404, "User not found.")
-            allowed = TECH_ROLES if u["kind"] == "tech" else CLIENT_ROLES
-            if role not in allowed:
-                raise HttpError(400, f"Role must be one of: {', '.join(allowed)}.")
-            if u["email"] == s["email"] and role != "admin":
-                raise HttpError(400, "You can't remove your own admin role.")
+            if u["kind"] == "tech":
+                if role != ROLE_NONE and not roles.get(role):
+                    raise HttpError(400, "No such role.")
+                if (role == ROLE_ADMIN or u["role"] == ROLE_ADMIN) and not roles.is_admin(s):
+                    raise HttpError(403, "Only administrators can make someone an administrator, or change an administrator's role.")
+                if u["email"] == s["email"] and role != ROLE_ADMIN and roles.is_admin(s):
+                    raise HttpError(400, "You can't remove your own administrator role.")
+                if u["role"] == ROLE_ADMIN and role != ROLE_ADMIN and not db.one(
+                        "SELECT 1 FROM users WHERE kind='tech' AND role=? AND disabled=0 AND id<>?", (ROLE_ADMIN, u["id"])):
+                    raise HttpError(400, "That's the last administrator - make someone else an administrator first.")
+            elif role not in CLIENT_ROLES:
+                raise HttpError(400, f"Role must be one of: {', '.join(CLIENT_ROLES)}.")
             db.run("UPDATE users SET role=? WHERE id=?", (role, u["id"]))
             db.audit(s["email"], "role changed", u["email"], self.client_ip(), org_id=u["org_id"], detail=role)
             return self.json({"ok": True})
@@ -2642,10 +2702,16 @@ class Handler(BaseHTTPRequestHandler):
                 db.audit(email, "sign-in refused (not a technician)", ip=self.client_ip())
                 raise HttpError(403, f"{email} isn't allowed to sign in to TikManager.")
             uid = db.run("INSERT INTO users (email, name, kind, role, created_at, entra_oid) VALUES (?,?,?,?,?,?)",
-                         (email, who["name"], "tech", "admin" if email in admins else "tech", now(), who["oid"]))
+                         (email, who["name"], "tech", ROLE_ADMIN if email in admins else roles.default(), now(), who["oid"]))
             user = db.one("SELECT * FROM users WHERE id=?", (uid,))
+            db.audit(email, "technician account created (first Microsoft sign-in)", ip=self.client_ip(), detail=user["role"])
         if user["disabled"]:
             raise HttpError(403, "Your TikManager account is disabled.")
+        if user["role"] == ROLE_NONE and email not in admins:
+            return self.send(403, ("<!doctype html><title>TikManager</title><meta name=viewport content='width=device-width'>"
+                                   "<p>You're signed in, but your TikManager account is waiting for an administrator to give it a role "
+                                   "(Admin &gt; Technicians). Try again once they have.</p><p><a href='/login'>Back</a></p>").encode(),
+                             "text/html; charset=utf-8")
         set_cookie = self.start_session(user)
         return self.redirect(ret or "/", [("Set-Cookie", set_cookie), ("Set-Cookie", cookie(STATE_COOKIE, "", 0, settings.secure_cookies))])
 
@@ -2807,8 +2873,10 @@ class Handler(BaseHTTPRequestHandler):
         u = db.one("SELECT * FROM users WHERE id=?", (uid,))
         if not u or (s["kind"] == "client" and (s["role"] != "admin" or u["org_id"] != s["org_id"])):
             raise HttpError(404, "User not found.")
-        if s["kind"] == "tech" and s["role"] != "admin" and u["kind"] == "tech":
-            raise HttpError(403, "Only administrators can change technician accounts.")
+        if s["kind"] == "tech" and u["kind"] == "tech" and not self.can(s, "techs"):
+            raise HttpError(403, f"Your role doesn't allow this - it needs: {PERM_LABEL['techs']}.")
+        if s["kind"] == "tech" and u["kind"] == "tech" and u["role"] == ROLE_ADMIN and not roles.is_admin(s):
+            raise HttpError(403, "Only administrators can change an administrator's account.")
         if u["email"] == s["email"] and action == "disable":
             raise HttpError(400, "You can't disable yourself.")
         extra = {}
@@ -2935,6 +3003,7 @@ def main():
     flowlog.start()
     try:
         msgs.sync_releases()   # this version's release notes in everyone's Message Center
+        msgs.seed_guides()     # built-in guides (putting TikManager on your phone), once
     except Exception:  # noqa: BLE001 - never stop the server over the Message Center
         traceback.print_exc()
     lifecycle.start()

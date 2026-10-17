@@ -31,6 +31,9 @@ SLIDES_2_0 = [
     {"id": "dashboards", "title": "Dashboards", "img": None, "view": "dashboard", "who": "tech",
      "text": "The Dashboard has tabs, like Report Center: Overview, Network, Security and Maintenance. Click any tile to jump "
              "to its list or open the page that deals with it."},
+    {"id": "roles", "title": "Your own technician roles", "img": None, "view": "admin", "who": "tech",
+     "text": "Admin > Technicians > Roles: build roles from individual permissions (upgrades, backups, Winbox, firewall changes, "
+             "blocking, clients, settings...) and pick the role new Microsoft sign-ins get - or make them wait for you."},
     {"id": "message-center", "title": "Message Center", "img": None, "view": "messages", "who": "all",
      "text": "The bell at the top right counts your unread messages: each new version's release notes and notices from your "
              "administrators. Click one to read it, or acknowledge them all at once in the Message Center."},

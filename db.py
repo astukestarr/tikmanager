@@ -199,7 +199,7 @@ CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
 CREATE TABLE IF NOT EXISTS messages (               -- Message Center (messages.py): release notes and notices
   id INTEGER PRIMARY KEY, ts REAL NOT NULL, kind TEXT NOT NULL,   -- release / notice
   title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', version TEXT, audience TEXT NOT NULL DEFAULT 'tech',   -- tech / all
-  created_by TEXT
+  created_by TEXT, always INTEGER NOT NULL DEFAULT 0   -- 1 = new accounts get it too, however long after it was posted
 );
 CREATE TABLE IF NOT EXISTS message_acks (           -- who acknowledged which message
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -289,6 +289,8 @@ class DB:
             c.execute("ALTER TABLE users ADD COLUMN entra_oid TEXT")
         if "users" in tables and "prefs" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
             c.execute("ALTER TABLE users ADD COLUMN prefs TEXT")
+        if "messages" in tables and "always" not in {r[1] for r in c.execute("PRAGMA table_info(messages)")}:
+            c.execute("ALTER TABLE messages ADD COLUMN always INTEGER NOT NULL DEFAULT 0")
         if "net_sites" in tables:
             cols = {r[1] for r in c.execute("PRAGMA table_info(net_sites)")}
             for col, ddl in (("wan_ip", "TEXT"), ("matched", "TEXT"), ("org_manual", "INTEGER NOT NULL DEFAULT 0")):

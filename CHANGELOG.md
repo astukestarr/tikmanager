@@ -3,6 +3,22 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.15 - 2026-10-17
+
+- **Your own technician roles** (Admin > Technicians > Roles) - a role is a set of permissions, ticked one by one: adopt and
+  manage devices, change router configuration, Winbox (full - without it, read-only), upgrades, backups and configuration
+  downloads, remote access, site-to-site VPNs, scripts and tasks, Flows, blocking, clients and client users, technicians
+  and roles, alerts, integrations, settings. Administrator, Technician and Read-only stay as built-in roles (Copy one to
+  start your own). The server checks every change against the person's role and says which permission is missing.
+  Existing technicians keep the role they had. Only administrators make administrators; the last administrator can't
+  be demoted; people can only hand out permissions they have.
+- **Default role for new Microsoft sign-ins** (Admin > Technicians) - any role, or **No access (waiting)**: the account
+  appears on the Technicians list marked "waiting for a role" and can't use TikManager until you give it one. Addresses
+  listed as administrators in the server settings are always administrators.
+- **Messages for everyone, now and later** - a notice can be marked **Show to new users too**, so accounts created later
+  get it as well. TikManager posts one itself: **Put TikManager on your phone's home screen** (iPhone, Android, Windows /
+  Mac steps), to everyone.
+
 ## 2.0.0-beta.14 - 2026-10-17
 
 - **Message Center** - a bell, top right, with a count of unread messages: each new version's release notes (added by

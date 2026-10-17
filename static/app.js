@@ -45,7 +45,10 @@ async function api(path, opts = {}) {
 }
 const post = (path, data = {}) => api(path, { method: "POST", body: JSON.stringify(data) });
 const isTech = () => me.kind === "tech";
-const canWrite = () => isTech() && me.role !== "readonly";
+// what a technician's role lets them change (roles.py); the server checks every change as well
+const can = (p) => isTech() && (me.perms || []).includes(p);
+const canWrite = () => isTech() && (me.perms || []).length > 0;
+const adminArea = () => ["settings", "techs", "integrations", "alerts"].some(can);
 // client admins get Winbox / site-to-site VPNs only where a TikManager administrator turned them on for their organization
 const canWinbox = () => isTech() || (me.client_winbox && me.client_winbox !== "off");
 const canVpn = () => canWrite() || (me.kind === "client" && !!me.client_vpn);
@@ -351,7 +354,7 @@ function lifecycleCard(adopted) {
   return `<div class="card"><h2>Lifecycle</h2>
     <p class="small muted">${disc} discontinued by MikroTik · ${old} over ${LC_OLD} years old. Age comes from each router's factory firmware;
       MikroTik publishes no end-of-support dates, so "discontinued" means no longer sold. Suggested replacements are current
-      MikroTik models of the same kind${me.kind === "tech" && me.role === "admin" ? ` - set your own standard per model on Admin &gt; Settings` : ""}.</p>
+      MikroTik models of the same kind${can("settings") ? ` - set your own standard per model on Admin &gt; Settings` : ""}.</p>
     <div class="table-wrap"><table><thead><tr><th>Router</th>${me.org ? "" : "<th>Client</th>"}<th>Model</th><th>Made</th><th>Age</th><th></th><th>Suggested replacement</th></tr></thead><tbody>
     ${flagged.slice(0, 25).map((d) => `<tr class="click" data-dev="${d.id}"><td>${esc(d.name)}</td>${me.org ? "" : `<td>${d.org ? esc(d.org) : `<span class="muted">Unassigned</span>`}</td>`}
       <td>${esc(d.model || "")}</td><td>${esc(lcMade(d))}</td><td class="nowrap">${esc(lcAge(d))}</td><td>${d.lc_status === "discontinued" ? `<span class="pill lc-disc">Discontinued</span>` : ""}</td>
@@ -492,7 +495,7 @@ async function showAdoption() {
       technician approves them; if this command ever leaks, an admin can replace it.</p>
     <div class="actions"><button class="btn primary" type="button" id="copy">Copy command</button>
       ${me.dev ? `<button class="btn" type="button" id="sim">Simulate a router registering (dev)</button>` : ""}
-      ${me.role === "admin" ? `<button class="btn danger" type="button" id="rotate">Replace command</button>` : ""}
+      ${can("settings") ? `<button class="btn danger" type="button" id="rotate">Replace command</button>` : ""}
       <button class="btn" type="button" data-close>Done</button><span class="status" id="cStatus"></span></div>`);
   const say = (t, k) => { $("cStatus").textContent = t; $("cStatus").className = `status ${k || ""}`; };
   $("copy").addEventListener("click", async () => { await navigator.clipboard.writeText($("cmd").textContent); say("Copied.", "ok"); });
@@ -1369,9 +1372,9 @@ async function clients() {
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Client</th><th>Routers</th><th>Online</th><th>Offline</th>
       <th title="What this client's own admins may use (client admin accounts only - viewers never)">Client admins: Winbox</th><th>Client admins: site-to-site VPNs</th></tr></thead><tbody>
       ${orgs.map((o) => `<tr><td>${esc(o.name)}</td><td>${o.devices}</td><td>${o.online || 0}</td><td>${o.offline ? `<span class="status err">${o.offline}</span>` : 0}</td>
-        <td>${me.role === "admin" ? `<select data-oacc="${o.id}" data-k="winbox" aria-label="Winbox for ${esc(o.name)}'s admins">${[["off", "Off"], ["read", "Read-only"], ["full", "Full"]].map(([k, l]) =>
+        <td>${can("clients") ? `<select data-oacc="${o.id}" data-k="winbox" aria-label="Winbox for ${esc(o.name)}'s admins">${[["off", "Off"], ["read", "Read-only"], ["full", "Full"]].map(([k, l]) =>
           `<option value="${k}" ${o.client_winbox === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : esc({ off: "Off", read: "Read-only", full: "Full" }[o.client_winbox] || "Off")}</td>
-        <td>${me.role === "admin" ? `<label class="small"><input type="checkbox" data-oacc="${o.id}" data-k="vpn" ${o.client_vpn ? "checked" : ""}> Allowed</label>` : o.client_vpn ? "Allowed" : "Off"}</td></tr>`).join("")
+        <td>${can("clients") ? `<label class="small"><input type="checkbox" data-oacc="${o.id}" data-k="vpn" ${o.client_vpn ? "checked" : ""}> Allowed</label>` : o.client_vpn ? "Allowed" : "Off"}</td></tr>`).join("")
         || `<tr><td colspan="6" class="muted">No clients yet.</td></tr>`}
     </tbody></table></div>
     <p class="small muted">Off by default. Winbox gives the client's admins a Winbox session to their own routers through TikManager (address-locked, 30 minutes,
@@ -1392,7 +1395,7 @@ async function clients() {
 async function users() {
   const [rows, orgs] = await Promise.all([api("/api/users"), isTech() ? api("/api/orgs") : Promise.resolve([])]);
   $("main").innerHTML = `<h1>Users</h1><p class="muted">${isTech() ? `${staffName()} sign in with Microsoft. Client users are invited and must set up an authenticator app.` : "People in your organization."}</p>
-    ${(canWrite() || (me.kind === "client" && me.role === "admin")) ? `<div class="card"><h2>Invite a client user</h2><form id="iForm" class="row">
+    ${(can("clients") || (me.kind === "client" && me.role === "admin")) ? `<div class="card"><h2>Invite a client user</h2><form id="iForm" class="row">
       ${isTech() ? `<select id="iOrg" aria-label="Client">${orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
       <input id="iEmail" type="email" placeholder="Email" required aria-label="Email"><input id="iName" placeholder="Name" aria-label="Name">
       <select id="iRole" aria-label="Role"><option value="viewer">Viewer</option><option value="admin">Client admin</option></select>
@@ -1404,7 +1407,7 @@ async function users() {
         <td class="row">${u.email === me.email ? "" : `
           ${u.invited ? `<button class="btn" type="button" data-act="resend" data-id="${u.id}">New link</button>` : ""}
           ${u.kind === "client" && u.totp_enabled ? `<button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}">Reset MFA</button>` : ""}
-          ${u.kind === "client" && !u.disabled && isTech() && me.role === "admin" ? `<button class="btn" type="button" data-viewas="${u.id}" title="See TikManager exactly as this user does (read-only)">View as</button>` : ""}
+          ${u.kind === "client" && !u.disabled && can("clients") ? `<button class="btn" type="button" data-viewas="${u.id}" title="See TikManager exactly as this user does (read-only)">View as</button>` : ""}
           <button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>`}</td></tr>`).join("")}
     </tbody></table></div></div>`;
   $("iForm")?.addEventListener("submit", async (e) => {
@@ -1431,9 +1434,12 @@ async function users() {
 }
 
 // --- Admin: branding, technicians, system ---------------------------------------------------------------------
-async function admin(tab = "branding") {
+const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["system", "Settings"]];
+const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), system: can("settings") || can("alerts") })[k];
+async function admin(tab) {
+  tab = tab && adminTabOk(tab) ? tab : (ADMIN_TABS.find(([k]) => adminTabOk(k)) || ["techs"])[0];
   $("main").innerHTML = `<h1>Admin</h1><div class="tabs" role="tablist">
-      ${[["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["system", "Settings"]].map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" class="${k === tab ? "active" : ""}">${l}</button>`).join("")}
+      ${ADMIN_TABS.filter(([k]) => adminTabOk(k)).map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" class="${k === tab ? "active" : ""}">${l}</button>`).join("")}
     </div><div id="adminBody"></div>`;
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => admin(b.dataset.tab)));
   const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, system: adminSystem };
@@ -1480,21 +1486,68 @@ async function adminBranding() {
 }
 
 async function adminTechs() {
-  const techs = (await api("/api/users")).filter((u) => u.kind === "tech");
+  const [all, R] = await Promise.all([api("/api/users"), api("/api/roles")]);
+  const techs = all.filter((u) => u.kind === "tech");
+  const roleList = [...R.roles, R.no_access];
+  const byId = Object.fromEntries(roleList.map((r) => [r.id, r]));
+  const edit = R.can_edit;
+  const groups = [...new Set(R.perms.map((p) => p.group))];
   $("adminBody").innerHTML = `<div class="card"><h2>Technicians</h2><p class="muted">${staffName()} sign in with Microsoft and appear here after their first sign-in.
-      <strong>Admin</strong>: everything, including this page. <strong>Tech</strong>: adopt, manage and back up routers, invite client users.
-      <strong>Read-only</strong>: view only.</p>
+      What each role can change is below (Roles). Everyone can look at everything their role lets them open.</p>
+    <div class="row tech-default"><label class="field">New Microsoft sign-ins get <select id="tDefault" ${edit ? "" : "disabled"}>
+        ${roleList.filter((r) => r.id !== "admin").map((r) => `<option value="${r.id}" ${R.default === r.id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}</select></label>
+      <span class="small muted">"No access (waiting)" lets them sign in but nothing more until you give them a role here. Addresses listed as administrators in the
+        server's settings are always administrators.</span></div>
     <div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr></thead><tbody>
-    ${techs.map((u) => `<tr><td>${esc(u.email)}${u.disabled ? ` <span class="pill">disabled</span>` : ""}</td><td>${esc(u.name)}</td>
-      <td><select data-role="${u.id}" ${u.email === me.email ? "disabled" : ""}>${["admin", "tech", "readonly"].map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r === "readonly" ? "Read-only" : r[0].toUpperCase() + r.slice(1)}</option>`).join("")}</select></td>
-      <td>${ago(u.last_login)}</td><td class="nowrap">${u.email === me.email ? "" : `<button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>
+    ${techs.map((u) => `<tr><td>${esc(u.email)}${u.disabled ? ` <span class="pill">disabled</span>` : ""}${u.role === "none" ? ` <span class="pill up-sched">waiting for a role</span>` : ""}</td><td>${esc(u.name)}</td>
+      <td><select data-role="${u.id}" ${u.email === me.email || !edit || (u.role === "admin" && !R.is_admin) ? "disabled" : ""} aria-label="Role for ${esc(u.email)}">
+        ${roleList.filter((r) => r.id !== "admin" || R.is_admin || u.role === "admin").map((r) => `<option value="${r.id}" ${u.role === r.id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}
+        ${byId[u.role] ? "" : `<option selected>${esc(u.role)} (missing)</option>`}</select></td>
+      <td>${ago(u.last_login)}</td><td class="nowrap">${u.email === me.email || !edit ? "" : `<button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>
         <button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}" title="Unlinks the Microsoft account (for a renamed or replaced account) and resets the authenticator app">Reset sign-in</button>`}</td></tr>`).join("")}
-    </tbody></table></div><span class="status" id="tStatus"></span></div>`;
+    </tbody></table></div><span class="status" id="tStatus"></span></div>
+    <div class="card"><div class="row"><h2>Roles</h2><span class="spacer"></span>${edit ? `<button class="btn primary" type="button" id="roleNew">New role</button>` : ""}</div>
+      <p class="small muted">A role is a set of permissions - what someone can change. Built-in roles can't be edited; <b>Copy</b> one to start your own.</p>
+      <div class="table-wrap"><table class="role-table"><thead><tr><th>Role</th>${groups.map((g) => `<th>${esc(g)}</th>`).join("")}<th>People</th><th></th></tr></thead><tbody>
+      ${R.roles.map((r) => `<tr><td><b>${esc(r.name)}</b>${r.builtin ? ` <span class="pill">built-in</span>` : ""}<div class="small muted">${esc(r.about || "")}</div></td>
+        ${groups.map((g) => { const ps = R.perms.filter((p) => p.group === g), n = ps.filter((p) => r.perms.includes(p.id)).length;
+          return `<td class="small" title="${esc(ps.filter((p) => r.perms.includes(p.id)).map((p) => p.label).join("\n"))}">${n === ps.length ? "All" : n ? `${n} of ${ps.length}` : `<span class="muted">—</span>`}</td>`; }).join("")}
+        <td>${r.users}</td><td class="nowrap">${edit ? `${r.builtin ? "" : `<button class="btn small" type="button" data-redit="${r.id}">Edit</button>`}
+          <button class="btn small" type="button" data-rcopy="${r.id}">Copy</button>
+          ${r.builtin ? "" : `<button class="btn small danger" type="button" data-rdel="${r.id}">Delete</button>`}` : ""}</td></tr>`).join("")}
+      </tbody></table></div><span class="status" id="rStatus"></span></div>`;
+  const msg = (id, m, ok) => { $(id).textContent = m; $(id).className = `status ${ok ? "ok" : "err"}`; };
+  $("tDefault")?.addEventListener("change", async (e) => { try { await post("/api/roles/default", { role: e.target.value }); msg("tStatus", "Saved.", true); } catch (err) { msg("tStatus", err.message); } });
   document.querySelectorAll("[data-role]").forEach((s) => s.addEventListener("change", async () => {
-    try { await post(`/api/users/${s.dataset.role}/role`, { role: s.value }); $("tStatus").textContent = "Saved."; $("tStatus").className = "status ok"; }
-    catch (e) { $("tStatus").textContent = e.message; $("tStatus").className = "status err"; adminTechs(); }
+    try { await post(`/api/users/${s.dataset.role}/role`, { role: s.value }); msg("tStatus", "Saved.", true); adminTechs(); }
+    catch (e) { msg("tStatus", e.message); adminTechs(); }
   }));
-  document.querySelectorAll("#adminBody [data-act]").forEach((b) => b.addEventListener("click", async () => { await post(`/api/users/${b.dataset.id}/${b.dataset.act}`); adminTechs(); }));
+  document.querySelectorAll("#adminBody [data-act]").forEach((b) => b.addEventListener("click", async () => {
+    try { await post(`/api/users/${b.dataset.id}/${b.dataset.act}`); adminTechs(); } catch (e) { msg("tStatus", e.message); } }));
+  const editor = (r, copy) => {
+    const have = new Set(r ? r.perms : []);
+    dialog(`<h2>${r && !copy ? `Edit role: ${esc(r.name)}` : r ? `New role from ${esc(r.name)}` : "New role"}</h2>
+      <label class="field">Name <input id="reName" maxlength="60" value="${esc(r && !copy ? r.name : r ? `${r.name} (copy)` : "")}"></label>
+      <label class="field">Description <input id="reAbout" maxlength="200" value="${esc(r ? r.about || "" : "")}" placeholder="What this role is for"></label>
+      <div class="role-perms">${groups.map((g) => `<fieldset><legend>${esc(g)}</legend>${R.perms.filter((p) => p.group === g).map((p) => `<label class="chk">
+          <input type="checkbox" value="${p.id}" ${have.has(p.id) ? "checked" : ""} ${!R.is_admin && !me.perms.includes(p.id) ? "disabled title=\"You can only give permissions you have\"" : ""}> ${esc(p.label)}</label>`).join("")}</fieldset>`).join("")}</div>
+      <p class="small muted">Without a permission, people with this role can still look but not change (Winbox opens read-only).</p>
+      <div class="actions"><button class="btn primary" type="button" id="reSave">Save role</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="reMsg"></span></div>`);
+    $("reSave").addEventListener("click", async () => {
+      try {
+        await post("/api/roles", { id: r && !copy ? r.id : "", name: $("reName").value, about: $("reAbout").value,
+          perms: [...document.querySelectorAll(".role-perms input:checked")].map((c) => c.value) });
+        $("dlg").close(); adminTechs();
+      } catch (e) { msg("reMsg", e.message); }
+    });
+  };
+  $("roleNew")?.addEventListener("click", () => editor(null));
+  document.querySelectorAll("[data-redit]").forEach((b) => b.addEventListener("click", () => editor(byId[b.dataset.redit])));
+  document.querySelectorAll("[data-rcopy]").forEach((b) => b.addEventListener("click", () => editor(byId[b.dataset.rcopy], true)));
+  document.querySelectorAll("[data-rdel]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Delete the role ${byId[b.dataset.rdel].name}?`)) return;
+    try { await post(`/api/roles/${b.dataset.rdel}/delete`); adminTechs(); } catch (e) { msg("rStatus", e.message); }
+  }));
 }
 
 // --- Admin > Integrations: ConnectWise PSA and IT Glue ---------------------------------------------------------------
@@ -3535,7 +3588,7 @@ async function alertsPage() {
         ${a.cw_ready ? `<button class="btn" type="button" data-test="cw">Send a test ticket</button>` : ""}
         <button class="btn" type="button" data-test="teams" ${a.teams_ready ? "" : "disabled"}>Send a test to Teams</button>
         ${a.mail_ready ? `<button class="btn" type="button" data-test="email">Send a test email</button>` : ""}<span class="status" id="alStatus"></span></div></div>` : ""}
-    ${a.can_edit && me.role === "admin" ? `<div class="card" id="whCard"><h2>Webhooks</h2><p class="muted small">Loading…</p></div>` : ""}`;
+    ${a.can_edit ? `<div class="card" id="whCard"><h2>Webhooks</h2><p class="muted small">Loading…</p></div>` : ""}`;
   $("main").querySelectorAll("[data-dev]").forEach((x) => x.addEventListener("click", (e) => { e.preventDefault(); go("router", x.dataset.dev); }));
   if (!a.can_edit) return;
   const status = (m, c = "") => { $("alStatus").textContent = m; $("alStatus").className = `status ${c}`; };
@@ -3906,7 +3959,7 @@ async function logViewer(el, fixed, ref) {
 async function logRulesCard(devs, orgs) {
   const x = await api("/api/logs/rules");
   if (!$("logRules")) return;
-  const admin = me.role === "admin";
+  const admin = can("alerts");
   const scopeText = (r) => r.scope === "org" ? `client ${orgs.find((o) => String(o.id) === r.target)?.name || "?"}` : r.scope === "tag" ? `tag ${r.target}`
     : r.scope === "device" ? devs.find((d) => String(d.id) === r.target)?.name || "?" : "all routers";
   $("logRules").innerHTML = `<div class="row"><h2>Alert rules</h2><span class="spacer"></span>${admin ? `<button class="btn" type="button" id="lrAdd">Add rule</button>` : ""}</div>
@@ -3990,7 +4043,7 @@ async function autoBlockCard() {
   let x;
   try { x = await api("/api/security/autoblock"); } catch (e) { if ($("abCard")) $("abCard").innerHTML = `<h2>Auto-block</h2><p class="status err">${esc(e.message)}</p>`; return; }
   if (!$("abCard")) return;
-  const c = x.settings, admin = me.role === "admin";
+  const c = x.settings, admin = can("blocking");
   const modeText = { off: "Off", audit: "Audit - list them, block by hand", block: "Block automatically" };
   $("abCard").innerHTML = `<div class="row"><h2>Auto-block</h2><span class="pill ${c.mode === "block" ? "ab-on" : ""}">${esc(modeText[c.mode])}</span></div>
     <p class="small muted">A block stops connections from that address straight to a router - only on routers with the drop rule below. Winbox through
@@ -4066,7 +4119,7 @@ async function regionCard(local) {   // local: redraw from the data already read
     rgView.draft = { enabled: !!p.enabled, threats: !!p.threats, mode: p.mode || "block", direction: p.direction || "incoming", countries: [...(p.countries || [])],
       skip: [...(p.skip || [])], exceptions: (p.exceptions || []).join("\n"), router_allow: { ...(p.router_allow || {}) } };
   }
-  const dr = rgView.draft, admin = me.role === "admin", g = x.geo;
+  const dr = rgView.draft, admin = can("blocking"), g = x.geo;
   const byCode = Object.fromEntries(x.countries.map((c) => [c.code, c]));
   const tl = x.threat || { entries: 0, sources: [] };
   const est = (dr.enabled ? dr.countries.reduce((n, c) => n + (byCode[c]?.entries || 0), 0) : 0) + (dr.threats ? tl.entries : 0);
@@ -4733,7 +4786,7 @@ async function messagesPage() {
       ${x.messages.length ? `<div class="msg-list">${x.messages.map((m) => `<div class="msg ${m.acked ? "" : "unread"} ${opened === m.id ? "open" : ""}">
           <div class="msg-row"><input type="checkbox" data-msel="${m.id}" ${msgView.sel.has(m.id) ? "checked" : ""} aria-label="Select ${esc(m.title)}">
             <button type="button" class="msg-title" data-mopen="${m.id}" aria-expanded="${opened === m.id}">${m.acked ? "" : `<span class="dot msg-dot"></span>`}${esc(m.title)}</button>
-            <span class="pill ${m.kind === "release" ? "up-run" : "up-sched"}">${m.kind === "release" ? "Release notes" : m.audience === "all" ? "Notice · everyone" : "Notice"}</span>
+            <span class="pill ${m.kind === "release" ? "up-run" : "up-sched"}">${m.kind === "release" ? "Release notes" : m.always ? "Guide" : m.audience === "all" ? "Notice · everyone" : "Notice"}</span>
             <span class="small muted nowrap">${msgDay(m.ts)}</span></div>
           ${opened === m.id ? `<div class="msg-body">${blocksHtml(m.blocks) || `<p class="muted small">No details.</p>`}
             <div class="row small muted">From ${esc(m.created_by || "TikManager")}<span class="spacer"></span>
@@ -4744,6 +4797,7 @@ async function messagesPage() {
       <label class="field">Title <input id="mpTitle" maxlength="150"></label>
       <label class="field">Message <textarea id="mpBody" rows="5" placeholder="Plain text. Lines starting with '- ' become bullets; **bold** and \`code\` work."></textarea></label>
       <label class="field">For <select id="mpAud"><option value="tech">Technicians</option><option value="all">Everyone (technicians and client users)</option></select></label>
+      <label class="chk"><input type="checkbox" id="mpAlways"> Show to new users too - people who get an account later see it as well (otherwise only accounts that exist now, or are made within 14 days)</label>
       <div class="actions"><button class="btn primary" type="button" id="mpSend">Post</button><span class="status small" id="mpMsg"></span></div></details>` : ""}`;
   const again = () => messagesPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
   $("main").querySelectorAll("[data-mall]").forEach((b) => b.addEventListener("click", () => { msgView.all = b.dataset.mall === "1"; msgView.sel.clear(); again(); }));
@@ -4758,7 +4812,7 @@ async function messagesPage() {
     await post(`/api/messages/${b.dataset.mdel}/delete`); msgView.open = null; again();
   }));
   $("mpSend")?.addEventListener("click", async () => {
-    try { await post("/api/messages/post", { title: $("mpTitle").value, body: $("mpBody").value, audience: $("mpAud").value }); msgView.all = true; again(); }
+    try { await post("/api/messages/post", { title: $("mpTitle").value, body: $("mpBody").value, audience: $("mpAud").value, always: $("mpAlways").checked }); msgView.all = true; again(); }
     catch (e) { $("mpMsg").textContent = e.message; $("mpMsg").className = "status small err"; }
   });
   if (opened) document.querySelector(".msg.open")?.scrollIntoView({ block: "nearest" });
@@ -5321,7 +5375,7 @@ const NAV = [
   { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
 ];
 const navCounts = {};
-const navOk = (who) => !who || (who === "unifi" ? !!me.unifi : who === "tech" ? isTech() : who === "vpn" ? isTech() || canVpn() : who === "admin" ? isTech() || me.role === "admin" : isTech() && me.role === "admin");
+const navOk = (who) => !who || (who === "unifi" ? !!me.unifi : who === "tech" ? isTech() : who === "vpn" ? isTech() || canVpn() : who === "admin" ? isTech() || (me.kind === "client" && me.role === "admin") : adminArea());
 const navOpen = () => { try { return new Set(JSON.parse(localStorage.getItem("tmNavOpen") || '["Devices"]')); } catch (e) { return new Set(["Devices"]); } };
 function renderNav() {
   const open = navOpen();
@@ -5493,9 +5547,15 @@ async function init() {
   const who = me.name || me.email || "";
   $("navAvatar").textContent = who.split(/[\s@.]+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   $("navName").textContent = who;
-  $("navRole").textContent = me.kind === "tech" ? { admin: "Administrator", tech: "Technician", readonly: "Read-only" }[me.role] || me.role
+  $("navRole").textContent = me.kind === "tech" ? me.role_name || me.role
     : `${me.org || "Client"} · ${me.role === "admin" ? "admin" : "viewer"}`;
   $("navUser").hidden = false;
+  if (isTech() && me.role === "none" && !me.is_admin) {
+    $("main").innerHTML = `<div class="card"><h1>Waiting for a role</h1><p>You're signed in, but your account doesn't have a role yet. An administrator gives you one on
+      Admin &gt; Technicians - then reload this page.</p></div>`;
+    $("navItems").innerHTML = "";
+    return;
+  }
   // appearance: the person's saved choice (theme.js already applied this browser's last one)
   if (me.prefs) window.setAppearance(me.prefs);
   $("appearanceBtn").addEventListener("click", showAppearance);

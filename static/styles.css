@@ -782,3 +782,9 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .msg-dot { background: var(--info); margin-right: 6px; }
 .msg-body { padding: 0 2px 12px 30px; } .msg-body ul { margin: 6px 0; padding-left: 20px; } .msg-body p { margin: 6px 0; }
 .msg-post summary { cursor: pointer; } .msg-post textarea { width: 100%; }
+/* Admin > Technicians > Roles */
+.tech-default { align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; } .tech-default .small { max-width: 520px; }
+.role-perms { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; max-height: 55vh; overflow-y: auto; }
+.role-perms fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 0; }
+.role-perms legend { font-weight: 600; padding: 0 4px; } .role-perms .chk { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; font-size: 13px; }
+.role-table td { vertical-align: top; }
