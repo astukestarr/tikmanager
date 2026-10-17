@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.8 - 2026-10-16
+
+- **Flows: Turn on Flows failed with `input does not match any value of version`** (RouterOS 7.24) - MikroTik's docs say
+  `IPFIX`, the router wanted something else. TikManager now tries `ipfix`, `IPFIX` and `10`, then falls back to NetFlow v9
+  (the collector reads both). Nothing on the router changed in the failed attempt.
+
 ## 2.0.0-beta.7 - 2026-10-16
 
 - **Flows: Turn on Flows failed on real routers** with `unknown parameter comment` - RouterOS Traffic Flow targets have

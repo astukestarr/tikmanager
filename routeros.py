@@ -916,14 +916,20 @@ class RouterOS:
     def traffic_flow_on(self, settings, dst, port, src):
         for t in self._tf_mine(dst, port):
             self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
-        body = {"dst-address": dst, "port": str(port), "version": "IPFIX", "src-address": src}
-        try:
-            self._req("PUT", "/ip/traffic-flow/target", body, timeout=20)
-        except RouterError as e:
-            if "unknown parameter" not in str(e):
-                raise
-            body.pop("src-address")   # older RouterOS: the route to the tunnel address picks the tunnel source anyway
-            self._req("PUT", "/ip/traffic-flow/target", body, timeout=20)
+        body = {"dst-address": dst, "port": str(port), "src-address": src}
+        # the spelling of IPFIX differs between RouterOS versions (and its docs); NetFlow v9 is the fallback - TikManager reads both
+        versions = ["ipfix", "IPFIX", "10", "9"]
+        while True:
+            try:
+                self._req("PUT", "/ip/traffic-flow/target", {**body, "version": versions[0]}, timeout=20)
+                break
+            except RouterError as e:
+                if "unknown parameter" in str(e) and "src-address" in body:
+                    body.pop("src-address")   # older RouterOS: the route to the tunnel address picks the tunnel source anyway
+                elif "value of version" in str(e) and len(versions) > 1:
+                    versions.pop(0)
+                else:
+                    raise
         self._req("POST", "/ip/traffic-flow/set", settings, timeout=20)
 
     def traffic_flow_off(self, restore, dst, port):
