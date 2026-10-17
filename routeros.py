@@ -904,6 +904,27 @@ class RouterOS:
         """The CPU load now (%) - read between batches when loading region-blocking lists."""
         return int((self._req("GET", "/system/resource?.proplist=cpu-load", timeout=10) or {}).get("cpu-load") or 0)
 
+    # --- Flows pilot (flows.py): Traffic Flow (IPFIX) to TikManager over the tunnel -----------------------------------
+    def traffic_flow(self):
+        return self.get("/ip/traffic-flow") or {}
+
+    def traffic_flow_on(self, settings, dst, port, src):
+        for t in self.get("/ip/traffic-flow/target") or []:
+            if t.get("comment") == "TikManager":
+                self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
+        self._req("PUT", "/ip/traffic-flow/target", {"dst-address": dst, "port": str(port), "version": "ipfix", "src-address": src,
+                                                     "comment": "TikManager"}, timeout=20)
+        self._req("POST", "/ip/traffic-flow/set", settings, timeout=20)
+
+    def traffic_flow_off(self, restore):
+        for t in self.get("/ip/traffic-flow/target") or []:
+            if t.get("comment") == "TikManager":
+                self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
+        others = [t for t in self.get("/ip/traffic-flow/target") or [] if t.get("comment") != "TikManager"]
+        if not others and restore.get("enabled") == "no":
+            restore = {"enabled": "no"}
+        self._req("POST", "/ip/traffic-flow/set", restore, timeout=20)
+
     GEO_BOOT = "tikmanager-geo-boot"
 
     def geo_boot_guard(self, on, script=""):
@@ -1487,6 +1508,20 @@ class SimRouter:
 
     def cpu_load(self):
         return random.Random(int(time.time() // 20) + self.id).randint(3, 45)
+
+    def traffic_flow(self):
+        return self._sim().get("tf", {"enabled": "false", "interfaces": "all", "cache-entries": "32k", "active-flow-timeout": "30m",
+                                      "inactive-flow-timeout": "15s"})
+
+    def traffic_flow_on(self, settings, dst, port, src):
+        st = self._sim()
+        st["tf"] = {**self.traffic_flow(), **{k: ("true" if v == "yes" else v) for k, v in settings.items()}}
+        st["tf_target"] = {"dst-address": dst, "port": str(port), "src-address": src}
+
+    def traffic_flow_off(self, restore):
+        st = self._sim()
+        st.pop("tf_target", None)
+        st["tf"] = {**self.traffic_flow(), **{k: ("true" if v == "yes" else "false" if v == "no" else v) for k, v in restore.items()}}
 
     def geo_boot_guard(self, on, script=""):
         if on:

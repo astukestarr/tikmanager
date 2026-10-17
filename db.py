@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS devices (
   sec_target TEXT, cve_n INTEGER, cve_max REAL, sec_info TEXT, sec_version TEXT, sec_checked REAL,   -- rossec.py: security releases / CVEs
   health TEXT, health_at REAL,             -- latest sensor readings {name: {value, unit}} (health_metrics has the history)
   bgp_at REAL,                              -- when the BGP sessions were last read
+  flows_on INTEGER NOT NULL DEFAULT 0, flows_prev TEXT,   -- Flows pilot: on, and the Traffic Flow settings to put back
   bgp_state TEXT,                           -- BGP peers (JSON {name: {up, remote, as, since, uptime, prefixes}}); NULL = no BGP
   isp_ifaces TEXT, isp_state TEXT,         -- internet links: chosen interfaces (JSON, null = automatic) and their state
   last_reboot REAL, last_reboot_why TEXT,  -- last restart TikManager noticed (uptime went back): upgrade / unexpected
@@ -195,6 +196,12 @@ CREATE TABLE IF NOT EXISTS sec_events (
   user TEXT, ip TEXT, device_id INTEGER, via TEXT, detail TEXT, uid TEXT UNIQUE          -- uid: de-duplicates imported events
 );
 CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
+CREATE TABLE IF NOT EXISTS flows (                  -- Flows pilot (flows.py): conversations summed per 10 minutes, kept 7 days
+  device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, ts INTEGER NOT NULL,
+  local TEXT NOT NULL, remote TEXT NOT NULL, port INTEGER NOT NULL, proto INTEGER NOT NULL, dir TEXT NOT NULL,
+  up INTEGER NOT NULL DEFAULT 0, down INTEGER NOT NULL DEFAULT 0, packets INTEGER NOT NULL DEFAULT 0, flows INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (device_id, ts, local, remote, port, proto, dir)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS region_sync (            -- region blocking: where each router's list stands
   device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
   state TEXT NOT NULL DEFAULT 'off',                 -- off / loading / synced / paused / waiting / too_big / error
@@ -311,7 +318,7 @@ class DB:
                              ("lc_suggest", "TEXT"), ("lc_suggest_name", "TEXT"), ("lc_suggest_why", "TEXT"),
                              ("dm_mode", "TEXT"), ("dm_flagged", "INTEGER"), ("dm_info", "TEXT"), ("dm_checked", "REAL"),
                              ("sec_target", "TEXT"), ("cve_n", "INTEGER"), ("cve_max", "REAL"), ("sec_info", "TEXT"), ("sec_version", "TEXT"),
-                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT"), ("bgp_state", "TEXT"), ("bgp_at", "REAL"),
+                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT"), ("bgp_state", "TEXT"), ("bgp_at", "REAL"), ("flows_on", "INTEGER NOT NULL DEFAULT 0"), ("flows_prev", "TEXT"),
                              ("last_reboot", "REAL"), ("last_reboot_why", "TEXT"), ("tags", "TEXT"), ("kind_override", "TEXT")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")

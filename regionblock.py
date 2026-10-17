@@ -36,6 +36,7 @@ UNDO = "tikmanager-geo-undo"
 UNDO_SCRIPT = (f'/ip firewall filter remove [find comment~"^{TAG}"]\n'
                f'/system scheduler remove [find where name="{UNDO}"]\n/system script remove [find where name="{UNDO}"]\n')
 CUTOFF_PAUSE = 24 * 3600        # after losing a router on a rule change, no automatic retry for this long (Sync now retries)
+LOG_LIMIT = "6/1m,6:packet"      # dropped connections logged (a sample for Flows > Blocked) - a handful a minute at most
 PRIVATE_V4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
 TIMEOUT = "14d"
 REFRESH_EVERY = 6 * 86400       # entries' timeouts are renewed this often
@@ -349,6 +350,8 @@ class RegionBlock:
         out = []
         if pol["direction"] in ("incoming", "both"):
             out += [{"chain": CHAIN_IN, "src-address": a, "action": "return", "comment": f"{TAG}: never block TikManager" if a in tm else f"{TAG}: private"} for a in safe]
+            out.append({"chain": CHAIN_IN, "src-address-list": neg + LIST, "action": "log", "log-prefix": "tm-geo-in", "limit": LOG_LIMIT,
+                        "comment": f"{TAG}: sample for Flows"})
             out.append({"chain": CHAIN_IN, "src-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: incoming"})
             for w in wans:
                 out.append({"chain": "input", "in-interface": w, "connection-state": "new", "action": "jump", "jump-target": CHAIN_IN, "comment": f"{TAG}"})
@@ -356,6 +359,8 @@ class RegionBlock:
                             "jump-target": CHAIN_IN, "comment": f"{TAG}: port forwards"})
         if pol["direction"] in ("outgoing", "both"):
             out += [{"chain": CHAIN_OUT, "dst-address": a, "action": "return", "comment": f"{TAG}: never block TikManager" if a in tm else f"{TAG}: private"} for a in safe]
+            out.append({"chain": CHAIN_OUT, "dst-address-list": neg + LIST, "action": "log", "log-prefix": "tm-geo-out", "limit": LOG_LIMIT,
+                        "comment": f"{TAG}: sample for Flows"})
             out.append({"chain": CHAIN_OUT, "dst-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: outgoing"})
             for w in wans:
                 out.append({"chain": "forward", "out-interface": w, "connection-state": "new", "action": "jump", "jump-target": CHAIN_OUT, "comment": f"{TAG}: outgoing"})

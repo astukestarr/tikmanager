@@ -709,3 +709,14 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .rg-sugg button { all: unset; display: block; box-sizing: border-box; width: 100%; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .rg-sugg button.on, .rg-sugg button:hover { background: var(--accent-soft); }
 .rg-sugg > span { display: block; padding: 5px 8px; }
+/* router page > Flows */
+.fl-layout { display: block; }
+.fl-side { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 0; }
+.fl-side input[type=search] { width: 220px; } .fl-side .chk { margin: 0; } .fl-side .rg-chips { margin: 0; }
+.fl-h { margin: 0; } .fl-seg { align-self: center; }
+.fl-tops { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.fl-tops .card { margin-top: 14px; }
+.fl-top .fl-row { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 13px; overflow: hidden; }
+.fl-top .fl-row button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; text-align: left; }
+.fl-cc { font-size: 11px; padding: 0 6px; }
+.fl-table td { vertical-align: top; }

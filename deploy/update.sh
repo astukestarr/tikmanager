@@ -28,6 +28,8 @@ cp /opt/tikmanager/deploy/tikmanager-wgport.path /opt/tikmanager/deploy/tikmanag
 cp /opt/tikmanager/deploy/tikmanager-unban.path /opt/tikmanager/deploy/tikmanager-unban.service /etc/systemd/system/
 systemctl daemon-reload
 # Winbox relay port pool (winbox.py; each port only answers the technician who opened it) - ufw skips it if already there
+# Flows (IPFIX from routers that have it turned on) - only over the tunnel
+ufw status 2>/dev/null | grep -q "Status: active" && ufw allow in on wg0 to 10.77.0.1 port 2055 proto udp comment 'Flows (IPFIX) over the tunnel' >/dev/null 2>&1 || true
 ufw status 2>/dev/null | grep -q "Status: active" && ufw allow 40000:40049/tcp comment 'Winbox relay (each port only for the technician who opened it)' >/dev/null 2>&1 || true
 systemctl enable --now tikmanager-update.path >/dev/null 2>&1 || true
 systemctl enable --now tikmanager-check.path tikmanager-check.timer tikmanager-authlog.timer tikmanager-wgport.path tikmanager-unban.path >/dev/null 2>&1 || true

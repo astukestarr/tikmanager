@@ -47,6 +47,7 @@ from rossec import RosSecurity
 from autoblock import AutoBlock
 from geoip import GeoError, GeoIP
 from regionblock import RegionBlock, RegionError
+from flows import Flows, MIN_MEM as FLOWS_MIN_MEM
 from devkind import kind as device_kind, KINDS as DEVICE_KINDS
 from routerlogs import RouterLogs, SEVERITIES as LOG_SEVERITIES
 from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
@@ -145,6 +146,7 @@ rossec = RosSecurity(db, settings.data_dir)   # known CVEs and missed MikroTik s
 autoblock = AutoBlock(db, settings, poller.client, secev)   # addresses guessing router passwords: blocked on every router
 geo = GeoIP(settings.data_dir, lambda: integ.config("ipinfo").get("token", ""), dev=settings.dev)   # IPinfo Lite, per country
 region = RegionBlock(db, settings, poller.client, geo, autoblock)   # region (country) blocking per client
+flowlog = Flows(db, settings, geo, poller.client, routerlogs)   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -736,6 +738,29 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, column="d.org_id")
             return self.json(db.q(f"""SELECT e.*, d.name AS router, o.name AS org FROM exceptions e JOIN devices d ON d.id = e.device_id
                                      LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY e.created_at DESC""", args))
+        if m := re.fullmatch(r"/api/devices/(\d+)/flows(\.csv)?", path):   # router page > Flows (pilot)
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            f = {k: str(q.get(k) or "")[:80] for k in ("hours", "q", "local", "remote", "port", "proto", "dir", "country", "org", "view")}
+            if m.group(2):
+                f["limit"] = 20000
+            x = flowlog.query(d, f)
+            x.update(min_mem=FLOWS_MIN_MEM, mem_total=d.get("mem_total"), geo=bool(geo.meta()))
+            if not m.group(2):
+                return self.json(x)
+            out = io.StringIO()
+            w = csv.writer(out)
+            cell = lambda v: ("'" + str(v)) if str(v or "")[:1] in ("=", "+", "-", "@", "\t", "\r") else str(v if v is not None else "")
+            blocked = f["view"] == "blocked"
+            w.writerow(["local", "local name", "remote", "country", "organisation", "service", "port", "protocol", "direction"]
+                       + (["samples"] if blocked else ["download bytes", "upload bytes", "packets", "last seen"]))
+            for r in x["rows"]:
+                w.writerow([cell(r["local"]), cell(r["local_name"]), cell(r["remote"]), cell(r["country"]), cell(r["org"]), cell(r["service"]), r["port"],
+                            cell(r["proto_name"]), r["dir"]] + ([r["hits"]] if blocked else [r["down"], r["up"], r["packets"],
+                            time.strftime("%Y-%m-%d %H:%M", time.localtime(r["last"]))]))
+            db.audit(s["email"], "flows exported", d["name"], self.client_ip(), detail=f"{len(x['rows'])} rows")
+            return self.send(200, out.getvalue().encode("utf-8-sig"), "text/csv; charset=utf-8",
+                             headers=[("Content-Disposition", f'attachment; filename="flows-{d["id"]}-{time.strftime("%Y%m%d-%H%M")}.csv"')])
         if m := re.fullmatch(r"/api/devices/(\d+)/routing", path):   # router page > Routing: BGP (monitored) + OSPF, RIP, routes (live)
             s = self.require(tech=True)
             d = self.device_for(s, m.group(1))
@@ -1757,6 +1782,20 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **remote.info(d["id"])})
+        if m := re.fullmatch(r"/api/devices/(\d+)/flows", path):   # {on}: turn the Flows pilot on / off for this router
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            on = bool(self.body().get("on"))
+            if on and not d["online"]:
+                raise HttpError(400, "The router is offline.")
+            try:
+                flowlog.enable(d) if on else flowlog.disable(d)
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            except RouterError as e:
+                raise HttpError(502, str(e)) from None
+            db.audit(s["email"], "flows turned " + ("on" if on else "off"), d["name"], self.client_ip())
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/bgp-check", path):   # BGP card > Check now
             s = self.require(tech=True)
             d = self.device_for(s, m.group(1))
@@ -2814,6 +2853,7 @@ def main():
     alerts.start()
     unifi.start()
     region.start()
+    flowlog.start()
     lifecycle.start()
     rossec.start()
     autoblock.start()

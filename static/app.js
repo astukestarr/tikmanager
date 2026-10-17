@@ -343,7 +343,7 @@ async function router(id) {
   const adopted = d.state === "adopted";
   const radios = (d.interfaces || []).some(isRadio);
   const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["ports", "Ports"]] : []), ...(radios ? [["wireless", "Wireless"]] : []),
-    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(isTech() ? [["routing", "Routing"]] : []), ...(canVpn() ? [["vpns", "VPNs"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
+    ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(isTech() ? [["routing", "Routing"], ["flows", "Flows"]] : []), ...(canVpn() ? [["vpns", "VPNs"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
     ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
@@ -441,6 +441,7 @@ async function router(id) {
       ${adopted && tab === "logs" ? `<div class="card" id="rLogs"></div>` : ""}
       ${adopted && tab === "ports" ? `<div id="ptRoot"><div class="card"><h2>Ports</h2><p class="muted small">Reading the ports…</p></div></div>` : ""}
       ${adopted && tab === "backups" ? `<div class="card" id="bkCard"><h2>Configuration backups</h2><p class="muted">Loading…</p></div>` : ""}
+      ${adopted && tab === "flows" ? `<div id="flRoot"><div class="card"><h2>Flows</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "routing" ? `<div id="rtRoot"><div class="card"><h2>Routing</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "vpns" ? `<div id="rvRoot"><div class="card"><h2>VPNs</h2><p class="muted small">Loading…</p></div></div>` : ""}
       ${adopted && tab === "remote" ? `<div id="raRoot"><div class="card"><h2>Remote access</h2><p class="muted small">Loading…</p></div></div>` : ""}
@@ -556,6 +557,7 @@ async function router(id) {
   $("mgHttp")?.addEventListener("click", () => mg(false));
   if ($("rvRoot")) rvTab(d).catch(() => {});
   if ($("rtRoot")) routingTab(d).catch(() => {});
+  if ($("flRoot")) flowsTab(d).catch((e) => { if ($("flRoot")) $("flRoot").innerHTML = `<div class="card"><h2>Flows</h2><p class="status err">${esc(e.message)}</p></div>`; });
   if ($("wbBox")) loadWinbox(d);
   loadLocation(d);
   api(`/api/devices/${d.id}/series?range=1h`).then((s) => sparkline($("spark"), s.traffic)).catch(() => {});
@@ -825,6 +827,90 @@ function ispCard(d) {
       <td>${l.active ? `<span class="pill" title="The default route uses this link now">carrying traffic</span>` : ""}</td></tr>`).join("")}</tbody></table></div>
     <p class="small muted">Events and an alert when a link goes down, comes back or changes address. Which interfaces count is set on the Settings tab.</p></div>`;
 }
+// router page > Flows (pilot, flows.py): conversations through the router from Traffic Flow (IPFIX), like UniFi's Insights > Flows
+const flView = { id: null, hours: 24, view: "all", q: "", f: {} };
+const FL_FILTERS = [["local", "Client"], ["remote", "Destination"], ["country", "Country"], ["org", "Organisation"], ["port", "Port"], ["proto", "Protocol"], ["dir", "Direction"]];
+const flBytes = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${(n / 1e3).toFixed(0)} KB` : `${n} B`;
+async function flowsTab(d) {
+  if (flView.id !== d.id) Object.assign(flView, { id: d.id, f: {}, q: "", view: "all" });
+  const qs = new URLSearchParams({ hours: flView.hours, view: flView.view, q: flView.q, ...flView.f });
+  const x = await api(`/api/devices/${d.id}/flows?${qs}`);
+  const root = $("flRoot");
+  if (!root) return;
+  if (!x.on && !x.rows.length) {
+    const small = x.mem_total && x.mem_total < x.min_mem;
+    root.innerHTML = `<div class="card"><h2>Flows <span class="pill">pilot</span></h2>
+      <p class="small">See who on this network talks to what - each conversation with its destination, country, organisation, service and how much
+        went each way, plus what region blocking dropped. Like UniFi's Flows, for MikroTik.</p>
+      <p class="small muted">Turning it on sets RouterOS Traffic Flow on this router (a small 4k-entry cache - about 1 MB of memory - and short
+        timeouts) and sends the records to TikManager over the tunnel only. It costs the router a little CPU per connection, so try it on bigger
+        routers first and watch the CPU on the Overview. Turning it off puts the router's previous Traffic Flow settings back.
+        Kept ${7} days in 10-minute summaries.</p>
+      ${small ? `<p class="small status warn">This router has ${Math.round(x.mem_total / 2 ** 20)} MB of memory - Flows is only for routers with 128 MB or more.</p>`
+        : canWrite() ? `<div class="actions"><button class="btn primary" type="button" id="flOn" ${d.online ? "" : "disabled"}>Turn on Flows</button><span class="status small" id="flMsg"></span></div>` : ""}</div>`;
+    $("flOn")?.addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      try { await post(`/api/devices/${d.id}/flows`, { on: true }); $("flMsg").textContent = "On - the first records arrive within a minute or two."; $("flMsg").className = "status small ok"; setTimeout(() => flowsTab(d).catch(() => {}), 2500); }
+      catch (err) { e.target.disabled = false; $("flMsg").textContent = err.message; $("flMsg").className = "status small err"; }
+    });
+    return;
+  }
+  const blocked = x.view === "blocked";
+  const chip = (k, v, label) => `<button type="button" class="linkish" data-flf="${k}" data-flv="${esc(String(v))}" title="Filter on this">${label}</button>`;
+  const top = (title, list, k, fmt) => `<div class="card fl-top"><div class="small muted">${title}</div>${(list || []).length ? (list).map((t) =>
+      `<div class="fl-row">${chip(k, t.key, esc(t.label || t.key))}<span class="small muted">${fmt(t)}</span></div>`).join("") : `<div class="small muted">—</div>`}</div>`;
+  const ago2 = x.last_seen ? `last record ${ago(x.last_seen)}` : x.on ? "waiting for the first records" : "off";
+  const dirs = { out: "↑ out", in: "↓ in", local: "local", transit: "transit", other: "" };
+  root.innerHTML = `<div class="fl-layout">
+    <aside class="card fl-side">
+      <input id="flQ" type="search" placeholder="Search…" value="${esc(flView.q)}" aria-label="Search flows">
+      <div class="seg fl-seg" role="group">${[[1, "1h"], [24, "1D"], [168, "1W"]].map(([h, l]) => `<button type="button" data-flh="${h}" class="${flView.hours === h ? "on" : ""}">${l}</button>`).join("")}</div>
+      <div class="small muted fl-h">Flows</div>
+      ${[["all", "All flows"], ["blocked", "Blocked (region blocking)"]].map(([k, l]) => `<label class="chk"><input type="radio" name="flView" value="${k}" ${flView.view === k ? "checked" : ""}> ${l}</label>`).join("")}
+      ${Object.keys(flView.f).length ? `<div class="small muted fl-h">Filters</div><div class="rg-chips">${Object.entries(flView.f).map(([k, v]) =>
+        `<span class="rg-chip">${esc((FL_FILTERS.find((f) => f[0] === k) || [k, k])[1])}: ${esc(k === "proto" ? ({ 6: "TCP", 17: "UDP", 1: "ICMP" }[v] || v) : v)}<button type="button" class="rg-x" data-flclear="${k}" aria-label="Remove filter">×</button></span>`).join("")}</div>
+        <button class="linkish small" type="button" id="flClear">Clear filters</button>` : `<p class="small muted">Click a client, destination, country, service… to filter on it.</p>`}
+      <div class="fl-h"><a class="btn small" href="/api/devices/${d.id}/flows.csv?${qs}" download>Download CSV</a></div>
+      <div class="small muted fl-h">${esc(ago2)}</div>
+      ${canWrite() && x.on ? `<button class="linkish small" type="button" id="flOff">Turn Flows off</button>` : ""}
+    </aside>
+    <div class="fl-main">
+      ${blocked ? `<div class="fl-tops">${top("Blocked by country", x.top_country, "country", (t) => `${t.hits} sample${t.hits === 1 ? "" : "s"}`)}</div>
+        <p class="small muted">A sample of what region blocking dropped - its log rules record at most a few dropped connections a minute per router.</p>`
+      : `<div class="fl-tops">${top("Top destinations", x.top_remote, "remote", (t) => flBytes(t.bytes))}${top("Top clients", x.top_local, "local", (t) => flBytes(t.bytes))}
+        ${top("Top countries", x.top_country, "country", (t) => flBytes(t.bytes))}${top("Top organisations", x.top_org, "org", (t) => flBytes(t.bytes))}</div>`}
+      <div class="card"><div class="row"><span class="small muted">${x.count.toLocaleString()} conversation${x.count === 1 ? "" : "s"}${blocked ? "" : ` · ${flBytes(x.total || 0)}`}${x.count > x.rows.length ? ` (top ${x.rows.length} shown)` : ""}</span></div>
+      ${x.rows.length ? `<div class="table-wrap"><table class="fl-table"><thead><tr><th>Client</th><th>Destination</th><th>Service</th><th>Dir.</th>
+          ${blocked ? "<th>Samples</th><th>Action</th>" : "<th>Download</th><th>Upload</th>"}<th>Last</th></tr></thead><tbody>
+        ${x.rows.map((r) => `<tr><td>${chip("local", r.local, r.local_name ? `${esc(r.local_name)} <span class="muted small">${esc(r.local)}</span>` : esc(r.local))}</td>
+          <td>${chip("remote", r.remote, esc(r.remote))}${r.country ? ` ${chip("country", r.country, `<span class="pill fl-cc" title="${esc(r.country_name)}">${esc(r.country)}</span>`)}` : ""}
+            ${r.org ? `<div class="small">${chip("org", r.org, `<span class="muted">${esc(r.org)}</span>`)}</div>` : ""}</td>
+          <td class="small">${r.port ? chip("port", r.port, esc(r.service)) : esc(r.service)} <span class="muted">${chip("proto", r.proto, esc(r.proto_name))}</span></td>
+          <td class="small nowrap">${r.dir in dirs && r.dir !== "other" ? chip("dir", r.dir, dirs[r.dir]) : ""}</td>
+          ${blocked ? `<td>${r.hits}</td><td><span class="pill up-failed">Block</span></td>` : `<td class="small nowrap">${flBytes(r.down)}</td><td class="small nowrap">${flBytes(r.up)}</td>`}
+          <td class="small nowrap">${ago(r.last)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="small muted">${x.on && !x.last_seen ? "Nothing yet - records arrive within a minute or two of turning Flows on." : "Nothing matches."}</p>`}</div>
+      ${x.fasttrack && !blocked ? `<p class="small status warn">This router uses FastTrack (MikroTik's default firewall), which skips Traffic Flow after the first
+        packets of each connection - every conversation is listed, but download and upload are far lower than the real traffic. Turning FastTrack off
+        would make them accurate at the cost of much more CPU, so TikManager leaves it alone.</p>` : ""}
+      ${x.geo ? "" : `<p class="small muted">Countries and organisations appear once the IPinfo data is downloaded (Security > Region blocking).</p>`}
+      <p class="small muted">Countries and organisations: IP address data powered by <a href="https://ipinfo.io" target="_blank" rel="noopener">IPinfo</a>.</p>
+    </div></div>`;
+  const again = () => flowsTab(d).catch(() => {});
+  let t;
+  $("flQ").addEventListener("input", (e) => { clearTimeout(t); t = setTimeout(() => { flView.q = e.target.value; again().then(() => { const i = $("flQ"); i?.focus(); i?.setSelectionRange(i.value.length, i.value.length); }); }, 400); });
+  root.querySelectorAll("[data-flh]").forEach((b) => b.addEventListener("click", () => { flView.hours = +b.dataset.flh; again(); }));
+  root.querySelectorAll("[name=flView]").forEach((r) => r.addEventListener("change", () => { flView.view = r.value; again(); }));
+  root.querySelectorAll("[data-flf]").forEach((b) => b.addEventListener("click", () => { flView.f[b.dataset.flf] = b.dataset.flv; again(); }));
+  root.querySelectorAll("[data-flclear]").forEach((b) => b.addEventListener("click", () => { delete flView.f[b.dataset.flclear]; again(); }));
+  $("flClear")?.addEventListener("click", () => { flView.f = {}; again(); });
+  $("flOff")?.addEventListener("click", async (e) => {
+    if (!confirm("Turn Flows off on this router? Its previous Traffic Flow settings are put back; what was collected stays until it ages out.")) return;
+    e.target.disabled = true;
+    try { await post(`/api/devices/${d.id}/flows`, { on: false }); again(); } catch (err) { alert(err.message); e.target.disabled = false; }
+  });
+}
+
 // router page > Routing: BGP (monitored every minute) and OSPF, RIP and the route table (read live when the tab opens)
 async function routingTab(d) {
   const root = $("rtRoot");

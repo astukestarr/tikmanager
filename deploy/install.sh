@@ -172,6 +172,7 @@ ufw allow "$WGPORT/udp" comment 'WireGuard from routers'
 ufw allow 40000:40049/tcp comment 'Winbox relay (each port only for the technician who opened it)'
 ufw allow from "$LAN" to any port 22 proto tcp comment 'SSH from LAN only'
 ufw allow in on wg0 to 10.77.0.1 port 5514 proto udp comment 'Router logs over the tunnel'
+ufw allow in on wg0 to 10.77.0.1 port 2055 proto udp comment 'Flows (IPFIX) over the tunnel'
 ufw --force enable
 
 echo "== fail2ban (SSH)"

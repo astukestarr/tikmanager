@@ -4,6 +4,9 @@ The daily file (~25 MB gzipped CSV, ~4 million networks) is downloaded by the Ti
 boiled down to one merged IPv4 list per country: adjacent networks are joined and written back as the fewest CIDRs, so
 a router holds as few address-list entries as possible. Results live in <data>/geo/ (v4/<cc>.txt + meta.json), so the
 download isn't repeated on restart. IPv6 isn't used yet (RouterOS keeps IPv6 address lists separately).
+
+For showing addresses (Flows), ranges.tsv keeps every IPv4 range with its country and organisation (as_name), adjacent
+rows with the same pair joined; lookup() searches it (loaded on first use, arrays + binary search).
 """
 import csv
 import gzip
@@ -14,6 +17,7 @@ import os
 import shutil
 import threading
 import time
+from bisect import bisect_right
 import urllib.error
 import urllib.request
 from array import array
@@ -35,6 +39,7 @@ class GeoIP:
         self.lock = threading.Lock()
         self.state = {"running": False, "error": None}
         self._cache = {}
+        self._idx = None   # (stamp, starts, ends, cc index, name index, ccs, names) for lookup()
 
     # --- reading -----------------------------------------------------------------------------------------------
     def meta(self):
@@ -64,17 +69,46 @@ class GeoIP:
         self._cache[cc] = (stamp, out)
         return out
 
-    def country_of(self, ip):
-        """The country code an IPv4 address is in ('' if unknown) - for showing, not for blocking (reads the lists)."""
+    def _index(self):
+        stamp = self.meta().get("updated_at")
+        if self._idx and self._idx[0] == stamp:
+            return self._idx
+        starts, ends, ci, ni, ccs, names, cpos, npos = array("I"), array("I"), array("H"), array("I"), [], [], {}, {}
         try:
-            a = ipaddress.ip_address(ip)
+            with open(self.dir / "ranges.tsv", encoding="utf-8") as f:
+                for line in f:
+                    a, b, cc, name = (line.rstrip("\n").split("\t") + ["", "", "", ""])[:4]
+                    starts.append(int(a)); ends.append(int(b))
+                    if cc not in cpos:
+                        cpos[cc] = len(ccs)
+                        ccs.append(cc)
+                    if name not in npos:
+                        npos[name] = len(names)
+                        names.append(name)
+                    ci.append(cpos[cc])
+                    ni.append(npos[name])
+        except OSError:
+            pass
+        self._idx = (stamp, starts, ends, ci, ni, ccs, names)
+        return self._idx
+
+    def lookup(self, ip):
+        """(country code, organisation) for an IPv4 address - ("", "") when unknown or private."""
+        try:
+            n = int(ipaddress.IPv4Address(ip))
         except ValueError:
-            return ""
-        for c in self.countries():
-            for n in self.cidrs(c["code"]):
-                if a in ipaddress.ip_network(n):
-                    return c["code"]
-        return ""
+            return "", ""
+        _, starts, ends, ci, ni, ccs, names = self._index()
+        i = bisect_right(starts, n) - 1
+        if i < 0 or n > ends[i]:
+            return "", ""
+        return ccs[ci[i]], names[ni[i]]
+
+    def country_of(self, ip):
+        return self.lookup(ip)[0]
+
+    def names(self):
+        return {c["code"]: c["name"] for c in self.countries()}
 
     # --- updating ----------------------------------------------------------------------------------------------
     def due(self):
@@ -116,6 +150,9 @@ class GeoIP:
         country's ranges arrive sorted; anything out of order is sorted at the end), then write the fewest CIDRs."""
         starts, ends, names, sorted_ok = {}, {}, {}, {}
         n = 0
+        self.dir.mkdir(parents=True, exist_ok=True)
+        rf = open(self.dir / "ranges.new", "w", encoding="utf-8", newline="\n")
+        cur = None   # [start, end, cc, as_name] being joined
         for row in rows:
             net, cc = (row.get("network") or "").strip(), (row.get("country_code") or "").strip().upper()
             if not net or ":" in net or len(cc) != 2:
@@ -126,6 +163,13 @@ class GeoIP:
                 continue
             n += 1
             a, b = int(ip.network_address), int(ip.broadcast_address)
+            org = (row.get("as_name") or "").replace("\t", " ").replace("\n", " ").strip()[:80]
+            if cur and a == cur[1] + 1 and cur[2] == cc and cur[3] == org:
+                cur[1] = b
+            else:
+                if cur:
+                    rf.write(f"{cur[0]}\t{cur[1]}\t{cur[2]}\t{cur[3]}\n")
+                cur = [a, b, cc, org]
             s, e = starts.setdefault(cc, array("I")), ends.setdefault(cc, array("I"))
             names.setdefault(cc, (row.get("country") or cc).strip())
             if s and a <= e[-1] + 1 and a >= s[-1]:
@@ -136,6 +180,9 @@ class GeoIP:
                     sorted_ok[cc] = False
                 s.append(a)
                 e.append(b)
+        if cur:
+            rf.write(f"{cur[0]}\t{cur[1]}\t{cur[2]}\t{cur[3]}\n")
+        rf.close()
         if n < 1000 and source == "IPinfo Lite":
             raise GeoError("The IPinfo file looked empty - not used.")
         tmp = self.dir / "v4.new"
@@ -164,19 +211,23 @@ class GeoIP:
             os.replace(old, self.dir / "v4.old")
         os.replace(tmp, old)
         shutil.rmtree(self.dir / "v4.old", ignore_errors=True)
+        os.replace(self.dir / "ranges.new", self.dir / "ranges.tsv")
         info = {"updated_at": time.time(), "source": source, "networks": n, "countries": meta}
         (self.dir / "meta.json").write_text(json.dumps(info), encoding="utf-8")
         self._cache.clear()
+        self._idx = None
 
 
 def _demo_rows():
     """Dev mode without a token: a few countries made from real-looking ranges, so the page and the sync can be tried."""
-    demo = {"CN": ("China", ["1.0.1.0/24", "1.0.2.0/23", "1.0.8.0/21", "27.8.0.0/13", "36.96.0.0/11", "42.0.0.0/8"]),
-            "RU": ("Russia", ["2.56.0.0/14", "5.3.0.0/16", "31.13.0.0/16", "37.9.0.0/16", "46.0.0.0/15"]),
-            "IR": ("Iran", ["2.144.0.0/14", "5.22.0.0/17", "31.2.128.0/17"]),
-            "KP": ("North Korea", ["175.45.176.0/22"]),
-            "US": ("United States", ["3.0.0.0/9", "4.0.0.0/9", "8.0.0.0/9", "12.0.0.0/8", "23.0.0.0/12", "34.0.0.0/9", "64.32.38.0/23"]),
-            "CA": ("Canada", ["24.48.0.0/12", "64.56.0.0/14", "99.224.0.0/11"])}
-    for cc, (name, nets) in demo.items():
-        for n in nets:
-            yield {"network": n, "country_code": cc, "country": name}
+    demo = {"CN": ("China", ["1.0.1.0/24", "1.0.2.0/23", "1.0.8.0/21", "27.8.0.0/13", "36.96.0.0/11", "42.0.0.0/8"], "Example Telecom CN"),
+            "RU": ("Russia", ["2.56.0.0/14", "5.3.0.0/16", "31.13.0.0/16", "37.9.0.0/16", "46.0.0.0/15"], "Example Net RU"),
+            "IR": ("Iran", ["2.144.0.0/14", "5.22.0.0/17", "31.2.128.0/17"], "Example ISP IR"),
+            "KP": ("North Korea", ["175.45.176.0/22"], "Example KP"),
+            "US": ("United States", ["3.0.0.0/9", "4.0.0.0/9", "8.0.0.0/9", "12.0.0.0/8", "23.0.0.0/12", "34.0.0.0/9", "64.32.38.0/23"], "Example Cloud US"),
+            "CA": ("Canada", ["24.48.0.0/12", "64.56.0.0/14", "99.224.0.0/11"], "Example Cable CA"),
+            "HK": ("Hong Kong", ["47.240.0.0/14"], "Example Cloud HK"),
+            "DE": ("Germany", ["78.40.0.0/14"], "Example Hosting DE")}
+    rows = [{"network": n, "country_code": cc, "country": name, "as_name": org} for cc, (name, nets, org) in demo.items() for n in nets]
+    rows.sort(key=lambda r: int(ipaddress.IPv4Network(r["network"]).network_address))   # the real file is in address order
+    yield from rows

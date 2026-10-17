@@ -214,6 +214,11 @@ loaded in small batches with a CPU watchdog; routers without the memory for it a
 rules off after a reboot until the list is back. TikManager, your routers and addresses your people actually used are
 never blocked. IP address data powered by [IPinfo](https://ipinfo.io).
 
+**Flows (pilot):** router page > Flows lists conversations through a router - client, destination, country, organisation,
+service, download / upload - with filters, CSV and what region blocking dropped. Opt-in per router (128 MB+): RouterOS
+Traffic Flow (IPFIX) to TikManager over the tunnel (UDP 2055), 10-minute summaries kept 7 days. On routers with FastTrack
+the byte counts are low (FastTracked packets skip Traffic Flow).
+
 **RouterOS security:** each router's page says whether MikroTik has released a security fix newer than its RouterOS
 on its channel (read from MikroTik's changelogs) and lists known CVEs for its version (NIST's vulnerability database,
 daily); the Upgrades page badges them, the Security page lists the fleet, and an alert can open a ticket. **What's new**

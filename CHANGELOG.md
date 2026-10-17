@@ -3,6 +3,26 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.4 - 2026-10-16
+
+- **Flows (pilot)** - router page > **Flows**: who on the network talks to what, like UniFi's Insights > Flows. Each
+  conversation with the client (named from DHCP leases), destination, country and organisation (IPinfo Lite), service,
+  direction, download and upload; top destinations, clients, countries and organisations; 1h / 1D / 1W; search; click any
+  client, destination, country, organisation, service, protocol or direction to filter on it; **Download CSV**. **Blocked**
+  shows what region blocking dropped (a sample).
+  - **Opt-in per router**, off by default, and refused on routers with less than 128 MB of memory. Turning it on sets
+    RouterOS Traffic Flow (a 4k-entry cache - about 1 MB - and short timeouts; left as it is if Traffic Flow is already in
+    use) and a target to TikManager's tunnel address, UDP 2055 - over the WireGuard tunnel only. Turning it off puts the
+    router's previous Traffic Flow settings back.
+  - TikManager collects IPFIX / NetFlow v9 and keeps 10-minute summaries for 7 days (at most 4,000 conversations per router
+    per 10 minutes; at most 1.5 million rows per router).
+  - Routers using FastTrack (MikroTik's default firewall) list every conversation, but their byte counts are far too low -
+    FastTracked packets skip Traffic Flow. The tab says so; TikManager doesn't turn FastTrack off.
+  - The server's firewall allows UDP 2055 on the tunnel only (the updater adds the rule).
+- **Region blocking logs a sample of what it drops** (at most 6 connections a minute per router, prefix `tm-geo-`) for
+  Flows > Blocked.
+- The IPinfo data also keeps each range's organisation, for Flows.
+
 ## 2.0.0-beta.3 - 2026-10-16
 
 - **Region blocking can never block TikManager** - the rules are now jumps (new connections on the internet links) into
