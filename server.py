@@ -58,6 +58,7 @@ import vpninv
 import healthdash
 healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManager" uses it
 import compliance
+import dashboards
 import whatsnew
 from f2b import F2b
 from remoteaccess import RemoteAccess, RaError
@@ -962,6 +963,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/rules":
             self.require(tech=True)
             return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
+        if m := re.fullmatch(r"/api/dashboard/(network|security|maintenance)", path):   # Dashboard > Network / Security / Maintenance
+            s = self.require(tech=m.group(1) != "network")
+            where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
+            rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
+                            WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
+            board = m.group(1)
+            out = (dashboards.network(db, rows) if board == "network" else dashboards.maintenance(db, rows) if board == "maintenance"
+                   else dashboards.security(db, rows, geo if geo.meta() else None, autoblock, region))
+            return self.json({**out, "read_at": time.time()})
         if path == "/api/region":   # Security > Region blocking: the country data, one client's policy and its routers
             self.require(tech=True)
             orgs = db.q("SELECT id, name FROM orgs ORDER BY name")

@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.12 - 2026-10-17
+
+- **Dashboards, like Report Center's** - the Dashboard has tabs: **Overview** (as before), **Network** (routers online,
+  internet links and BGP peers down, latency, packet loss, busiest CPUs and memory, links dropping most), **Security**
+  (technicians: failed sign-ins and the top addresses behind them with their country, auto-blocked addresses, what region
+  blocking and known bad networks dropped by country, routers with CVEs, blocking coverage) and **Maintenance**
+  (technicians: backup problems, routers behind on RouterOS, firmware to apply, what's scheduled in the next 7 days,
+  failed upgrades, discontinued models). The last board picked is remembered; `#dashboard/network` etc. link straight
+  to one. Built from what TikManager already stores - nothing extra is read from routers.
+- **Every dashboard tile does something** - click it to jump to its list on the board (highlighted), or to open the page
+  that deals with it (Routers, Blocking...).
+
 ## 2.0.0-beta.11 - 2026-10-17
 
 - **Security has its own heading in the menu**, with **Sign-ins & events** (the old Security page: sign-in attempts,

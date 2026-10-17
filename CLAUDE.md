@@ -76,6 +76,7 @@ on a server: `deploy/push.ps1 -VM user@host` (Windows) or copy the folder and `s
 | Ports and VLANs | `ports.py` (`build`, `plan`, `undo_script`, `apply/keep/undo`), `RouterOS.port_data/br_*`, `portsTab/portEditor/ptChange` in `app.js` |
 | Router logs and log alert rules | `routerlogs.py` (`parse`, `query`, `conditions`), `logsPage/logViewer/logRulesCard` in `app.js` |
 | Webhooks (alert destinations) | `webhooks.py` (`build`, `send_all`, `check_url`), `alerts._hooks`, `webhooksCard/webhookDialog` in `app.js` |
+| Dashboard boards | `dashboards.py` (`network`, `security`, `maintenance`), `dashboard(board)` / `dash*` / `bindTiles()` in `app.js` |
 | Flows pilot (IPFIX) | `flows.py` (`Parser`, `Flows.add` / `flush` / `query` / `_blocked`, `enable` / `disable`), `traffic_flow*` in `routeros.py`, `flowsTab()` in `app.js` |
 | Region blocking (countries per client) + known bad networks | `threatlists.py` (Spamhaus DROP + FireHOL Level 1), `geoip.py` (IPinfo Lite -> merged per-country lists), `regionblock.py` (`policies`, `effective`, `protected`, `target`, `sync_router`, `_ensure_rules`, `remove`), `cpu_load` / `geo_boot_guard` in `routeros.py`, `regionCard()` in `app.js` |
 | Auto-block (fleet-wide blocklist) | `autoblock.py` (`candidates`, `block`, `release` + `_remove_everywhere`, `push`, `add_rule`, `blocks`), `autoBlockCard()` / `secBlocks()` in `app.js` |

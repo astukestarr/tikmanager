@@ -721,3 +721,19 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .fl-cc { font-size: 11px; padding: 0 6px; }
 .fl-table td { vertical-align: top; }
 .rg-threat { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+/* Dashboard boards (like Report Center's) */
+.dash-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.dash-head h1 { margin: 2px 0; } .dash-head .muted { margin: 0; }
+.eyebrow { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
+.dash-tabs { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.dash-tabs a { padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; }
+.dash-tabs a + a { border-left: 1px solid var(--border); }
+.dash-tabs a.on { background: var(--accent-soft); color: var(--accent); }
+.dash-tabs a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dash-bars { display: flex; flex-direction: column; gap: 6px; }
+.dash-bar { display: grid; grid-template-columns: minmax(120px, 40%) 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
+.dash-bar .bar { width: 100%; }
+.tile-btn { font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
+.tile-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+.tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 0 16px; align-items: start; }

@@ -130,22 +130,138 @@ function setBars(root) {   // widths are set from JS: the security policy doesn'
 }
 
 // --- views ------------------------------------------------------------------------------------------------
-async function dashboard() {
+// Dashboard: boards like Report Center's - Overview, plus Network for everyone and Security / Maintenance for technicians
+// (dashboards.py). The board picked last is remembered per browser; #dashboard/<board> links straight to one.
+const DASH_BOARDS = [["overview", "Overview"], ["network", "Network"], ["security", "Security", "tech"], ["maintenance", "Maintenance", "tech"]];
+async function dashboard(board) {
+  const boards = DASH_BOARDS.filter(([, , who]) => !who || isTech());
+  let saved = null;
+  try { saved = localStorage.getItem("tmBoard"); } catch (e) { /* private window */ }
+  board = boards.some(([b]) => b === board) ? board : boards.some(([b]) => b === saved) ? saved : "overview";
+  try { localStorage.setItem("tmBoard", board); } catch (e) { /* private window */ }
+  const name = boards.find(([b]) => b === board)[1];
+  if (!$("dashBody") || $("main").dataset.board !== board) {
+    $("main").dataset.board = board;
+    $("main").innerHTML = `<div class="dash-head"><div><div class="eyebrow">${esc(name)} dashboard</div><h1>${esc(new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }))}</h1>
+        <p class="muted">${me.org ? esc(me.org) : "All clients"}</p></div>
+      <div class="dash-tabs" role="tablist" aria-label="Dashboards">${boards.map(([b, l]) => `<a role="tab" href="#dashboard/${b}" class="${b === board ? "on" : ""}" aria-selected="${b === board}">${esc(l)}</a>`).join("")}</div></div>
+      <div id="dashBody"><p class="muted">Loading…</p></div>`;
+  }
+  history.replaceState(null, "", `#dashboard/${board}`);
+  if (board === "overview") return dashOverview();
+  const x = await api(`/api/dashboard/${board}`);
+  if (!$("dashBody")) return;
+  ({ network: dashNetwork, security: dashSecurity, maintenance: dashMaintenance })[board](x);
+  bindRows();
+  bindTiles();
+}
+
+// small helpers for the boards. A tile always does something: "@card" scrolls to that card on the board (and flashes it),
+// "view" or "view/arg" opens that page.
+const dTile = (v, l, cls = "", sub = "", act = "") => `<button type="button" class="tile tile-btn ${cls}" data-tact="${esc(act)}" title="${act.startsWith("@") ? "Show the list" : "Open"}">
+  <div class="v">${v}</div><div class="l">${l}</div>${sub ? `<div class="small muted">${sub}</div>` : ""}</button>`;
+const dCard = (title, body, more = "", id = "") => `<div class="card"${id ? ` id="${id}"` : ""}><div class="row"><h2>${title}</h2><span class="spacer"></span>${more}</div>${body}</div>`;
+const dTable = (rows, cols, empty) => rows.length ? `<div class="table-wrap"><table><thead><tr>${cols.map(([, h]) => `<th>${h}</th>`).join("")}</tr></thead><tbody>
+  ${rows.map((r) => `<tr${r.id ? ` class="click" data-dev="${r.id}"` : ""}>${cols.map(([k, , f]) => `<td class="small">${f ? f(r[k], r) : esc(String(r[k] ?? ""))}</td>`).join("")}</tr>`).join("")}
+  </tbody></table></div>` : `<p class="small muted">${empty}</p>`;
+const dRouter = (v, r) => `${r.online === false ? `<span class="dot off"></span>` : ""}${esc(v)}${!me.org && r.org ? ` <span class="muted">${esc(r.org)}</span>` : ""}`;
+const dBars = (items, label, val) => items.length ? `<div class="dash-bars">${items.map((i) => { const max = Math.max(...items.map(val)) || 1;
+  return `<div class="dash-bar"><span>${label(i)}</span><div class="bar"><i data-pct="${Math.round(100 * val(i) / max)}"></i></div><b>${val(i).toLocaleString()}</b></div>`; }).join("")}</div>` : "";
+function bindTiles() {
+  document.querySelectorAll("#main [data-tact]").forEach((b) => b.addEventListener("click", () => {
+    const act = b.dataset.tact;
+    if (act.startsWith("@")) {
+      const c = $(act.slice(1));
+      if (!c) return;
+      c.scrollIntoView({ behavior: "smooth", block: "start" });
+      c.classList.remove("sec-flash"); void c.offsetWidth; c.classList.add("sec-flash");
+    } else if (act) {
+      const [v, ...rest] = act.split("/");
+      go(v, rest.join("/") || undefined);
+    }
+  }));
+}
+
+function dashNetwork(x) {
+  const down = (s) => s ? durShort(Date.now() / 1000 - s) : "";
+  $("dashBody").innerHTML = `<div class="tiles">
+      ${dTile(`${x.online}/${x.total}`, "Routers online", x.online < x.total ? "warn" : "good", "", "routers/router")}
+      ${dTile(x.links_down.length, "Internet links down", x.links_down.length ? "bad" : "good", `of ${x.links_total}`, "@dnLinks")}
+      ${x.bgp_total ? dTile(x.bgp_down.length, "BGP peers down", x.bgp_down.length ? "bad" : "good", `of ${x.bgp_total}`, "@dnBgp") : ""}
+      ${dTile(x.avg_latency != null ? `${x.avg_latency} ms` : "—", "Average latency", "", "last hour", "@dnLat")}
+      ${dTile(x.lossy.length, "Routers with packet loss", x.lossy.length ? "warn" : "good", "last hour", "@dnLoss")}</div>
+    <div class="dash-grid">
+      ${dCard("Internet links down", dTable(x.links_down, [["name", "Router", dRouter], ["link", "Link", (v, r) => `<span class="mono">${esc(v)}</span> <span class="muted">${esc(r.comment)}</span>`], ["since", "Down for", down]], "Every internet link is up."), "", "dnLinks")}
+      ${x.bgp_total ? dCard("BGP peers down", dTable(x.bgp_down, [["name", "Router", dRouter], ["peer", "Peer"], ["remote", "Address", (v) => `<span class="mono">${esc(v)}</span>`], ["since", "Down for", down]], "Every BGP peer is established."), "", "dnBgp") : ""}
+      ${dCard("Highest latency (last hour)", dTable(x.latency, [["name", "Router", dRouter], ["value", "Average", (v) => `${v} ms`]], "No latency readings yet."), "", "dnLat")}
+      ${dCard("Packet loss (last hour)", dTable(x.lossy, [["name", "Router", dRouter], ["value", "Worst", (v) => `${v}%`]], "No packet loss."), "", "dnLoss")}
+      ${dCard("Busiest CPUs (last hour)", dTable(x.cpu, [["name", "Router", dRouter], ["value", "Average", (v) => `<div class="row"><div class="bar"><i data-pct="${v}"></i></div>${v}%</div>`]], "No readings yet."))}
+      ${dCard("Most memory used (last hour)", dTable(x.mem, [["name", "Router", dRouter], ["value", "Average", (v) => `<div class="row"><div class="bar"><i data-pct="${v}"></i></div>${v}%</div>`]], "No readings yet."))}
+      ${dCard("Links dropping most (24 hours)", dTable(x.flaps, [["name", "Router"], ["n", "Times down"]], "No link went down in the last 24 hours."))}
+    </div>`;
+}
+
+function dashSecurity(x) {
+  const cc = (c, n) => c ? `<span class="pill fl-cc" title="${esc(n || c)}">${esc(c)}</span>` : "";
+  const reg = x.region || {};
+  $("dashBody").innerHTML = `<div class="tiles">
+      ${dTile(x.failed_24h.toLocaleString(), "Failed router sign-ins", x.failed_24h ? "warn" : "good", "last 24 hours", "@dsTop")}
+      ${dTile(x.blocked_now, "Addresses auto-blocked", "", "now", "blocking")}
+      ${dTile(x.drops_24h.toLocaleString(), "Drops logged", "", `region ${x.drops_by_kind.geo.toLocaleString()} · known bad ${x.drops_by_kind.threat.toLocaleString()} (sample, 24 h)`, "@dsDrops")}
+      ${dTile(x.cve_routers, "Routers with known CVEs", x.cve_routers ? "bad" : "good", "", "@dsCves")}
+      ${x.flagged.length ? dTile(x.flagged.length, "Flagged as compromised", "bad", "", "@dsCover") : ""}</div>
+    <div class="dash-grid">
+      ${dCard("Top addresses trying to get in (24 hours)", dTable(x.top_ips, [["ip", "Address", (v, r) => `<span class="mono">${esc(v)}</span> ${cc(r.country)}${r.org ? `<div class="muted">${esc(r.org)}</div>` : ""}`],
+        ["n", "Failed"], ["routers", "Routers"], ["last", "Last", (v) => ago(v)]], "No failed sign-ins in the last 24 hours."), `<a class="small" href="#security">Sign-ins &amp; events</a>`, "dsTop")}
+      ${dCard("Dropped by country (24 hours)", dBars(x.drops_by_country, (i) => `${cc(i.code === "??" ? "" : i.code, i.name)} ${esc(i.name)}`, (i) => i.n)
+        || `<p class="small muted">Nothing logged - region blocking and known bad networks log a sample of what they drop (a few a minute per router).</p>`, `<a class="small" href="#blocking">Blocking</a>`, "dsDrops")}
+      ${dCard("Routers with known CVEs", dTable(x.cves, [["name", "Router", dRouter], ["version", "RouterOS"], ["cves", "CVEs"], ["max", "Worst score", (v) => v != null ? `<span class="pill ${v >= 7 ? "up-failed" : "up-sched"}">${v}</span>` : ""]],
+        "No known CVEs for the RouterOS versions in use."), `<a class="small" href="#vulns">Vulnerabilities</a>`, "dsCves")}
+      ${dCard("Blocking coverage", `<p class="small"><b>${reg.region ?? 0}</b> of ${x.clients_total} client${x.clients_total === 1 ? "" : "s"} with region blocking ·
+          <b>${reg.threats ?? 0}</b> blocking known bad networks</p>
+        ${Object.keys(x.region_states).length ? `<p class="small">${Object.entries(x.region_states).map(([k, n]) => `${n} ${esc((RG_STATE[k] || [0, k])[1])}`).join(" · ")}</p>` : ""}
+        ${x.flagged.length ? `<h3>Flagged as possibly compromised</h3>${dTable(x.flagged, [["name", "Router", dRouter]], "")}` : ""}`, `<a class="small" href="#blocking">Set up</a>`, "dsCover")}
+    </div>`;
+}
+
+function dashMaintenance(x) {
+  const t = (v) => v ? new Date(v * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  $("dashBody").innerHTML = `<div class="tiles">
+      ${dTile(x.backup_bad.length, "Backup problems", x.backup_bad.length ? "bad" : "good", "failed or over 2 days old", "@dmBackup")}
+      ${dTile(x.behind.length, "Behind on RouterOS", x.behind.length ? "warn" : "good", `of ${x.total}`, "@dmBehind")}
+      ${dTile(x.firmware.length, "Firmware to apply", x.firmware.length ? "warn" : "good", "after the next restart", "@dmFw")}
+      ${dTile(x.scheduled.length + x.tasks.length, "Scheduled", "", "next 7 days", "@dmSched")}
+      ${dTile(x.failed_upgrades.length, "Failed upgrades", x.failed_upgrades.length ? "bad" : "good", "last 7 days", "@dmFailed")}</div>
+    <div class="dash-grid">
+      ${dCard("Backup problems", dTable(x.backup_bad, [["name", "Router", dRouter], ["last", "Last backup", (v) => v ? ago(v) : "never"], ["error", "Problem", (v) => `<span class="muted">${esc(v)}</span>`]],
+        "Every router has a backup from the last 2 days."), `<a class="small" href="#backups">Backups</a>`, "dmBackup")}
+      ${dCard("Behind on RouterOS", dTable(x.behind.slice(0, 15), [["name", "Router", dRouter], ["version", "Running"], ["latest", "Newest on its channel"]], "Every router runs the newest RouterOS on its channel.")
+        + (x.behind.length > 15 ? `<p class="small muted">${x.behind.length - 15} more on Upgrades.</p>` : ""), `<a class="small" href="#upgrades">Upgrades</a>`, "dmBehind")}
+      ${dCard("Scheduled in the next 7 days", dTable([...x.scheduled.map((u) => ({ ...u, what: `RouterOS ${u.to_version || "upgrade"}${u.status === "held" ? " (held)" : ""}`, when: u.scheduled_at })),
+        ...x.tasks.map((k) => ({ name: k.name, what: `Task (${k.kind})`, when: k.next_run }))].sort((a, b) => a.when - b.when),
+        [["when", "When", t], ["name", "Router / task"], ["what", "What"]], "Nothing scheduled."), `<a class="small" href="#tasks">Tasks</a>`, "dmSched")}
+      ${dCard("Failed upgrades (7 days)", dTable(x.failed_upgrades, [["name", "Router"], ["to_version", "To"], ["finished_at", "When", (v) => ago(v)], ["detail", "Why", (v) => `<span class="muted">${esc(v || "")}</span>`]], "No failed upgrades."), `<a class="small" href="#upgrades">Upgrades</a>`, "dmFailed")}
+      ${dCard("Firmware to apply", dTable(x.firmware, [["name", "Router", dRouter], ["current", "Current"], ["upgrade", "Installed, applies on restart"]], "Firmware matches RouterOS everywhere."), "", "dmFw")}
+      ${dCard("Discontinued models", dTable(x.discontinued, [["name", "Router", dRouter], ["model", "Model"], ["made", "Made"]], "No discontinued models."))}
+    </div>`;
+}
+
+async function dashOverview() {
   const [devices, events] = await Promise.all([api("/api/devices"), api("/api/events")]);
   const adopted = devices.filter((d) => d.state === "adopted");
   const offline = adopted.filter((d) => !d.online);
-  $("main").innerHTML = `<h1>Dashboard</h1><p class="muted">${me.org ? esc(me.org) : "All clients"}</p>
-    <div class="tiles">
-      <div class="tile"><div class="v">${adopted.length}</div><div class="l">Devices</div></div>
-      <div class="tile good"><div class="v">${adopted.length - offline.length}</div><div class="l">Online</div></div>
-      <div class="tile ${offline.length ? "bad" : ""}"><div class="v">${offline.length}</div><div class="l">Offline</div></div>
-      <div class="tile warn"><div class="v">${devices.length - adopted.length}</div><div class="l">Waiting for approval</div></div>
-      ${adopted.some((d) => d.dm_flagged) ? `<div class="tile bad"><div class="v">${adopted.filter((d) => d.dm_flagged).length}</div><div class="l">Flagged as compromised</div></div>` : ""}
+  if (!$("dashBody")) return;
+  $("dashBody").innerHTML = `<div class="tiles">
+      ${dTile(adopted.length, "Devices", "", "", "routers")}
+      ${dTile(adopted.length - offline.length, "Online", "good", "", "routers")}
+      ${dTile(offline.length, "Offline", offline.length ? "bad" : "", "", "@doOffline")}
+      ${dTile(devices.length - adopted.length, "Waiting for approval", "warn", "", devices.length > adopted.length && isTech() ? "@doPending" : "routers")}
+      ${adopted.some((d) => d.dm_flagged) ? dTile(adopted.filter((d) => d.dm_flagged).length, "Flagged as compromised", "bad", "", "@doFlag") : ""}
     </div>
-    ${adopted.some((d) => d.dm_flagged) ? `<div class="card flag-card"><h2>Flagged as possibly compromised</h2>
+    ${adopted.some((d) => d.dm_flagged) ? `<div class="card flag-card" id="doFlag"><h2>Flagged as possibly compromised</h2>
       <p class="small">RouterOS found signs of unauthorized access in their configuration. Open each one for what to do.</p>
       ${table(adopted.filter((d) => d.dm_flagged), ["state", "org", "name", "model", "version", "last_seen"])}</div>` : ""}
-    ${isTech() && devices.length > adopted.length ? `<div class="card"><h2>Waiting for approval</h2>${pendingTable(devices.filter((d) => d.state !== "adopted"))}</div>` : ""}
+    ${isTech() && devices.length > adopted.length ? `<div class="card" id="doPending"><h2>Waiting for approval</h2>${pendingTable(devices.filter((d) => d.state !== "adopted"))}</div>` : ""}
     ${(() => {
       const down = adopted.filter((d) => d.online).flatMap((d) => Object.entries(d.isp_state || {}).filter(([, l]) => !l.up).map(([n, l]) => ({ d, n, l })));
       return down.length ? `<div class="card"><h2>Internet links down</h2><p class="small muted">The router is reachable (another link or the tunnel still works), but this link isn't.</p>
@@ -155,12 +271,13 @@ async function dashboard() {
         </tbody></table></div></div>` : "";
     })()}
     ${lifecycleCard(adopted)}
-    <div class="card"><h2>Offline routers</h2>${offline.length ? table(offline, ["state", "org", "name", "last_seen", "last_error"]) : `<p class="muted">Everything is online.</p>`}</div>
+    <div class="card" id="doOffline"><h2>Offline routers</h2>${offline.length ? table(offline, ["state", "org", "name", "last_seen", "last_error"]) : `<p class="muted">Everything is online.</p>`}</div>
     <div class="card"><h2>Recent events</h2>${events.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Event</th><th>Detail</th></tr></thead><tbody>
       ${events.slice(0, 25).map((e) => `<tr class="click" data-dev="${e.device_id}"><td>${when(e.ts)}</td><td>${esc(e.device)}</td><td>${esc(e.org)}</td>
         <td><span class="pill">${esc(e.kind)}</span></td><td class="muted">${esc(e.detail)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">No events yet.</p>`}</div>`;
   bindRows();
   bindPending();
+  bindTiles();
 }
 
 // Dashboard: discontinued and old routers, oldest first, so replacements can be planned
@@ -5199,7 +5316,7 @@ async function go(v, arg) {
     await (v === "router" ? router(arg) : VIEWS[v](arg));
     // auto-refresh, skipped while someone is typing in a field on the page
     if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || vpnHold || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
-      (v === "router" ? router(arg) : dashboard()).catch(() => {}); }, 30000);
+      (v === "router" ? router(arg) : dashboard(arg)).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => { if (!$("dlg").open) upgradesView().catch(() => {}); }, 20000);
     // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)
     if (v === "health") timer = setInterval(() => { if (hView.busy || document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; healthPage().catch(() => {}); }, 60000);
