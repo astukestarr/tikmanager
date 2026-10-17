@@ -168,7 +168,7 @@ class Flows:
             prev = json.loads(d.get("flows_prev") or "{}")
             restore = {k: v for k, v in prev.items() if v not in (None, "")}
             restore["enabled"] = "yes" if str(prev.get("enabled")) == "true" else "no"
-            self.client(d).traffic_flow_off(restore)
+            self.client(d).traffic_flow_off(restore, self.target_ip(), FLOW_PORT)
         self.db.run("UPDATE devices SET flows_on=0, flows_prev=NULL WHERE id=?", (d["id"],))
         self.devmap_at = 0
         self.db.event(d["id"], d["org_id"], "flows", "Flows turned off - Traffic Flow settings put back")

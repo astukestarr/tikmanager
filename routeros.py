@@ -908,19 +908,28 @@ class RouterOS:
     def traffic_flow(self):
         return self.get("/ip/traffic-flow") or {}
 
+    # Traffic Flow targets have no comment, so TikManager's is the one pointing at its tunnel address and FLOW port
+    def _tf_mine(self, dst, port):
+        return [t for t in self.get("/ip/traffic-flow/target") or []
+                if str(t.get("dst-address") or "").split("/")[0] == dst and str(t.get("port") or "") == str(port)]
+
     def traffic_flow_on(self, settings, dst, port, src):
-        for t in self.get("/ip/traffic-flow/target") or []:
-            if t.get("comment") == "TikManager":
-                self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
-        self._req("PUT", "/ip/traffic-flow/target", {"dst-address": dst, "port": str(port), "version": "ipfix", "src-address": src,
-                                                     "comment": "TikManager"}, timeout=20)
+        for t in self._tf_mine(dst, port):
+            self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
+        body = {"dst-address": dst, "port": str(port), "version": "IPFIX", "src-address": src}
+        try:
+            self._req("PUT", "/ip/traffic-flow/target", body, timeout=20)
+        except RouterError as e:
+            if "unknown parameter" not in str(e):
+                raise
+            body.pop("src-address")   # older RouterOS: the route to the tunnel address picks the tunnel source anyway
+            self._req("PUT", "/ip/traffic-flow/target", body, timeout=20)
         self._req("POST", "/ip/traffic-flow/set", settings, timeout=20)
 
-    def traffic_flow_off(self, restore):
-        for t in self.get("/ip/traffic-flow/target") or []:
-            if t.get("comment") == "TikManager":
-                self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
-        others = [t for t in self.get("/ip/traffic-flow/target") or [] if t.get("comment") != "TikManager"]
+    def traffic_flow_off(self, restore, dst, port):
+        for t in self._tf_mine(dst, port):
+            self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
+        others = self.get("/ip/traffic-flow/target") or []
         if not others and restore.get("enabled") == "no":
             restore = {"enabled": "no"}
         self._req("POST", "/ip/traffic-flow/set", restore, timeout=20)
@@ -1518,7 +1527,7 @@ class SimRouter:
         st["tf"] = {**self.traffic_flow(), **{k: ("true" if v == "yes" else v) for k, v in settings.items()}}
         st["tf_target"] = {"dst-address": dst, "port": str(port), "src-address": src}
 
-    def traffic_flow_off(self, restore):
+    def traffic_flow_off(self, restore, dst=None, port=None):
         st = self._sim()
         st.pop("tf_target", None)
         st["tf"] = {**self.traffic_flow(), **{k: ("true" if v == "yes" else "false" if v == "no" else v) for k, v in restore.items()}}

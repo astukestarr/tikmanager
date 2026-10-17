@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.7 - 2026-10-16
+
+- **Flows: Turn on Flows failed on real routers** with `unknown parameter comment` - RouterOS Traffic Flow targets have
+  no comment. TikManager's target is now recognised by its address and port (TikManager's tunnel address, UDP 2055); the
+  version is sent as `IPFIX`, and if a router doesn't know `src-address` the target is added without it. The failed
+  attempt changed nothing on the router.
+
 ## 2.0.0-beta.6 - 2026-10-16
 
 - **Upgrade now checks for updates first** - when a newer version came out after the last hourly check (e.g. beta.5
