@@ -963,13 +963,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/rules":
             self.require(tech=True)
             return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
-        if m := re.fullmatch(r"/api/dashboard/(network|security|maintenance)", path):   # Dashboard > Network / Security / Maintenance
-            s = self.require(tech=m.group(1) != "network")
+        if m := re.fullmatch(r"/api/dashboard/(network|security|maintenance|mobile)", path):   # Dashboard boards (and the phone dashboard)
+            s = self.require(tech=m.group(1) not in ("network", "mobile"))
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                             WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
             board = m.group(1)
             out = (dashboards.network(db, rows) if board == "network" else dashboards.maintenance(db, rows) if board == "maintenance"
+                   else dashboards.mobile(db, rows, s["kind"] == "tech") if board == "mobile"
                    else dashboards.security(db, rows, geo if geo.meta() else None, autoblock, region))
             return self.json({**out, "read_at": time.time()})
         if path == "/api/region":   # Security > Region blocking: the country data, one client's policy and its routers

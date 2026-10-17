@@ -737,3 +737,26 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .tile-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
 .tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 0 16px; align-items: start; }
+/* the phone dashboard */
+.m-dash { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.m-dash h2 { margin: 10px 0 0; font-size: 16px; scroll-margin-top: calc(var(--stick-top, 60px) + 8px); }
+.m-status { border-radius: 14px; padding: 16px 18px; color: #fff; background: var(--good); }
+.m-status.warn { background: var(--warn); } .m-status.bad { background: var(--bad); }
+.m-big { font-size: 22px; font-weight: 700; }
+.m-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 8px; margin-top: 10px; }
+.m-kpi { font: inherit; color: inherit; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+.m-kpi b { font-size: 20px; } .m-kpi span { font-size: 12px; color: var(--muted); }
+.m-kpi.bad b { color: var(--bad); } .m-kpi.warn b { color: var(--warn); }
+#mQ { width: 100%; font-size: 16px; padding: 12px 14px; border-radius: 12px; }
+.m-list { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.m-row { font: inherit; color: inherit; text-align: left; display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'main right' 'sub right';
+  gap: 2px 10px; padding: 12px 14px; min-height: 48px; background: none; border: 0; border-top: 1px solid var(--border); cursor: pointer; }
+.m-row:first-child { border-top: 0; } .m-row:active { background: var(--accent-soft); }
+.m-main { grid-area: main; font-weight: 600; } .m-sub { grid-area: sub; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.m-right { grid-area: right; align-self: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.bad-t { color: var(--bad); } .warn-t { color: var(--warn); }
+.m-foot { text-align: center; margin: 8px 0 24px; }
+[data-mode="dark"] .m-status { color: #0f1319; }
+@media (prefers-color-scheme: dark) { [data-mode="system"] .m-status { color: #0f1319; } }
+.m-sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }

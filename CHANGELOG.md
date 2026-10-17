@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.13 - 2026-10-17
+
+- **Phone dashboard** - on a phone (a screen up to 700 px wide) the Dashboard opens a version made for it: a green /
+  amber / red banner (**All good** or **N need attention**), Online / Offline / Alerts / Issues buttons, a search box to
+  find a router by name, client, site or address, **Needs attention** worst first (possibly compromised, offline,
+  internet links and BGP peers down, backup problems) - each one tap from its router page - open alerts and recent
+  events. Refreshed every 30 seconds (not while typing). **Full dashboards** at the bottom switches that phone to the
+  normal boards; **Phone view** on the tabs switches back. Works for client users too (their own routers; alerts and
+  backups are for technicians).
+
 ## 2.0.0-beta.12 - 2026-10-17
 
 - **Dashboards, like Report Center's** - the Dashboard has tabs: **Overview** (as before), **Network** (routers online,

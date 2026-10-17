@@ -31,6 +31,9 @@ SLIDES_2_0 = [
     {"id": "dashboards", "title": "Dashboards", "img": None, "view": "dashboard", "who": "tech",
      "text": "The Dashboard has tabs, like Report Center: Overview, Network, Security and Maintenance. Click any tile to jump "
              "to its list or open the page that deals with it."},
+    {"id": "phone", "title": "A dashboard for your phone", "img": None, "view": "dashboard", "who": "all",
+     "text": "Open TikManager on a phone and the Dashboard shows what needs attention, worst first, with a router search - "
+             "one tap to any router. Full dashboards at the bottom switches back to the normal boards."},
     {"id": "security-menu", "title": "Security has its own menu", "img": None, "view": "blocking", "who": "tech",
      "text": "Security > Sign-ins & events, Blocking, Vulnerabilities and Compliance. Monitoring > Performance & security is "
              "now Router health."},

@@ -116,3 +116,37 @@ def maintenance(db, rows, now=None):
           for r in rows if r.get("lc_status") == "discontinued"]
     return {"total": len(rows), "backup_bad": backup_bad, "behind": behind, "firmware": firmware, "scheduled": sched, "tasks": tasks,
             "failed_upgrades": failed_up, "discontinued": lc}
+
+def mobile(db, rows, tech, now=None):
+    """The phone dashboard: counts, and one list of what needs attention - worst first, each a tap away from its router."""
+    now = now or time.time()
+    ids = [r["id"] for r in rows]
+    ph = ",".join("?" * len(ids)) or "NULL"
+    items = []
+    add = lambda r, level, what, detail="", since=None: items.append({**_brief(r), "level": level, "what": what, "detail": detail, "since": since})
+    for r in rows:
+        if r.get("dm_flagged"):
+            add(r, 0, "Possibly compromised", "RouterOS found signs of unauthorized access")
+        if not r["online"]:
+            add(r, 1, "Offline", r.get("last_error") or "", r.get("last_seen"))
+            continue
+        for n, l in (json.loads(r.get("isp_state") or "{}") or {}).items():
+            if not l.get("up"):
+                add(r, 1, "Internet link down", n + (f" ({l['comment']})" if l.get("comment") else ""), l.get("since"))
+        for n, p in (json.loads(r.get("bgp_state") or "null") or {}).items():
+            if not p.get("up"):
+                add(r, 1, "BGP peer down", f"{n} {p.get('remote') or ''}".strip(), p.get("since"))
+        if tech and (r.get("last_backup_error") or (r.get("last_backup_at") and now - r["last_backup_at"] > BACKUP_STALE)):
+            add(r, 3, "Backup problem", r.get("last_backup_error") or "no backup for over 2 days", r.get("last_backup_at"))
+    alerts = []
+    if tech and ids:
+        alerts = db.q(f"""SELECT a.title, a.detail, a.opened_at, a.device_id AS id, d.name, o.name AS org FROM alerts a
+                          LEFT JOIN devices d ON d.id = a.device_id LEFT JOIN orgs o ON o.id = a.org_id
+                          WHERE a.resolved_at IS NULL AND (a.device_id IN ({ph}) OR a.device_id IS NULL) ORDER BY a.opened_at DESC LIMIT 20""", ids)
+    items.sort(key=lambda i: (i["level"], -(i["since"] or 0)))
+    events = db.q(f"""SELECT e.ts, e.kind, e.detail, e.device_id AS id, d.name FROM events e JOIN devices d ON d.id = e.device_id
+                      WHERE e.device_id IN ({ph}) ORDER BY e.ts DESC LIMIT 15""", ids) if ids else []
+    return {"online": sum(1 for r in rows if r["online"]), "total": len(rows), "attention": items[:50], "attention_count": len(items),
+            "alerts": alerts, "events": events,
+            "routers": [{"id": r["id"], "name": r["name"], "org": r.get("org") or "", "online": bool(r["online"]), "site": r.get("site") or "",
+                         "ip": r.get("wan_ip") or r.get("public_ip") or "", "model": r.get("model") or ""} for r in rows]}

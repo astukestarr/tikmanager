@@ -133,7 +133,14 @@ function setBars(root) {   // widths are set from JS: the security policy doesn'
 // Dashboard: boards like Report Center's - Overview, plus Network for everyone and Security / Maintenance for technicians
 // (dashboards.py). The board picked last is remembered per browser; #dashboard/<board> links straight to one.
 const DASH_BOARDS = [["overview", "Overview"], ["network", "Network"], ["security", "Security", "tech"], ["maintenance", "Maintenance", "tech"]];
+// Phones get their own dashboard (dashMobile): a narrow screen, unless the person picked the full dashboards there.
+// tmMobile: "off" = full dashboards on this phone; anything else = automatic.
+const phoneScreen = () => matchMedia("(max-width: 700px)").matches;
+const mobilePref = () => { try { return localStorage.getItem("tmMobile") || "auto"; } catch (e) { return "auto"; } };
+const setMobilePref = (v) => { try { localStorage.setItem("tmMobile", v); } catch (e) { /* private window */ } };
+const mobileView = () => phoneScreen() && mobilePref() !== "off";
 async function dashboard(board) {
+  if (board === "mobile" || (mobileView() && !board)) return dashMobile();
   const boards = DASH_BOARDS.filter(([, , who]) => !who || isTech());
   let saved = null;
   try { saved = localStorage.getItem("tmBoard"); } catch (e) { /* private window */ }
@@ -144,16 +151,71 @@ async function dashboard(board) {
     $("main").dataset.board = board;
     $("main").innerHTML = `<div class="dash-head"><div><div class="eyebrow">${esc(name)} dashboard</div><h1>${esc(new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }))}</h1>
         <p class="muted">${me.org ? esc(me.org) : "All clients"}</p></div>
-      <div class="dash-tabs" role="tablist" aria-label="Dashboards">${boards.map(([b, l]) => `<a role="tab" href="#dashboard/${b}" class="${b === board ? "on" : ""}" aria-selected="${b === board}">${esc(l)}</a>`).join("")}</div></div>
+      <div class="dash-tabs" role="tablist" aria-label="Dashboards">${boards.map(([b, l]) => `<a role="tab" href="#dashboard/${b}" class="${b === board ? "on" : ""}" aria-selected="${b === board}">${esc(l)}</a>`).join("")}
+        ${phoneScreen() ? `<a href="#dashboard/mobile" id="toMobile">Phone view</a>` : ""}</div></div>
       <div id="dashBody"><p class="muted">Loading…</p></div>`;
   }
   history.replaceState(null, "", `#dashboard/${board}`);
+  $("toMobile")?.addEventListener("click", () => setMobilePref("auto"));
   if (board === "overview") return dashOverview();
   const x = await api(`/api/dashboard/${board}`);
   if (!$("dashBody")) return;
   ({ network: dashNetwork, security: dashSecurity, maintenance: dashMaintenance })[board](x);
   bindRows();
   bindTiles();
+}
+
+// The phone dashboard: is everything OK, find a router, what needs attention (worst first, one tap to the router),
+// open alerts and recent events. Refreshed every 30 seconds like the others (not while typing in the search box).
+const mView = { q: "" };
+async function dashMobile() {
+  const x = await api("/api/dashboard/mobile");
+  const fresh = !$("mDash");
+  if (fresh) {
+    $("main").dataset.board = "mobile";
+    $("main").innerHTML = `<div class="m-dash" id="mDash"><div id="mStatus"></div>
+      <input id="mQ" type="search" placeholder="Find a router, client or address" aria-label="Find a router" value="${esc(mView.q)}" autocomplete="off">
+      <div id="mFound"></div><div id="mBody"></div>
+      <p class="m-foot"><button class="linkish small" type="button" id="mFull">Full dashboards</button></p></div>`;
+    $("mQ").addEventListener("input", (e) => { mView.q = e.target.value; found(); });
+    $("mFull").addEventListener("click", () => { setMobilePref("off"); go("dashboard", "overview"); });
+  }
+  history.replaceState(null, "", "#dashboard/mobile");
+  const bad = x.attention.filter((i) => i.level <= 1).length;
+  const since = (t) => t ? ago(t) : "";
+  const level = ["bad", "bad", "warn", "warn"];
+  $("mStatus").innerHTML = `<div class="m-status ${x.attention_count ? (bad ? "bad" : "warn") : "good"}">
+      <div class="m-big">${x.attention_count ? `${x.attention_count} need${x.attention_count === 1 ? "s" : ""} attention` : "All good"}</div>
+      <div class="small">${x.online} of ${x.total} online${me.org ? ` · ${esc(me.org)}` : ""}</div></div>
+    <div class="m-kpis">
+      <button type="button" class="m-kpi" data-mgo="routers"><b>${x.online}/${x.total}</b><span>Online</span></button>
+      <button type="button" class="m-kpi ${x.total - x.online ? "bad" : ""}" data-mjump="mAttn"><b>${x.total - x.online}</b><span>Offline</span></button>
+      ${isTech() ? `<button type="button" class="m-kpi ${x.alerts.length ? "bad" : ""}" data-mjump="mAlerts"><b>${x.alerts.length}</b><span>Alerts</span></button>` : ""}
+      <button type="button" class="m-kpi ${x.attention_count ? "warn" : ""}" data-mjump="mAttn"><b>${x.attention_count}</b><span>Issues</span></button></div>`;
+  const row = (r, main, sub, right, cls = "") => `<button type="button" class="m-row ${cls}" ${r.id ? `data-mdev="${r.id}"` : ""}>
+      <span class="m-main">${main}</span><span class="m-sub">${sub}</span><span class="m-right">${right}</span></button>`;
+  $("mBody").innerHTML = `
+    <h2 id="mAttn">Needs attention</h2>
+    ${x.attention.length ? `<div class="m-list">${x.attention.map((i) => row(i, `<span class="dot ${i.level <= 1 ? "off" : "pending"}"></span>${esc(i.name)}`,
+        `<b class="${level[i.level]}-t">${esc(i.what)}</b>${i.detail ? ` · ${esc(i.detail)}` : ""}${!me.org && i.org ? ` · ${esc(i.org)}` : ""}`, since(i.since))).join("")}</div>`
+      : `<p class="small muted">Nothing needs attention.</p>`}
+    ${isTech() ? `<h2 id="mAlerts">Open alerts</h2>${x.alerts.length ? `<div class="m-list">${x.alerts.map((a) => row(a, esc(a.title), `${esc(a.name || a.org || "")}${a.detail ? ` · ${esc(a.detail)}` : ""}`, since(a.opened_at))).join("")}</div>`
+      : `<p class="small muted">No open alerts.</p>`}` : ""}
+    <h2>Recent events</h2>
+    ${x.events.length ? `<div class="m-list">${x.events.map((e) => row(e, esc(e.name), `<span class="pill">${esc(e.kind)}</span> ${esc(e.detail || "")}`, since(e.ts))).join("")}</div>`
+      : `<p class="small muted">No events yet.</p>`}`;
+  const found = () => {
+    const q = mView.q.trim().toLowerCase();
+    $("mFound").innerHTML = q ? `<div class="m-list m-found">${x.routers.filter((r) => `${r.name} ${r.org} ${r.site} ${r.ip} ${r.model}`.toLowerCase().includes(q)).slice(0, 12)
+      .map((r) => row(r, `<span class="dot ${r.online ? "on" : "off"}"></span>${esc(r.name)}`, esc([r.org, r.site, r.ip].filter(Boolean).join(" · ")), "›")).join("")
+      || `<p class="small muted">No router matches.</p>`}</div>` : "";
+    bind($("mFound"));
+  };
+  const bind = (root) => root.querySelectorAll("[data-mdev]").forEach((b) => b.addEventListener("click", () => go("router", b.dataset.mdev)));
+  found();
+  bind($("mBody"));
+  $("mStatus").querySelectorAll("[data-mgo]").forEach((b) => b.addEventListener("click", () => go(b.dataset.mgo)));
+  $("mStatus").querySelectorAll("[data-mjump]").forEach((b) => b.addEventListener("click", () => $(b.dataset.mjump)?.scrollIntoView({ behavior: "smooth", block: "start" })));
 }
 
 // small helpers for the boards. A tile always does something: "@card" scrolls to that card on the board (and flashes it),
