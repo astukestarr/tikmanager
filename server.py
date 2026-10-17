@@ -45,6 +45,8 @@ from mailer import Mailer, MailError
 from lifecycle import Lifecycle
 from rossec import RosSecurity
 from autoblock import AutoBlock
+from geoip import GeoError, GeoIP
+from regionblock import RegionBlock, RegionError
 from devkind import kind as device_kind, KINDS as DEVICE_KINDS
 from routerlogs import RouterLogs, SEVERITIES as LOG_SEVERITIES
 from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
@@ -141,6 +143,8 @@ alerts.webhooks = Webhooks(db, backups.vault)   # alerts to Slack, Discord, ntfy
 lifecycle = Lifecycle(db, settings.data_dir, thumbs)   # router age and discontinued models (from mikrotik.com)
 rossec = RosSecurity(db, settings.data_dir)   # known CVEs and missed MikroTik security releases per router
 autoblock = AutoBlock(db, settings, poller.client, secev)   # addresses guessing router passwords: blocked on every router
+geo = GeoIP(settings.data_dir, lambda: integ.config("ipinfo").get("token", ""), dev=settings.dev)   # IPinfo Lite, per country
+region = RegionBlock(db, settings, poller.client, geo, autoblock)   # region (country) blocking per client
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -551,7 +555,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(rows)
         if path == "/api/integrations":
             self.require(tech=True, admin=True)
-            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"), "mail": integ.public("mail"),
+            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"), "mail": integ.public("mail"), "ipinfo": integ.public("ipinfo"),
                               "itg_last_sync": json.loads(db.setting("itg_last_sync") or "null"), "itg_sync": integ.sync_state,
                               # set up elsewhere, shown on the Integrations page too
                               "teams": {"configured": integ.configured("teams")}, "webhooks": {"count": len(alerts.webhooks.public())},
@@ -923,6 +927,42 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/rules":
             self.require(tech=True)
             return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
+        if path == "/api/region":   # Security > Region blocking: the country data, one client's policy and its routers
+            self.require(tech=True)
+            orgs = db.q("SELECT id, name FROM orgs ORDER BY name")
+            pols = region.policies()
+            try:
+                oid = int(q.get("org") or 0)
+            except ValueError:
+                oid = 0
+            if not oid and orgs:
+                oid = next((o["id"] for o in orgs if pols.get(str(o["id"]), {}).get("enabled")), orgs[0]["id"])
+            pol = pols.get(str(oid))
+            n, sizes = None, {}
+
+            def size(p):   # entries on a router for this (effective) policy
+                k = tuple(p["countries"])
+                if k not in sizes:
+                    sizes[k] = len(region.target(p)) if p["countries"] else 0
+                return sizes[k]
+            if pol and pol.get("countries") and geo.meta():
+                n = size(pol)
+            routers = []
+            for d in db.q("SELECT * FROM devices WHERE state='adopted' AND org_id=? ORDER BY name", (oid,)):
+                st = region.state(d["id"]) or {}
+                eff = region.effective(pol, d["id"]) if pol else None
+                rn = size(eff) if eff and geo.meta() else n
+                routers.append({"id": d["id"], "name": d["name"], "online": d["online"], "model": d.get("model"), "mem_total": d.get("mem_total"),
+                                "mem_used": d.get("mem_used"), "wans": region.wans(d), "skip": d["id"] in ((pol or {}).get("skip") or []),
+                                "fits": region.capacity(d, rn)[0] if rn else None, "let_through": ((pol or {}).get("router_allow") or {}).get(str(d["id"])) or [],
+                                **{k: st.get(k) for k in ("state", "detail", "entries", "hits", "synced_at", "checked_at")}})
+            meta = geo.meta()
+            return self.json({"orgs": [{"id": o["id"], "name": o["name"], "on": bool(pols.get(str(o["id"]), {}).get("enabled"))} for o in orgs],
+                              "org_id": oid, "policy": pol, "entries": n, "routers": routers, "countries": geo.countries(),
+                              "geo": {"updated_at": meta.get("updated_at"), "source": meta.get("source"), "networks": meta.get("networks"),
+                                      "running": geo.state["running"], "error": geo.state["error"], "token_set": bool(integ.config("ipinfo").get("token")),
+                                      "dev": settings.dev},
+                              "running": region.running, "bytes_per_entry": 600, "ram_share": 0.25})
         if path == "/api/security/autoblock":   # auto-block settings, candidates, blocked addresses, routers without the drop rule
             self.require(tech=True)
             return self.json(autoblock.info())
@@ -2328,6 +2368,46 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "webhook saved", h["name"], self.client_ip(), detail=h["format"])
             return self.json({"ok": True, "id": h["id"]})
+        if path == "/api/region/token":   # {token}: the IPinfo Lite token (stored encrypted, never sent back)
+            s = self.require(tech=True, admin=True)
+            integ.save("ipinfo", {"token": str(self.body().get("token") or "").strip(), "clear": ["token"] if self.body().get("clear") else []})
+            db.audit(s["email"], "integration settings changed", "IPinfo (region blocking)", self.client_ip())
+            if integ.config("ipinfo").get("token"):
+                threading.Thread(target=lambda: geo.update() if not geo.state["running"] else None, daemon=True, name="geo-update").start()
+            return self.json({"ok": True})
+        if path == "/api/region/update":   # download the country data now (background)
+            s = self.require(tech=True, admin=True)
+            if not integ.config("ipinfo").get("token") and not settings.dev:
+                raise HttpError(400, "Add your IPinfo Lite token first (free at ipinfo.io).")
+            if not geo.state["running"]:
+                def run():
+                    try:
+                        geo.update()
+                        region.kick()
+                    except GeoError:
+                        pass   # shown on the page (geo.state)
+                threading.Thread(target=run, daemon=True, name="geo-update").start()
+            return self.json({"ok": True})
+        if path == "/api/region/policy":   # {org_id, enabled, mode, direction, countries, skip, exceptions}
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            org = db.one("SELECT id, name FROM orgs WHERE id=?", (int(b.get("org_id") or 0),))
+            if not org:
+                raise HttpError(400, "Client not found.")
+            if not geo.countries():
+                raise HttpError(400, "The country data hasn't been downloaded yet.")
+            try:
+                pol = region.save_policy(org["id"], b)
+            except RegionError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "region blocking", org["name"], self.client_ip(),
+                     detail=f"{'on' if pol['enabled'] else 'off'}: {pol['mode']} {','.join(pol['countries'])} ({pol['direction']})")
+            region.kick(org["id"])
+            return self.json({"ok": True, "policy": pol})
+        if path == "/api/region/sync":   # {org_id}: bring this client's routers in line now
+            self.require(tech=True, write=True)
+            region.kick(int(self.body().get("org_id") or 0) or None)
+            return self.json({"ok": True})
         if path == "/api/security/autoblock/settings":
             s = self.require(tech=True, admin=True)
             try:
@@ -2733,6 +2813,7 @@ def main():
     wgport.start_loop()
     alerts.start()
     unifi.start()
+    region.start()
     lifecycle.start()
     rossec.start()
     autoblock.start()

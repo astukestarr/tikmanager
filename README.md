@@ -207,6 +207,13 @@ address and isn't affected. **Unblock** (Top addresses, or Auto-block > Blocked 
 the routers in the background. Non-public addresses, TikManager, your routers and a whitelist are never blocked. Off
 until an administrator turns it on.
 
+**Region blocking:** per client, Block or Allow only a list of countries - Incoming, Outgoing or Both - on its routers,
+with per-router exceptions (leave a router out, or let some countries through on it). Country data is IPinfo Lite (free
+token; downloaded daily by TikManager, never by routers). The `tikmanager-geo` address list lives in router RAM only and is
+loaded in small batches with a CPU watchdog; routers without the memory for it are skipped; a startup scheduler keeps the
+rules off after a reboot until the list is back. TikManager, your routers and addresses your people actually used are
+never blocked. IP address data powered by [IPinfo](https://ipinfo.io).
+
 **RouterOS security:** each router's page says whether MikroTik has released a security fix newer than its RouterOS
 on its channel (read from MikroTik's changelogs) and lists known CVEs for its version (NIST's vulnerability database,
 daily); the Upgrades page badges them, the Security page lists the fleet, and an alert can open a ticket. **What's new**

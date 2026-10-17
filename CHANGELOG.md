@@ -3,6 +3,32 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.1 - 2026-10-16
+
+TikManager 2 - a new major version for a big new feature. **No manual steps**: existing data and settings keep working,
+upgrade with the button (beta channel).
+
+- **Region blocking** (Security > Region blocking) - per client, like UniFi's: **Block** or **Allow only** a list of
+  countries, **Incoming** (from the internet to the router and its port forwards - the default), **Outgoing** (from the
+  client's network out, with a warning: big services answer from all over the world) or **Both**.
+  - Country data from **IPinfo Lite** (free token from ipinfo.io, entered on the Security page or Admin > Integrations and
+    stored encrypted). TikManager downloads it daily and merges each country into the fewest networks; routers never
+    download anything. IPv4 only for now.
+  - **Never blocked**: TikManager's server, every router's own addresses, addresses your people used in the last 90 days
+    (TikManager and router sign-ins, remote access), the auto-block whitelist and the client's own exceptions - cut out
+    of the list in Block mode, added to it in Allow mode.
+  - **Per router**: leave a router out, or **let countries through** on just that router (Block: left off its list;
+    Allow: added to it).
+  - **Safe on small routers**: one address list (`tikmanager-geo`) whose entries have a timeout, so it lives in RAM only
+    (no flash writes, not in exports or backups; renewed weekly); loaded 150 entries at a time with pauses, slowing down
+    when the CPU is busy and pausing above 85%; later changes send only the differences. A router where the list would
+    take more than a quarter of its free memory is skipped (shown per router). Rules are firewall filter rules with
+    `connection-state=new` on the internet links, so replies and TikManager's tunnel aren't touched.
+  - **After a restart** the list is gone (RAM only), so a startup scheduler disables the region rules until TikManager
+    has loaded it again - Allow mode can't lock everyone out.
+  - Per router: status (loading, active, paused, not enough memory), entries, packets dropped; router events and the
+    audit log record each change.
+
 ## 1.46.1 - 2026-10-16
 
 The full release of 1.46.1-beta.1 to beta.5 - a patch with new monitoring: existing data and settings keep working,

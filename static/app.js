@@ -1250,6 +1250,8 @@ const INTEGRATIONS = [
     about: "Alerts to Slack, Discord, ntfy or any HTTPS endpoint (Alerts page)." },
   { id: "ubnt", name: "UniFi & UISP", cat: "Network", color: "#006fff",
     about: "UniFi (unifi.ui.com) and UISP sites and devices - your accounts and clients' own - each site assigned to a client." },
+  { id: "ipinfo", name: "IPinfo", cat: "Security", color: "#3f65f5", link: "region",
+    about: "Country data (IPinfo Lite, free) for region blocking - set up on the Security page." },
   { id: "github", name: "GitHub script library", cat: "Scripts", color: "#24292f", test: true,
     about: "Browse the community RouterOS script library; share scripts with a token." },
   { id: "offsite", name: "Off-site backup", cat: "Backup", color: "#2e9d5b", link: "system",
@@ -1291,6 +1293,7 @@ async function adminIntegrations() {
     document.querySelectorAll("[data-iopen]").forEach((b) => b.addEventListener("click", () => {
       const x = INTEGRATIONS.find((y) => y.id === b.dataset.iopen);
       if (x.link === "alerts") return go("alerts");
+      if (x.link === "region") return go("security").then?.(() => setTimeout(() => $("rgCard")?.scrollIntoView({ block: "start" }), 600));
       if (x.link === "system") return admin("system").then(() => setTimeout(() => (x.id === "offsite" ? $("offCard") : $("cfDomains")?.closest(".card"))?.scrollIntoView({ block: "start" }), 400));
       intView.open = x.id;
       adminIntegrations();
@@ -3779,6 +3782,124 @@ async function autoBlockCard() {
   });
 }
 
+// Security page > Region blocking (regionblock.py): per client, Block or Allow countries, incoming / outgoing / both - like UniFi's
+const rgView = { org: null, draft: null, msg: "" };
+const RG_STATE = { off: ["", "off"], loading: ["up-run", "loading"], synced: ["up-done", "active"], paused: ["up-sched", "paused (busy CPU)"],
+  waiting: ["up-sched", "waiting"], too_big: ["up-failed", "not enough memory"], error: ["up-failed", "error"] };
+async function regionCard() {
+  let x;
+  try { x = await api(`/api/region${rgView.org ? `?org=${rgView.org}` : ""}`); }
+  catch (e) { if ($("rgCard")) $("rgCard").innerHTML = `<h2>Region blocking</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  if (!$("rgCard")) return;
+  if (rgView.org !== x.org_id || !rgView.draft) {
+    rgView.org = x.org_id;
+    const p = x.policy || {};
+    rgView.draft = { enabled: !!p.enabled, mode: p.mode || "block", direction: p.direction || "incoming", countries: [...(p.countries || [])],
+      skip: [...(p.skip || [])], exceptions: (p.exceptions || []).join("\n"), router_allow: { ...(p.router_allow || {}) } };
+  }
+  const dr = rgView.draft, admin = me.role === "admin", g = x.geo;
+  const byCode = Object.fromEntries(x.countries.map((c) => [c.code, c]));
+  const est = dr.countries.reduce((n, c) => n + (byCode[c]?.entries || 0), 0);
+  const mb = (n) => `${(n * x.bytes_per_entry / 1e6).toFixed(n * x.bytes_per_entry < 1e7 ? 1 : 0)} MB`;
+  const dirty = JSON.stringify(dr) !== JSON.stringify((() => { const p = x.policy || {}; return { enabled: !!p.enabled, mode: p.mode || "block",
+    direction: p.direction || "incoming", countries: [...(p.countries || [])], skip: [...(p.skip || [])], exceptions: (p.exceptions || []).join("\n"),
+    router_allow: { ...(p.router_allow || {}) } }; })());
+  const seg = (id, val, opts) => `<div class="seg" role="group" id="${id}">${opts.map(([k, l]) => `<button type="button" data-v="${k}" class="${val === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  const data = g.updated_at ? `${esc(g.source)} · updated ${ago(g.updated_at)} · ${(g.networks || 0).toLocaleString()} networks, ${x.countries.length} countries`
+    : g.token_set || g.dev ? "not downloaded yet" : "needs an IPinfo Lite token (free)";
+  $("rgCard").innerHTML = `<div class="row"><h2>Region blocking</h2><span class="pill ${x.policy?.enabled ? "ab-on" : ""}">${x.policy?.enabled ? `${x.policy.mode === "allow" ? "Allow only" : "Block"} · ${x.policy.countries.length} countr${x.policy.countries.length === 1 ? "y" : "ies"}` : "Off"}</span>
+      <span class="spacer"></span><label class="field rg-org">Client <select id="rgOrg">${x.orgs.map((o) => `<option value="${o.id}" ${o.id === x.org_id ? "selected" : ""}>${esc(o.name)}${o.on ? " ●" : ""}</option>`).join("")}</select></label></div>
+    <p class="small muted">Drop new connections from (or to) whole countries on this client's routers. Replies and connections already open aren't touched, nor is
+      TikManager's tunnel. Never blocked: TikManager, the routers' own addresses, addresses your people actually used in the last 90 days (sign-ins,
+      remote access) and the auto-block whitelist. The list lives in each router's memory only (no flash writes, not in backups) and is loaded a little at a
+      time; a router where it would take more than a quarter of its free memory is skipped.</p>
+    <div class="rg-data small"><span>Country data: ${data}</span>
+      ${g.running ? `<span class="status">Downloading…</span>` : ""}${g.error ? `<span class="status err">${esc(g.error)}</span>` : ""}
+      ${admin && (g.token_set || g.dev) && !g.running ? `<button class="btn small" type="button" id="rgUpdate">Update now</button>` : ""}</div>
+    ${admin ? `<details class="rg-token" ${g.token_set || g.dev ? "" : "open"}><summary class="small">IPinfo token ${g.token_set ? "(saved)" : ""}</summary>
+      <p class="small muted">Sign up free at <a href="https://ipinfo.io/signup" target="_blank" rel="noopener">ipinfo.io</a>, then copy the token from your
+        dashboard. TikManager downloads IPinfo Lite once a day (about 25 MB) - your routers never download anything.</p>
+      <div class="row"><input id="rgToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="${g.token_set ? "saved - leave blank to keep" : "token"}">
+        <button class="btn" type="button" id="rgTokenSave">Save token</button><span class="status small" id="rgTokenMsg"></span></div></details>` : ""}
+    ${x.countries.length ? `
+    <label class="chk rg-on"><input type="checkbox" id="rgEnabled" ${dr.enabled ? "checked" : ""} ${canWrite() ? "" : "disabled"}> Region blocking on for this client</label>
+    <div class="rg-grid">
+      <div><div class="small muted">Mode</div>${seg("rgMode", dr.mode, [["block", "Block"], ["allow", "Allow only"]])}
+        <div class="small muted rg-hint">${dr.mode === "allow" ? "Only the countries below get through - everything else is dropped." : "The countries below are dropped."}</div></div>
+      <div><div class="small muted">Direction</div>${seg("rgDir", dr.direction, [["incoming", "Incoming"], ["outgoing", "Outgoing"], ["both", "Both"]])}
+        <div class="small muted rg-hint">${{ incoming: "From the internet to the router and its port forwards.", outgoing: "From the client's network out to the internet.", both: "Both ways." }[dr.direction]}</div></div>
+    </div>
+    ${dr.direction !== "incoming" ? `<div class="ab-warn small"><b>Outgoing can break things people use.</b> Big services (Microsoft, Google, Amazon, Cloudflare,
+      app updates, CDNs) answer from servers all over the world, so blocking a country outgoing can stop websites and apps working in ways that are hard to trace.
+      Incoming is the safe choice for most clients.</div>` : ""}
+    ${dr.mode === "allow" ? `<div class="ab-warn small"><b>Allow only drops every other country</b> - including staff travelling abroad and cloud services hosted elsewhere.
+      Lists are also big (the United States alone is about ${(byCode.US?.entries || 0).toLocaleString()} entries, ${mb(byCode.US?.entries || 0)}), so small routers may be skipped.</div>` : ""}
+    <div class="small muted">Countries</div>
+    <div class="rg-chips">${dr.countries.map((c) => `<span class="rg-chip">${esc(byCode[c]?.name || c)} <span class="muted">${(byCode[c]?.entries || 0).toLocaleString()}</span>
+        ${canWrite() ? `<button type="button" class="rg-x" data-rgdel="${c}" aria-label="Remove ${esc(byCode[c]?.name || c)}">×</button>` : ""}</span>`).join("") || `<span class="small muted">None picked.</span>`}
+      ${canWrite() ? `<input id="rgAdd" list="rgList" placeholder="Add a country…" aria-label="Add a country"><datalist id="rgList">
+        ${x.countries.filter((c) => !dr.countries.includes(c.code)).map((c) => `<option value="${esc(c.name)} (${c.code})"></option>`).join("")}</datalist>` : ""}</div>
+    <p class="small muted">About <b>${est.toLocaleString()}</b> address-list entries (${mb(est)} of router memory)${x.entries != null && !dirty ? ` - ${x.entries.toLocaleString()} after
+      adding / cutting out the never-blocked addresses` : ""}.</p>
+    <details class="rg-exc"><summary class="small">Also never block (addresses or networks)</summary>
+      <textarea id="rgExc" rows="3" spellcheck="false" ${canWrite() ? "" : "disabled"} placeholder="one per line">${esc(dr.exceptions)}</textarea></details>
+    ${canWrite() ? `<div class="actions"><button class="btn primary" type="button" id="rgSave" ${dirty ? "" : "disabled"}>Save and apply</button>
+      ${x.policy?.enabled ? `<button class="btn" type="button" id="rgSync">Sync now</button>` : ""}<span class="status small" id="rgMsg">${esc(rgView.msg)}</span></div>` : ""}
+    <h3>Routers</h3>
+    ${x.routers.length ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Free memory</th><th>Status</th><th>Let through here</th><th>Entries</th><th>Dropped</th><th>Include</th></tr></thead><tbody>
+      ${x.routers.map((r) => { const free = r.mem_total ? r.mem_total - (r.mem_used || 0) : null, [cls, label] = RG_STATE[r.state || "off"] || ["", r.state];
+        return `<tr><td><a href="#router/${r.id}">${esc(r.name)}</a>${r.online ? "" : ` <span class="small muted">(offline)</span>`}</td>
+          <td class="small nowrap">${free != null ? `${Math.round(free / 1e6)} MB${r.fits === false ? ` <span class="status warn">too little for this list</span>` : ""}` : "—"}</td>
+          <td class="small">${r.skip ? `<span class="pill">left out</span>` : `<span class="pill ${cls}">${esc(label)}</span>`}${r.detail ? `<div class="small muted">${esc(r.detail)}</div>` : ""}</td>
+          <td class="small"><div class="rg-chips rg-rchips">${(dr.router_allow[r.id] || []).map((c) => `<span class="rg-chip">${esc(byCode[c]?.name || c)}${canWrite()
+              ? ` <button type="button" class="rg-x" data-rgrdel="${r.id}:${c}" aria-label="Stop letting ${esc(byCode[c]?.name || c)} through">×</button>` : ""}</span>`).join("")}
+            ${canWrite() ? `<input class="rg-radd" data-rgradd="${r.id}" list="rgListAll" placeholder="+ country" aria-label="Let a country through on ${esc(r.name)}">` : ""}</div></td>
+          <td class="small">${r.entries != null && r.state && r.state !== "off" ? r.entries.toLocaleString() : ""}</td>
+          <td class="small">${r.hits ? Number(r.hits).toLocaleString() : ""}</td>
+          <td><input type="checkbox" data-rgskip="${r.id}" ${r.skip ? "" : "checked"} ${canWrite() ? "" : "disabled"} aria-label="Include ${esc(r.name)}"></td></tr>`; }).join("")}</tbody></table></div>`
+      : `<p class="small muted">This client has no routers.</p>`}
+    <datalist id="rgListAll">${x.countries.map((c) => `<option value="${esc(c.name)} (${c.code})"></option>`).join("")}</datalist>
+    <p class="small muted">Let through here: countries this one router lets through even though the client's policy doesn't - in Block mode they're
+      left off its list, in Allow mode added to it.</p>` : ""}
+    <p class="small muted rg-credit">IP address data powered by <a href="https://ipinfo.io" target="_blank" rel="noopener">IPinfo</a> (IPinfo Lite, CC BY-SA 4.0).</p>`;
+  const redraw = () => regionCard().catch(() => {});
+  const keep = () => { if ($("rgExc")) dr.exceptions = $("rgExc").value; };
+  $("rgOrg").addEventListener("change", (e) => { rgView.org = +e.target.value; rgView.draft = null; rgView.msg = ""; redraw(); });
+  $("rgUpdate")?.addEventListener("click", async (e) => { e.target.disabled = true; try { await post("/api/region/update"); } catch (err) { rgView.msg = err.message; } setTimeout(redraw, 1500); });
+  $("rgTokenSave")?.addEventListener("click", async () => {
+    try { await post("/api/region/token", { token: $("rgToken").value }); $("rgTokenMsg").textContent = "Saved - downloading the country data…"; $("rgTokenMsg").className = "status small ok"; setTimeout(redraw, 3000); }
+    catch (e) { $("rgTokenMsg").textContent = e.message; $("rgTokenMsg").className = "status small err"; }
+  });
+  $("rgEnabled")?.addEventListener("change", (e) => { keep(); dr.enabled = e.target.checked; redraw(); });
+  $("rgMode")?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { keep(); dr.mode = b.dataset.v; redraw(); }));
+  $("rgDir")?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { keep(); dr.direction = b.dataset.v; redraw(); }));
+  $("rgCard").querySelectorAll("[data-rgdel]").forEach((b) => b.addEventListener("click", () => { keep(); dr.countries = dr.countries.filter((c) => c !== b.dataset.rgdel); redraw(); }));
+  $("rgCard").querySelectorAll("[data-rgskip]").forEach((c) => c.addEventListener("change", () => {
+    keep(); const id = +c.dataset.rgskip; dr.skip = c.checked ? dr.skip.filter((i) => i !== id) : [...dr.skip, id]; redraw();
+  }));
+  $("rgAdd")?.addEventListener("change", (e) => {
+    const m = /\(([A-Z]{2})\)\s*$/.exec(e.target.value) || [null, e.target.value.trim().toUpperCase()];
+    if (byCode[m[1]] && !dr.countries.includes(m[1])) { keep(); dr.countries = [...dr.countries, m[1]].sort((a, b) => (byCode[a].name).localeCompare(byCode[b].name)); redraw(); }
+  });
+  $("rgCard").querySelectorAll("[data-rgrdel]").forEach((b) => b.addEventListener("click", () => {
+    keep(); const [id, c] = b.dataset.rgrdel.split(":"); const left = (dr.router_allow[id] || []).filter((y) => y !== c);
+    if (left.length) dr.router_allow[id] = left; else delete dr.router_allow[id];
+    redraw();
+  }));
+  $("rgCard").querySelectorAll("[data-rgradd]").forEach((i) => i.addEventListener("change", () => {
+    const m = /\(([A-Z]{2})\)\s*$/.exec(i.value) || [null, i.value.trim().toUpperCase()], id = i.dataset.rgradd;
+    if (byCode[m[1]] && !(dr.router_allow[id] || []).includes(m[1])) { keep(); dr.router_allow[id] = [...(dr.router_allow[id] || []), m[1]].sort(); redraw(); }
+  }));
+  $("rgExc")?.addEventListener("input", () => { keep(); if ($("rgSave")) $("rgSave").disabled = false; });
+  $("rgSave")?.addEventListener("click", async (e) => {
+    keep(); e.target.disabled = true;
+    try { await post("/api/region/policy", { org_id: x.org_id, ...dr }); rgView.draft = null; rgView.msg = dr.enabled ? "Saved - the routers are being updated now." : "Saved."; redraw(); }
+    catch (err) { e.target.disabled = false; $("rgMsg").textContent = err.message; $("rgMsg").className = "status small err"; }
+  });
+  $("rgSync")?.addEventListener("click", async (e) => { e.target.disabled = true; await post("/api/region/sync", { org_id: x.org_id }).catch(() => {}); rgView.msg = "Syncing…"; setTimeout(redraw, 2500); });
+  if (x.running || x.routers.some((r) => r.state === "loading") || g.running) setTimeout(() => { if ($("rgCard") && !dirty) redraw(); }, 5000);
+}
+
 // what "blocked" means for one address right now - each with its own Unblock (fail2ban here guards SSH to TikManager's
 // server only; the routers' block list only drops on routers that have the drop rule)
 function secBlocks(s, a) {
@@ -3810,6 +3931,7 @@ async function securityPage() {
     <div class="tiles sec-kpis">${tile("tikmanager")}${tile("server")}${tile("router")}</div>
     <div class="card" id="rosSec"><h2>RouterOS vulnerabilities</h2><p class="muted small">Loading…</p></div>
     <div class="card" id="abCard"><h2>Auto-block</h2><p class="muted small">Loading…</p></div>
+    <div class="card" id="rgCard"><h2>Region blocking</h2><p class="muted small">Loading…</p></div>
     ${s.flags.length ? `<div class="card"><h2>Worth a look</h2><ul class="sec-flags">${s.flags.map((f) =>
       `<li class="flag-${esc(f.level)}">${esc(f.text)}${f.ip ? ` <button class="linkish" type="button" data-ip="${esc(f.ip)}">show</button>` : ""}</li>`).join("")}</ul></div>` : ""}
     <div class="grid2">
@@ -3855,6 +3977,7 @@ async function securityPage() {
   if (secView.jump) { secView.jump = false; $("secEvents").scrollIntoView({ behavior: "smooth", block: "start" }); $("secEvents").classList.add("sec-flash"); }
   rosSecCard();
   autoBlockCard();
+  if (isTech()) regionCard();
   $("main").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
   $("secSrc").addEventListener("change", () => { secView.source = $("secSrc").value; reload(); });
   $("secKind").addEventListener("change", () => { secView.kind = $("secKind").value; reload(); });

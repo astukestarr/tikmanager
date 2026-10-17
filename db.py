@@ -195,6 +195,12 @@ CREATE TABLE IF NOT EXISTS sec_events (
   user TEXT, ip TEXT, device_id INTEGER, via TEXT, detail TEXT, uid TEXT UNIQUE          -- uid: de-duplicates imported events
 );
 CREATE INDEX IF NOT EXISTS sec_events_ts ON sec_events(ts);
+CREATE TABLE IF NOT EXISTS region_sync (            -- region blocking: where each router's list stands
+  device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'off',                 -- off / loading / synced / paused / waiting / too_big / error
+  detail TEXT, mode TEXT, entries INTEGER, target_hash TEXT, hits INTEGER,
+  synced_at REAL, refreshed_at REAL, checked_at REAL, updated_at REAL
+);
 CREATE TABLE IF NOT EXISTS health_metrics (   -- board sensors and fibre (SFP) readings every 5 minutes, kept 30 days
   device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, ts REAL NOT NULL, name TEXT NOT NULL, value REAL
 );

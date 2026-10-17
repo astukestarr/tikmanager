@@ -12,11 +12,25 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "1.46.0"   # the release these slides describe (its betas included)
-SINCE = "1.45.1"     # the full release before it
+RELEASE = "2.0.0"    # the release these slides describe (its betas included)
+SINCE = "1.46.1"     # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
-SLIDES = [
+SLIDES_2_0 = [
+    {"id": "region-blocking", "title": "Region blocking", "img": "region", "view": "security", "who": "tech",
+     "text": "Security > Region blocking drops new connections from (or to) whole countries on a client's routers - Block or "
+             "Allow only, Incoming, Outgoing or Both, like UniFi. Country data comes from IPinfo Lite (free token, updated "
+             "daily). TikManager, your routers and addresses your people used in the last 90 days are never blocked."},
+    {"id": "region-safe", "title": "Safe on small routers", "img": None, "view": "security", "who": "tech",
+     "text": "The list lives in router memory only - no flash writes, not in backups - and is loaded a little at a time, slowing "
+             "down when the CPU is busy. A router where it would take more than a quarter of its free memory is skipped, and "
+             "after a restart the rules wait until TikManager has reloaded the list."},
+    {"id": "region-per-router", "title": "Different countries on one router", "img": None, "view": "security", "who": "tech",
+     "text": "Leave a router out, or let some countries through on just that router (Let through here) - e.g. one site that "
+             "works with China and the UK while the client's other sites block them."},
+]
+
+SLIDES_1_46 = [
     {"id": "health-dash", "title": "Performance & security dashboard", "img": "dashboard", "view": "health", "who": "tech",
      "text": "Monitoring > Performance & security checks every router for internet problems, performance, open ports and "
              "exposed services, weak encryption and old VPN types (PPTP, L2TP without IPsec), VPNs that are down, updates "
@@ -73,11 +87,12 @@ SLIDES = [
              "events. Router pages no longer scroll sideways on narrow screens. RouterOS 7.20's renamed \"available-from\" "
              "is understood everywhere."},
 ]
+SLIDES = SLIDES_2_0
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"1.46.0": {"since": "1.45.1", "slides": SLIDES}}
+TOURS = {"2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")
 

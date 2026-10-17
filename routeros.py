@@ -900,6 +900,24 @@ class RouterOS:
     def undo_run(self, name):
         self._req("POST", "/system/script/run", {"number": name}, timeout=60)
 
+    def cpu_load(self):
+        """The CPU load now (%) - read between batches when loading region-blocking lists."""
+        return int((self._req("GET", "/system/resource?.proplist=cpu-load", timeout=10) or {}).get("cpu-load") or 0)
+
+    GEO_BOOT = "tikmanager-geo-boot"
+
+    def geo_boot_guard(self, on, script=""):
+        """Region blocking: a startup scheduler that runs `script` (disables the region rules) after a reboot, when the
+        RAM-only list is gone, until TikManager has loaded it again. Kept as it is when already there."""
+        have = self.get(f"/system/scheduler?name={self.GEO_BOOT}") or []
+        if on and have and have[0].get("on-event") == script:
+            return
+        for s in have:
+            self._req("DELETE", f"/system/scheduler/{s['.id']}", timeout=20)
+        if on:
+            self._req("PUT", "/system/scheduler", {"name": self.GEO_BOOT, "start-time": "startup", "on-event": script, "policy": "read,write",
+                                                   "comment": "TikManager: region rules wait for their list after a restart"}, timeout=20)
+
     def undo_armed(self, name):
         return bool(self.get(f"/system/scheduler?name={urllib.parse.quote(name)}"))
 
@@ -1467,8 +1485,39 @@ class SimRouter:
                         "rx": random.randint(10 ** 6, 10 ** 9) if other else 0, "tx": random.randint(10 ** 6, 10 ** 9) if other else 0})
         return out
 
+    def cpu_load(self):
+        return random.Random(int(time.time() // 20) + self.id).randint(3, 45)
+
+    def geo_boot_guard(self, on, script=""):
+        if on:
+            self._sim()["geo_boot"] = script
+        else:
+            self._sim().pop("geo_boot", None)
+
+    def _sim_geo(self, body):
+        """The address-list commands region blocking sends (add / remove / set timeout), applied to the simulated list."""
+        st, done = self._fw(), False
+        al = st["fw"]["address-list"]
+        for m in re.finditer(r"address-list add list=(\S+) address=(\S+) timeout=(\S+)\}", body):
+            lst, addr, to = m.groups()
+            if not any(x["list"] == lst and x["address"] == addr for x in al):
+                al.append({".id": f"*{st['fw_next']:X}", "list": lst, "address": addr, "timeout": to, "dynamic": "true", "disabled": "false"})
+                st["fw_next"] += 1
+            done = True
+        for m in re.finditer(r"address-list remove \[find list=(\S+) address=(\S+)\]", body):
+            st["fw"]["address-list"] = al = [x for x in al if not (x["list"] == m[1] and x["address"] == m[2])]
+            done = True
+        if m := re.search(r"address-list remove \[find list=(\S+)\]", body):
+            st["fw"]["address-list"] = [x for x in al if x["list"] != m[1]]
+            done = True
+        if re.search(r"address-list set \[find list=\S+ dynamic\]", body):
+            done = True
+        return done
+
     def run_script(self, body, timeout=120):
         time.sleep(0.3)
+        if self._sim_geo(body):
+            return ""
         if ":error" in body:
             raise RouterError("HTTP 400: failure: " + body.split(":error", 1)[1].strip().strip('"')[:80])
         return "\n".join(f"(simulated) {line.strip()}" for line in body.splitlines() if line.strip() and not line.strip().startswith("#"))[:2000]

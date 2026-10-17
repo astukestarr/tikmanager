@@ -689,3 +689,16 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .wnh-notes { padding: 4px 0 8px; max-width: 80ch; } .wnh-notes h4 { margin: 10px 0 4px; }
 .wnh-notes ul { margin: 4px 0 8px 18px; padding: 0; } .wnh-notes li { margin: 3px 0; } .wnh-notes p { margin: 4px 0; }
 .rt-head { margin: 0 0 4px; padding: 0 4px; }
+/* Security > Region blocking */
+.rg-org { margin: 0; flex-direction: row; align-items: center; gap: 6px; }
+.rg-data { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.rg-token, .rg-exc { margin: 6px 0; } .rg-token .row input { flex: 1; min-width: 200px; }
+.rg-on { margin: 10px 0; }
+.rg-grid { display: flex; flex-wrap: wrap; gap: 24px; margin: 8px 0 10px; } .rg-hint { margin-top: 4px; max-width: 320px; }
+.rg-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 6px; }
+.rg-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--accent-soft); font-size: 13px; }
+.rg-x { all: unset; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; text-align: center; line-height: 18px; color: var(--muted); }
+.rg-x:hover, .rg-x:focus-visible { background: var(--border); color: var(--text); }
+#rgAdd { min-width: 180px; } #rgExc { width: 100%; }
+.rg-credit { margin-top: 10px; }
+.rg-rchips { margin: 0; } .rg-radd { width: 110px; padding: 2px 6px; font-size: 12px; }
