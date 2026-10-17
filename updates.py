@@ -150,6 +150,17 @@ class Updates:
             self.latest.update(checked_at=time.time(), error=f"Couldn't check for updates: {e}"[:200])
         return self.latest
 
+    def installed(self):
+        """When this version arrived (its version.py was written by the updater / installer) and, if the updater's last
+        run put it there, the version it came from."""
+        try:
+            at = (Path(__file__).resolve().parent / "version.py").stat().st_mtime
+        except OSError:
+            at = None
+        st = self.status()
+        came = st.get("from") if st.get("state") == "done" and st.get("version") == __version__ and str(st.get("detail", "")).startswith("Upgraded") else None
+        return {"installed_at": at, "upgraded_from": came}
+
     def info(self):
         cur, new = vtuple(__version__), vtuple(self.latest.get("version"))
         return {"version": __version__, "latest": self.latest.get("version"), "available": bool(cur and new and new > cur),
@@ -157,7 +168,7 @@ class Updates:
                 "withdrawn_installed": __version__ in (self.latest.get("withdrawn") or []),
                 "url": self.latest.get("url"), "notes": self.latest.get("notes"), "checked_at": self.latest.get("checked_at"),
                 "error": self.latest.get("error"), "repo": self.repo, "supported": self.supported(), "status": self.status(),
-                "security": self.security()}
+                "security": self.security(), **self.installed()}
 
     def security_supported(self):
         return os.name == "posix" and Path("/etc/systemd/system/tikmanager-check.path").exists()

@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 1.46.1-beta.5 - 2026-10-16
+
+- **Version & updates shows dates and times**: **Installed** - when this version was installed (and the version it was
+  upgraded from, when the one-click updater did it) - and **Last checked** with the date and time of the last update check
+  (plus how long ago). **Check for updates** checks right away, as before.
+
 ## 1.46.1-beta.4 - 2026-10-16
 
 - **Fix: BGP didn't show on routers whose peers are written with a prefix** (`remote.address=10.10.7.100/32`, as RouterOS

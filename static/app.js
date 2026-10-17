@@ -2316,7 +2316,8 @@ async function versionCard() {
   el.innerHTML = `<h2>Version &amp; updates</h2>
     <div class="grid2"><div class="kv"><span>This installation</span><span class="mono">${esc(u.version)}</span></div>
       <div class="kv"><span>Newest release</span><span class="mono">${esc(u.latest || "—")}</span></div>
-      <div class="kv"><span>Checked</span><span>${u.checked_at ? ago(u.checked_at) : "not yet"}</span></div>
+      <div class="kv"><span>Installed</span><span>${u.installed_at ? `${fullTime(u.installed_at)}${u.upgraded_from ? ` <span class="small muted">(from ${esc(u.upgraded_from)})</span>` : ""}` : "—"}</span></div>
+      <div class="kv"><span>Last checked</span><span>${u.checked_at ? `${fullTime(u.checked_at)} <span class="small muted">(${ago(u.checked_at)})</span>` : "not yet"}</span></div>
       <div class="kv"><span>Updates from</span><span class="mono">${esc(u.repo ? `github.com/${u.repo}` : "—")}</span></div>
       <div class="kv"><span>Channel</span><span><select id="verChannel" aria-label="Update channel">
         <option value="stable" ${u.channel !== "beta" ? "selected" : ""}>Stable (recommended)</option>
@@ -4201,6 +4202,7 @@ async function whatsNew(all, release) {
   if (!dlg.open) dlg.showModal();
 }
 
+const fullTime = (t) => new Date(t * 1000).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 // Version & updates > What's new in past releases: this release line and the 5 before it, from the installed changelog
 const mdInline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");   // escaped first
 async function wnHistory() {
