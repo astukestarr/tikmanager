@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.5 - 2026-10-16
+
+- **Block known bad networks** (Security > Region blocking, per client, with or without region blocking) - hijacked and
+  criminal networks, botnet controllers and the worst attackers from **Spamhaus DROP** and **FireHOL Level 1**, dropped
+  in **both directions** on the client's routers.
+  - TikManager downloads both lists daily (free, no sign-up; a few thousand networks), keeps only public IPv4 networks
+    (FireHOL Level 1 also lists private and reserved ranges - those are left out) and merges them. If a list can't be
+    downloaded, its last good copy is kept; a result over 20,000 networks isn't used.
+  - Same safeguards as region blocking: a second RAM-only address list (`tikmanager-threat`), loaded in batches with the CPU
+    watchdog, counted in the same memory budget, TikManager and everything never-blocked cut out, rules after
+    TikManager's return rules, Safe Mode on rule changes, the startup guard after a reboot, per-router Include.
+  - Flows > Blocked shows which drops came from region blocking and which from the known-bad lists (log prefix
+    `tm-threat-`).
+
 ## 2.0.0-beta.4 - 2026-10-16
 
 - **Flows (pilot)** - router page > **Flows**: who on the network talks to what, like UniFi's Insights > Flows. Each

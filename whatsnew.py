@@ -28,6 +28,10 @@ SLIDES_2_0 = [
     {"id": "region-per-router", "title": "Different countries on one router", "img": None, "view": "security", "who": "tech",
      "text": "Leave a router out, or let some countries through on just that router (Let through here) - e.g. one site that "
              "works with China and the UK while the client's other sites block them."},
+    {"id": "known-bad", "title": "Block known bad networks", "img": None, "view": "security", "who": "tech",
+     "text": "One switch per client next to Region blocking: hijacked and criminal networks, botnet controllers and the worst "
+             "attackers (Spamhaus DROP + FireHOL Level 1, updated daily) are dropped both ways. A few thousand entries - fine "
+             "on every router - with the same safeguards as region blocking."},
     {"id": "flows", "title": "Flows (pilot)", "img": None, "view": "routers", "who": "tech",
      "text": "Router page > Flows: who talks to what - clients, destinations, countries, organisations, services, download and "
              "upload - with filters and CSV, plus what region blocking dropped. Opt-in per router (128 MB or more), sent over "

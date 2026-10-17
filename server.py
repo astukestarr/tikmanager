@@ -46,6 +46,7 @@ from lifecycle import Lifecycle
 from rossec import RosSecurity
 from autoblock import AutoBlock
 from geoip import GeoError, GeoIP
+from threatlists import SOURCES as THREAT_SOURCES, ThreatError, ThreatLists
 from regionblock import RegionBlock, RegionError
 from flows import Flows, MIN_MEM as FLOWS_MIN_MEM
 from devkind import kind as device_kind, KINDS as DEVICE_KINDS
@@ -145,7 +146,8 @@ lifecycle = Lifecycle(db, settings.data_dir, thumbs)   # router age and disconti
 rossec = RosSecurity(db, settings.data_dir)   # known CVEs and missed MikroTik security releases per router
 autoblock = AutoBlock(db, settings, poller.client, secev)   # addresses guessing router passwords: blocked on every router
 geo = GeoIP(settings.data_dir, lambda: integ.config("ipinfo").get("token", ""), dev=settings.dev)   # IPinfo Lite, per country
-region = RegionBlock(db, settings, poller.client, geo, autoblock)   # region (country) blocking per client
+threats = ThreatLists(settings.data_dir, dev=settings.dev)   # known bad networks (Spamhaus DROP + FireHOL Level 1)
+region = RegionBlock(db, settings, poller.client, geo, autoblock, threats)   # region (country) blocking + known bad networks per client
 flowlog = Flows(db, settings, geo, poller.client, routerlogs)   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
@@ -966,28 +968,32 @@ class Handler(BaseHTTPRequestHandler):
             n, sizes = None, {}
 
             def size(p):   # entries on a router for this (effective) policy
-                k = tuple(p["countries"])
+                k = (tuple(p["countries"]), region.region_on(p), bool(p.get("threats")))
                 if k not in sizes:
-                    sizes[k] = len(region.target(p)) if p["countries"] else 0
+                    sizes[k] = len(region.target(p)) if region.active(p, None) else 0
                 return sizes[k]
-            if pol and pol.get("countries") and geo.meta():
+            if pol and region.active(pol, None) and (geo.meta() or threats.meta()):
                 n = size(pol)
             routers = []
             for d in db.q("SELECT * FROM devices WHERE state='adopted' AND org_id=? ORDER BY name", (oid,)):
                 st = region.state(d["id"]) or {}
                 eff = region.effective(pol, d["id"]) if pol else None
-                rn = size(eff) if eff and geo.meta() else n
+                rn = size(eff) if eff and (geo.meta() or threats.meta()) else n
                 routers.append({"id": d["id"], "name": d["name"], "online": d["online"], "model": d.get("model"), "mem_total": d.get("mem_total"),
                                 "mem_used": d.get("mem_used"), "wans": region.wans(d), "skip": d["id"] in ((pol or {}).get("skip") or []),
                                 "fits": region.capacity(d, rn)[0] if rn else None, "let_through": ((pol or {}).get("router_allow") or {}).get(str(d["id"])) or [],
                                 **{k: st.get(k) for k in ("state", "detail", "entries", "hits", "synced_at", "checked_at")}})
-            meta = geo.meta()
-            return self.json({"orgs": [{"id": o["id"], "name": o["name"], "on": bool(pols.get(str(o["id"]), {}).get("enabled"))} for o in orgs],
+            meta, tm_ = geo.meta(), threats.meta()
+            return self.json({"orgs": [{"id": o["id"], "name": o["name"], "on": region.active(pols.get(str(o["id"])), None)} for o in orgs],
                               "org_id": oid, "policy": pol, "entries": n, "routers": routers, "countries": geo.countries(),
                               "geo": {"updated_at": meta.get("updated_at"), "source": meta.get("source"), "networks": meta.get("networks"),
                                       "running": geo.state["running"], "error": geo.state["error"], "token_set": bool(integ.config("ipinfo").get("token")),
                                       "dev": settings.dev},
-                              "running": region.running, "bytes_per_entry": 600, "ram_share": 0.25})
+                              "running": region.running, "bytes_per_entry": 600, "ram_share": 0.25,
+                              "threat": {"entries": tm_.get("entries") or 0, "updated_at": tm_.get("updated_at"), "running": threats.state["running"],
+                                         "error": threats.state["error"] or "; ".join(tm_.get("errors") or []) or None,
+                                         "sources": [{"id": k, "name": v["name"], "info": v["info"], **((tm_.get("sources") or {}).get(k) or {})}
+                                                     for k, v in THREAT_SOURCES.items()]}})
         if path == "/api/security/autoblock":   # auto-block settings, candidates, blocked addresses, routers without the drop rule
             self.require(tech=True)
             return self.json(autoblock.info())
@@ -2427,20 +2433,32 @@ class Handler(BaseHTTPRequestHandler):
                         pass   # shown on the page (geo.state)
                 threading.Thread(target=run, daemon=True, name="geo-update").start()
             return self.json({"ok": True})
+        if path == "/api/region/threats/update":   # download the known-bad-network lists now (background)
+            self.require(tech=True, admin=True)
+            if not threats.state["running"]:
+                def run_t():
+                    try:
+                        threats.update()
+                        region.kick(manual=False)
+                    except ThreatError:
+                        pass   # shown on the page
+                threading.Thread(target=run_t, daemon=True, name="threat-update").start()
+            return self.json({"ok": True})
         if path == "/api/region/policy":   # {org_id, enabled, mode, direction, countries, skip, exceptions}
             s = self.require(tech=True, write=True)
             b = self.body()
             org = db.one("SELECT id, name FROM orgs WHERE id=?", (int(b.get("org_id") or 0),))
             if not org:
                 raise HttpError(400, "Client not found.")
-            if not geo.countries():
+            if b.get("enabled") and not geo.countries():
                 raise HttpError(400, "The country data hasn't been downloaded yet.")
             try:
                 pol = region.save_policy(org["id"], b)
             except RegionError as e:
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "region blocking", org["name"], self.client_ip(),
-                     detail=f"{'on' if pol['enabled'] else 'off'}: {pol['mode']} {','.join(pol['countries'])} ({pol['direction']})")
+                     detail=f"{'on' if pol['enabled'] else 'off'}: {pol['mode']} {','.join(pol['countries'])} ({pol['direction']})"
+                            f"; known bad networks {'on' if pol['threats'] else 'off'}")
             region.kick(org["id"])
             return self.json({"ok": True, "policy": pol})
         if path == "/api/region/sync":   # {org_id}: bring this client's routers in line now

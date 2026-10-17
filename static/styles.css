@@ -720,3 +720,4 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .fl-top .fl-row button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; text-align: left; }
 .fl-cc { font-size: 11px; padding: 0 6px; }
 .fl-table td { vertical-align: top; }
+.rg-threat { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }

@@ -4,6 +4,8 @@
   internet to the router's own services and to port forwards; the default), Outgoing (new connections from the LAN to the
   internet) or Both - and the countries. Routers can be left out one by one, or let some countries through on their own
   (Block: taken off that router's list; Allow: added to it) - e.g. one site that works with China while the others don't.
+- Known bad networks (a separate switch per client): threatlists.py (Spamhaus DROP + FireHOL Level 1) on a second list,
+  THREAT_LIST, dropped both ways whatever the region settings - same safeguards, same memory budget.
 - Data: geoip.py (IPinfo Lite, merged per country). Never blocked, whatever the data says: TikManager's server, every
   router's own addresses, addresses people actually used in the last 90 days (TikManager and router sign-ins, remote
   access connections) and the auto-block whitelist - in Block mode they're cut out of the list, in Allow mode added to it.
@@ -30,6 +32,7 @@ from pathlib import Path
 from routeros import RouterError
 
 LIST = "tikmanager-geo"
+THREAT_LIST = "tikmanager-threat"   # known bad networks; entries are kept as "t:<address>" in the pushed record
 TAG = "TikManager region blocking"
 CHAIN_IN, CHAIN_OUT = "tikmanager-geo-in", "tikmanager-geo-out"
 UNDO = "tikmanager-geo-undo"
@@ -56,8 +59,8 @@ class Busy(Exception):
 
 
 class RegionBlock:
-    def __init__(self, db, settings, client, geo, autoblock):
-        self.db, self.s, self.client, self.geo, self.autoblock = db, settings, client, geo, autoblock
+    def __init__(self, db, settings, client, geo, autoblock, threats=None):
+        self.db, self.s, self.client, self.geo, self.autoblock, self.threats = db, settings, client, geo, autoblock, threats
         self.dir = Path(settings.data_dir) / "geo" / "pushed"
         self.lock = threading.Lock()
         self.running = False
@@ -80,9 +83,11 @@ class RegionBlock:
         if mode not in MODES or direction not in DIRECTIONS:
             raise RegionError("Pick Block or Allow, and a direction.")
         countries = sorted({str(c).upper() for c in b.get("countries") or [] if str(c).upper() in codes})[:250]
-        enabled = bool(b.get("enabled"))
+        enabled, threats = bool(b.get("enabled")), bool(b.get("threats"))
         if enabled and not countries:
             raise RegionError("Pick at least one country.")
+        if threats and not (self.threats and self.threats.cidrs()):
+            raise RegionError("The known-bad-network lists haven't been downloaded yet.")
         extra = []
         for x in str(b.get("exceptions") or "").replace(",", "\n").split("\n"):
             if x.strip():
@@ -90,7 +95,7 @@ class RegionBlock:
                     extra.append(str(ipaddress.ip_network(x.strip(), strict=False)))
                 except ValueError:
                     raise RegionError(f"Not an address or network: {x.strip()}") from None
-        pol = {"enabled": enabled, "mode": mode, "direction": direction, "countries": countries,
+        pol = {"enabled": enabled, "threats": threats, "mode": mode, "direction": direction, "countries": countries,
                "skip": sorted({int(x) for x in b.get("skip") or [] if str(x).isdigit()}), "exceptions": extra[:200], "saved_at": time.time(),
                "router_allow": {str(int(k)): sorted({str(c).upper() for c in v if str(c).upper() in codes})
                                 for k, v in (b.get("router_allow") or {}).items() if str(k).isdigit() and isinstance(v, list) and v}}
@@ -132,6 +137,35 @@ class RegionBlock:
         return sorted(out)
 
     @staticmethod
+    def region_on(pol):
+        return bool(pol and pol.get("enabled") and pol.get("countries"))
+
+    @classmethod
+    def active(cls, pol, did):
+        return bool(pol and (cls.region_on(pol) or pol.get("threats")) and did not in (pol.get("skip") or []))
+
+    @staticmethod
+    def _split(entry):
+        """A pushed entry -> (address list, address)."""
+        return (THREAT_LIST, entry[2:]) if entry.startswith("t:") else (LIST, entry)
+
+    @staticmethod
+    def _carve(nets, prot):
+        """nets with the protected networks cut out."""
+        out = []
+        for n in nets:
+            pieces = [n]
+            for p in (p for p in prot if p.overlaps(n)):
+                nxt = []
+                for x in pieces:
+                    if p.supernet_of(x):
+                        continue
+                    nxt += list(x.address_exclude(p)) if x.supernet_of(p) else [x]
+                pieces = nxt
+            out += pieces
+        return sorted(out)
+
+    @staticmethod
     def effective(pol, did):
         """This router's policy: the client's, with the countries let through on this router taken off (Block) or added (Allow)."""
         extra = set((pol.get("router_allow") or {}).get(str(did)) or [])
@@ -141,31 +175,25 @@ class RegionBlock:
         return {**pol, "countries": sorted(cs)}
 
     def target(self, pol):
-        """The addresses to put on the routers' list for this policy: the countries, merged, with protected addresses
-        cut out (Block) or added (Allow)."""
-        nets = [ipaddress.IPv4Network(c) for cc in pol["countries"] for c in self.geo.cidrs(cc)]
-        nets = list(ipaddress.collapse_addresses(nets))
+        """The entries to put on the routers for this policy: the countries, merged, with protected addresses cut out
+        (Block) or added (Allow) - when region blocking is on - and the known bad networks ("t:..." entries, protected
+        addresses cut out) when that switch is on."""
         prot = self.protected(pol)
         rs = lambda n: str(n).removesuffix("/32")   # RouterOS shows a single address without /32
-        if pol["mode"] == "allow":
-            return [rs(n) for n in ipaddress.collapse_addresses(nets + prot)]
         out = []
-        for n in nets:
-            hit = [p for p in prot if p.overlaps(n)]
-            pieces = [n]
-            for p in hit:
-                nxt = []
-                for x in pieces:
-                    if p.supernet_of(x):
-                        continue
-                    nxt += list(x.address_exclude(p)) if x.supernet_of(p) else [x]
-                pieces = nxt
-            out += pieces
-        return [rs(n) for n in sorted(out)]
+        if self.region_on(pol):
+            nets = list(ipaddress.collapse_addresses(ipaddress.IPv4Network(c) for cc in pol["countries"] for c in self.geo.cidrs(cc)))
+            if pol["mode"] == "allow":
+                out += [rs(n) for n in ipaddress.collapse_addresses(nets + prot)]
+            else:
+                out += [rs(n) for n in self._carve(nets, prot)]
+        if pol.get("threats") and self.threats:
+            out += ["t:" + rs(n) for n in self._carve([ipaddress.IPv4Network(c) for c in self.threats.cidrs()], prot)]
+        return out
 
-    @staticmethod
-    def thash(pol, target):
-        return hashlib.sha1((pol["mode"] + pol["direction"] + "\n".join(target)).encode()).hexdigest()
+    def thash(self, pol, target):
+        return hashlib.sha1((pol["mode"] + pol["direction"] + str(self.region_on(pol)) + str(bool(pol.get("threats")))
+                             + "\n".join(target)).encode()).hexdigest()
 
     # --- per-router state -----------------------------------------------------------------------------------------
     def state(self, did):
@@ -225,7 +253,7 @@ class RegionBlock:
                 pol = pols.get(str(d["org_id"]))
                 if pol:
                     pol = self.effective(pol, d["id"])
-                active = bool(pol and pol.get("enabled") and pol.get("countries") and d["id"] not in (pol.get("skip") or []))
+                active = self.active(pol, d["id"])
                 st = self.state(d["id"])
                 if manual:
                     self.cutoff.pop(d["id"], None)
@@ -234,9 +262,9 @@ class RegionBlock:
                 try:
                     if not active:
                         if st and st["state"] != "off":
-                            self.remove(d, "Region blocking is off for this router.")
+                            self.remove(d, "Region blocking and known bad networks are off for this router.")
                         continue
-                    key = (d["org_id"], tuple(pol["countries"]))
+                    key = (d["org_id"], tuple(pol["countries"]), self.region_on(pol), bool(pol.get("threats")))
                     if key not in targets:
                         t = self.target(pol)
                         targets[key] = (t, self.thash(pol, t))
@@ -292,7 +320,7 @@ class RegionBlock:
         cl = self.client(d)
         pushed = self._pushed(did)
         rules = [r for r in cl.fw_rules("filter") or [] if str(r.get("comment") or "").startswith(TAG)]
-        lost = bool(pushed) and (any(r.get("disabled") == "true" for r in rules) or not cl.al_find(LIST, next(iter(pushed))))
+        lost = bool(pushed) and (any(r.get("disabled") == "true" for r in rules) or not cl.al_find(*self._split(next(iter(pushed)))))
         if lost:   # rebooted (the startup scheduler disabled the rules) or the list was cleared: load it again
             pushed = set()
         steady = (st.get("state") == "synced" and st.get("target_hash") == th and not lost and len(rules) == len(self._bodies(pol, wans, tm))
@@ -309,7 +337,8 @@ class RegionBlock:
             self._set(did, state="loading", detail=f"{len(pushed & want):,} of {len(want):,} loaded", entries=len(want), mode=pol["mode"])
         for i in range(0, len(add), BATCH):
             chunk = add[i:i + BATCH]
-            cl.run_script("\n".join(f':do {{/ip firewall address-list add list={LIST} address={a} timeout={TIMEOUT}}} on-error={{}}' for a in chunk), timeout=120)
+            cl.run_script("\n".join(f':do {{/ip firewall address-list add list={lst} address={a} timeout={TIMEOUT}}} on-error={{}}'
+                                    for lst, a in map(self._split, chunk)), timeout=120)
             pushed.update(chunk)
             if i // BATCH % 10 == 9:
                 self._save_pushed(did, pushed)
@@ -317,24 +346,29 @@ class RegionBlock:
             self._pace(cl)
         for i in range(0, len(rem), REMOVE_BATCH):
             chunk = rem[i:i + REMOVE_BATCH]
-            cl.run_script("\n".join(f':do {{/ip firewall address-list remove [find list={LIST} address={a}]}} on-error={{}}' for a in chunk), timeout=120)
+            cl.run_script("\n".join(f':do {{/ip firewall address-list remove [find list={lst} address={a}]}} on-error={{}}'
+                                    for lst, a in map(self._split, chunk)), timeout=120)
             pushed.difference_update(chunk)
             self._pace(cl)
         self._save_pushed(did, pushed)
         refreshed = st.get("refreshed_at") or now
         if not (add or lost) and now - refreshed >= REFRESH_EVERY:   # renew the timeouts (one command on the router)
-            cl.run_script(f"/ip firewall address-list set [find list={LIST} dynamic] timeout={TIMEOUT}", timeout=180)
+            for lst in (LIST, THREAT_LIST):
+                cl.run_script(f"/ip firewall address-list set [find list={lst} dynamic] timeout={TIMEOUT}", timeout=180)
             refreshed = now
         elif add or lost:
             refreshed = now
         cl.geo_boot_guard(True, f"/ip firewall filter disable [find comment~\"^{TAG}\"]")
         self._ensure_rules(cl, d, pol, wans, tm)
         rules = [r for r in cl.fw_rules("filter") or [] if str(r.get("comment") or "").startswith(TAG)]
-        self._set(did, state="synced", detail=f"{len(want):,} entries · {why}", entries=len(want), target_hash=th, mode=pol["mode"],
+        nt = sum(1 for e in want if e.startswith("t:"))
+        self._set(did, state="synced", detail=f"{len(want):,} entries{f' ({nt:,} known bad networks)' if nt else ''} · {why}", entries=len(want), target_hash=th, mode=pol["mode"],
                   synced_at=now, refreshed_at=refreshed, checked_at=now, hits=self._hits(rules))
         if add or rem or lost:
             self.db.event(did, d["org_id"], "region blocking",
-                          f"{'Reloaded after a restart: ' if lost else ''}{pol['mode']} {', '.join(pol['countries'])} ({pol['direction']}) - "
+                          f"{'Reloaded after a restart: ' if lost else ''}"
+                          f"{(pol['mode'] + ' ' + ', '.join(pol['countries']) + ' (' + pol['direction'] + ')') if self.region_on(pol) else 'region off'}"
+                          f"{' + known bad networks' if pol.get('threats') else ''} - "
                           f"{len(want):,} entries (+{len(add):,} / -{len(rem):,})")
 
     @staticmethod
@@ -345,23 +379,35 @@ class RegionBlock:
     def _bodies(pol, wans, tm):
         """New connections on the internet links jump to TikManager's chains; there TikManager's addresses (and, in Allow
         mode, private addresses - an upstream router or CGNAT) return to the router's own rules first, then the drop."""
+        region, threats = RegionBlock.region_on(pol), bool(pol.get("threats"))
         neg = "!" if pol["mode"] == "allow" else ""
-        safe = list(tm) + (list(PRIVATE_V4) if pol["mode"] == "allow" else [])
+        safe = list(tm) + (list(PRIVATE_V4) if region and pol["mode"] == "allow" else [])
+        geo_in, geo_out = region and pol["direction"] in ("incoming", "both"), region and pol["direction"] in ("outgoing", "both")
         out = []
-        if pol["direction"] in ("incoming", "both"):
+        if geo_in or threats:
             out += [{"chain": CHAIN_IN, "src-address": a, "action": "return", "comment": f"{TAG}: never block TikManager" if a in tm else f"{TAG}: private"} for a in safe]
-            out.append({"chain": CHAIN_IN, "src-address-list": neg + LIST, "action": "log", "log-prefix": "tm-geo-in", "limit": LOG_LIMIT,
-                        "comment": f"{TAG}: sample for Flows"})
-            out.append({"chain": CHAIN_IN, "src-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: incoming"})
+            if threats:
+                out.append({"chain": CHAIN_IN, "src-address-list": THREAT_LIST, "action": "log", "log-prefix": "tm-threat-in", "limit": LOG_LIMIT,
+                            "comment": f"{TAG}: sample for Flows"})
+                out.append({"chain": CHAIN_IN, "src-address-list": THREAT_LIST, "action": "drop", "comment": f"{TAG}: known bad networks"})
+            if geo_in:
+                out.append({"chain": CHAIN_IN, "src-address-list": neg + LIST, "action": "log", "log-prefix": "tm-geo-in", "limit": LOG_LIMIT,
+                            "comment": f"{TAG}: sample for Flows"})
+                out.append({"chain": CHAIN_IN, "src-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: incoming"})
             for w in wans:
                 out.append({"chain": "input", "in-interface": w, "connection-state": "new", "action": "jump", "jump-target": CHAIN_IN, "comment": f"{TAG}"})
                 out.append({"chain": "forward", "in-interface": w, "connection-state": "new", "connection-nat-state": "dstnat", "action": "jump",
                             "jump-target": CHAIN_IN, "comment": f"{TAG}: port forwards"})
-        if pol["direction"] in ("outgoing", "both"):
+        if geo_out or threats:
             out += [{"chain": CHAIN_OUT, "dst-address": a, "action": "return", "comment": f"{TAG}: never block TikManager" if a in tm else f"{TAG}: private"} for a in safe]
-            out.append({"chain": CHAIN_OUT, "dst-address-list": neg + LIST, "action": "log", "log-prefix": "tm-geo-out", "limit": LOG_LIMIT,
-                        "comment": f"{TAG}: sample for Flows"})
-            out.append({"chain": CHAIN_OUT, "dst-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: outgoing"})
+            if threats:
+                out.append({"chain": CHAIN_OUT, "dst-address-list": THREAT_LIST, "action": "log", "log-prefix": "tm-threat-out", "limit": LOG_LIMIT,
+                            "comment": f"{TAG}: sample for Flows"})
+                out.append({"chain": CHAIN_OUT, "dst-address-list": THREAT_LIST, "action": "drop", "comment": f"{TAG}: known bad networks"})
+            if geo_out:
+                out.append({"chain": CHAIN_OUT, "dst-address-list": neg + LIST, "action": "log", "log-prefix": "tm-geo-out", "limit": LOG_LIMIT,
+                            "comment": f"{TAG}: sample for Flows"})
+                out.append({"chain": CHAIN_OUT, "dst-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: outgoing"})
             for w in wans:
                 out.append({"chain": "forward", "out-interface": w, "connection-state": "new", "action": "jump", "jump-target": CHAIN_OUT, "comment": f"{TAG}: outgoing"})
         return out
@@ -411,7 +457,8 @@ class RegionBlock:
             cl = self.client(d)
             self._remove_rules(cl)
             cl.geo_boot_guard(False)
-            cl.run_script(f"/ip firewall address-list remove [find list={LIST}]", timeout=180)
+            for lst in (LIST, THREAT_LIST):
+                cl.run_script(f"/ip firewall address-list remove [find list={lst}]", timeout=180)
             (self.dir / f"{did}.txt").unlink(missing_ok=True)
             self.db.event(did, d["org_id"], "region blocking", f"Removed from the router - {why}")
         self._set(did, state=state, detail=why, target_hash=None, hits=0)
@@ -421,6 +468,11 @@ class RegionBlock:
         time.sleep(90)
         while True:
             try:
+                if self.threats and self.threats.due() and any(p.get("threats") for p in self.policies().values()):
+                    try:
+                        self.threats.update()
+                    except Exception:  # noqa: BLE001 - keep the last lists; the page shows the error
+                        traceback.print_exc()
                 if self.geo.due():
                     try:
                         self.geo.update()

@@ -386,25 +386,26 @@ class Flows:
             out[r[key]] = out.get(r[key], 0) + r["up"] + r["down"]
         return out
 
-    LOG = re.compile(r"tm-geo-(in|out)\S*\s.*?proto (\w+)[^,]*, (\d+\.\d+\.\d+\.\d+):?(\d*)->(\d+\.\d+\.\d+\.\d+):?(\d*)")
+    LOG = re.compile(r"tm-(geo|threat)-(in|out)\S*\s.*?proto (\w+)[^,]*, (\d+\.\d+\.\d+\.\d+):?(\d*)->(\d+\.\d+\.\d+\.\d+):?(\d*)")
 
     def _blocked(self, d, since, f, names, cn):
-        """What region blocking dropped - from the sampled log lines (at most a few per minute, so a sample)."""
+        """What region blocking / known bad networks dropped - from the sampled log lines (a few per minute, so a sample)."""
         out = {}
-        for l in self.db.q("SELECT ts, message FROM router_logs WHERE device_id=? AND ts>=? AND message LIKE '%tm-geo-%' ORDER BY id DESC LIMIT 20000",
+        for l in self.db.q("SELECT ts, message FROM router_logs WHERE device_id=? AND ts>=? AND (message LIKE '%tm-geo-%' OR message LIKE '%tm-threat-%') ORDER BY id DESC LIMIT 20000",
                            (d["id"], since)):
             m = self.LOG.search(l["message"])
             if not m:
                 continue
-            way, proto, s, sp, t, tp = m.groups()
+            why, way, proto, s, sp, t, tp = m.groups()
             remote, local, port = (s, t, int(tp or 0)) if way == "in" else (t, s, int(tp or 0))
             pn = {"TCP": 6, "UDP": 17, "ICMP": 1}.get(proto.upper(), 0)
-            k = (local, remote, port, pn, way)
+            k = (local, remote, port, pn, way, why)
             if k not in out:
                 cc, org = self.geo.lookup(remote)
                 out[k] = {"local": local, "local_name": names.get(local, ""), "remote": remote, "port": port, "proto": pn, "proto_name": proto.upper(),
                           "dir": way, "country": cc, "country_name": cn.get(cc, ""), "org": org, "service": service(port, pn), "hits": 0, "last": l["ts"],
-                          "up": 0, "down": 0, "packets": 0, "flows": 0, "action": "Block"}
+                          "up": 0, "down": 0, "packets": 0, "flows": 0,
+                          "action": "Known bad network" if why == "threat" else "Region"}
             out[k]["hits"] += 1
         rows = sorted(out.values(), key=lambda r: -r["hits"])
         q = str(f.get("q") or "").lower().strip()

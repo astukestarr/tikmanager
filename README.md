@@ -212,7 +212,8 @@ with per-router exceptions (leave a router out, or let some countries through on
 token; downloaded daily by TikManager, never by routers). The `tikmanager-geo` address list lives in router RAM only and is
 loaded in small batches with a CPU watchdog; routers without the memory for it are skipped; a startup scheduler keeps the
 rules off after a reboot until the list is back. TikManager, your routers and addresses your people actually used are
-never blocked. IP address data powered by [IPinfo](https://ipinfo.io).
+never blocked. IP address data powered by [IPinfo](https://ipinfo.io). **Block known bad networks** (same card, per
+client) drops Spamhaus DROP and FireHOL Level 1 networks both ways - downloaded daily by TikManager, public IPv4 only.
 
 **Flows (pilot):** router page > Flows lists conversations through a router - client, destination, country, organisation,
 service, download / upload - with filters, CSV and what region blocking dropped. Opt-in per router (128 MB+): RouterOS

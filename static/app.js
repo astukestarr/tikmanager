@@ -866,7 +866,7 @@ async function flowsTab(d) {
       <input id="flQ" type="search" placeholder="Search…" value="${esc(flView.q)}" aria-label="Search flows">
       <div class="seg fl-seg" role="group">${[[1, "1h"], [24, "1D"], [168, "1W"]].map(([h, l]) => `<button type="button" data-flh="${h}" class="${flView.hours === h ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="small muted fl-h">Flows</div>
-      ${[["all", "All flows"], ["blocked", "Blocked (region blocking)"]].map(([k, l]) => `<label class="chk"><input type="radio" name="flView" value="${k}" ${flView.view === k ? "checked" : ""}> ${l}</label>`).join("")}
+      ${[["all", "All flows"], ["blocked", "Blocked (region / known bad)"]].map(([k, l]) => `<label class="chk"><input type="radio" name="flView" value="${k}" ${flView.view === k ? "checked" : ""}> ${l}</label>`).join("")}
       ${Object.keys(flView.f).length ? `<div class="small muted fl-h">Filters</div><div class="rg-chips">${Object.entries(flView.f).map(([k, v]) =>
         `<span class="rg-chip">${esc((FL_FILTERS.find((f) => f[0] === k) || [k, k])[1])}: ${esc(k === "proto" ? ({ 6: "TCP", 17: "UDP", 1: "ICMP" }[v] || v) : v)}<button type="button" class="rg-x" data-flclear="${k}" aria-label="Remove filter">×</button></span>`).join("")}</div>
         <button class="linkish small" type="button" id="flClear">Clear filters</button>` : `<p class="small muted">Click a client, destination, country, service… to filter on it.</p>`}
@@ -887,7 +887,7 @@ async function flowsTab(d) {
             ${r.org ? `<div class="small">${chip("org", r.org, `<span class="muted">${esc(r.org)}</span>`)}</div>` : ""}</td>
           <td class="small">${r.port ? chip("port", r.port, esc(r.service)) : esc(r.service)} <span class="muted">${chip("proto", r.proto, esc(r.proto_name))}</span></td>
           <td class="small nowrap">${r.dir in dirs && r.dir !== "other" ? chip("dir", r.dir, dirs[r.dir]) : ""}</td>
-          ${blocked ? `<td>${r.hits}</td><td><span class="pill up-failed">Block</span></td>` : `<td class="small nowrap">${flBytes(r.down)}</td><td class="small nowrap">${flBytes(r.up)}</td>`}
+          ${blocked ? `<td>${r.hits}</td><td><span class="pill up-failed" title="${esc(r.action === "Region" ? "Region blocking" : "Known bad networks list")}">Block · ${esc(r.action === "Region" ? "region" : "known bad")}</span></td>` : `<td class="small nowrap">${flBytes(r.down)}</td><td class="small nowrap">${flBytes(r.up)}</td>`}
           <td class="small nowrap">${ago(r.last)}</td></tr>`).join("")}</tbody></table></div>`
         : `<p class="small muted">${x.on && !x.last_seen ? "Nothing yet - records arrive within a minute or two of turning Flows on." : "Nothing matches."}</p>`}</div>
       ${x.fasttrack && !blocked ? `<p class="small status warn">This router uses FastTrack (MikroTik's default firewall), which skips Traffic Flow after the first
@@ -3880,20 +3880,22 @@ async function regionCard(local) {   // local: redraw from the data already read
   if (rgView.org !== x.org_id || !rgView.draft) {
     rgView.org = x.org_id;
     const p = x.policy || {};
-    rgView.draft = { enabled: !!p.enabled, mode: p.mode || "block", direction: p.direction || "incoming", countries: [...(p.countries || [])],
+    rgView.draft = { enabled: !!p.enabled, threats: !!p.threats, mode: p.mode || "block", direction: p.direction || "incoming", countries: [...(p.countries || [])],
       skip: [...(p.skip || [])], exceptions: (p.exceptions || []).join("\n"), router_allow: { ...(p.router_allow || {}) } };
   }
   const dr = rgView.draft, admin = me.role === "admin", g = x.geo;
   const byCode = Object.fromEntries(x.countries.map((c) => [c.code, c]));
-  const est = dr.countries.reduce((n, c) => n + (byCode[c]?.entries || 0), 0);
+  const tl = x.threat || { entries: 0, sources: [] };
+  const est = (dr.enabled ? dr.countries.reduce((n, c) => n + (byCode[c]?.entries || 0), 0) : 0) + (dr.threats ? tl.entries : 0);
   const mb = (n) => `${(n * x.bytes_per_entry / 1e6).toFixed(n * x.bytes_per_entry < 1e7 ? 1 : 0)} MB`;
-  const dirty = JSON.stringify(dr) !== JSON.stringify((() => { const p = x.policy || {}; return { enabled: !!p.enabled, mode: p.mode || "block",
+  const dirty = JSON.stringify(dr) !== JSON.stringify((() => { const p = x.policy || {}; return { enabled: !!p.enabled, threats: !!p.threats, mode: p.mode || "block",
     direction: p.direction || "incoming", countries: [...(p.countries || [])], skip: [...(p.skip || [])], exceptions: (p.exceptions || []).join("\n"),
     router_allow: { ...(p.router_allow || {}) } }; })());
   const seg = (id, val, opts) => `<div class="seg" role="group" id="${id}">${opts.map(([k, l]) => `<button type="button" data-v="${k}" class="${val === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
   const data = g.updated_at ? `${esc(g.source)} · updated ${ago(g.updated_at)} · ${(g.networks || 0).toLocaleString()} networks, ${x.countries.length} countries`
     : g.token_set || g.dev ? "not downloaded yet" : "needs an IPinfo Lite token (free)";
   $("rgCard").innerHTML = `<div class="row"><h2>Region blocking</h2><span class="pill ${x.policy?.enabled ? "ab-on" : ""}">${x.policy?.enabled ? `${x.policy.mode === "allow" ? "Allow only" : "Block"} · ${x.policy.countries.length} countr${x.policy.countries.length === 1 ? "y" : "ies"}` : "Off"}</span>
+      ${x.policy?.threats ? `<span class="pill ab-on">Known bad networks</span>` : ""}
       <span class="spacer"></span><label class="field rg-org">Client <select id="rgOrg">${x.orgs.map((o) => `<option value="${o.id}" ${o.id === x.org_id ? "selected" : ""}>${esc(o.name)}${o.on ? " ●" : ""}</option>`).join("")}</select></label></div>
     <p class="small muted">Drop new connections from (or to) whole countries on this client's routers. Replies and connections already open aren't touched, and TikManager's
       own addresses are let through before any rule drops anything; rule changes are tested like Safe Mode. Never blocked: TikManager, the routers' own addresses, addresses your people actually used in the last 90 days (sign-ins,
@@ -3907,7 +3909,17 @@ async function regionCard(local) {   // local: redraw from the data already read
         dashboard. TikManager downloads IPinfo Lite once a day (about 25 MB) - your routers never download anything.</p>
       <div class="row"><input id="rgToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="${g.token_set ? "saved - leave blank to keep" : "token"}">
         <button class="btn" type="button" id="rgTokenSave">Save token</button><span class="status small" id="rgTokenMsg"></span></div></details>` : ""}
-    ${x.countries.length ? `
+    ${!x.countries.length && !tl.entries && admin ? `<div class="rg-threat small"><b>Known bad networks</b> (Spamhaus DROP + FireHOL Level 1) - free, no sign-up.
+      <button class="btn small" type="button" id="rgThreatUpdate">Download the lists</button></div>` : ""}
+    ${x.countries.length || tl.entries ? `
+    <div class="rg-threat"><label class="chk"><input type="checkbox" id="rgThreats" ${dr.threats ? "checked" : ""} ${canWrite() && tl.entries ? "" : "disabled"}>
+        <b>Block known bad networks</b> for this client - both directions</label>
+      <div class="small muted">Hijacked and criminal networks, botnet controllers and the worst attackers:
+        ${tl.sources.map((s) => `<a href="${esc(s.info)}" target="_blank" rel="noopener">${esc(s.name)}</a>${s.entries ? ` (${s.entries.toLocaleString()})` : ""}`).join(" + ")}
+        - ${tl.entries ? `${tl.entries.toLocaleString()} networks after merging, updated ${ago(tl.updated_at)}, refreshed daily` : "not downloaded yet"}.
+        Small enough for every router (about ${mb(tl.entries || 4000)}). Works with or without region blocking; private addresses and everything that's never blocked stay out.</div>
+      <div class="rg-data small">${tl.running ? `<span class="status">Downloading…</span>` : ""}${tl.error ? `<span class="status warn">${esc(tl.error)}</span>` : ""}
+        ${admin && !tl.running ? `<button class="btn small" type="button" id="rgThreatUpdate">${tl.entries ? "Update now" : "Download the lists"}</button>` : ""}</div></div>
     <label class="chk rg-on"><input type="checkbox" id="rgEnabled" ${dr.enabled ? "checked" : ""} ${canWrite() ? "" : "disabled"}> Region blocking on for this client</label>
     <div class="rg-grid">
       <div><div class="small muted">Mode</div>${seg("rgMode", dr.mode, [["block", "Block"], ["allow", "Allow only"]])}
@@ -3955,6 +3967,8 @@ async function regionCard(local) {   // local: redraw from the data already read
     catch (e) { $("rgTokenMsg").textContent = e.message; $("rgTokenMsg").className = "status small err"; }
   });
   $("rgEnabled")?.addEventListener("change", (e) => { keep(); dr.enabled = e.target.checked; redraw(); });
+  $("rgThreats")?.addEventListener("change", (e) => { keep(); dr.threats = e.target.checked; redraw(); });
+  $("rgThreatUpdate")?.addEventListener("click", async (e) => { e.target.disabled = true; try { await post("/api/region/threats/update"); } catch (err) { rgView.msg = err.message; } setTimeout(reload, 2500); });
   $("rgMode")?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { keep(); dr.mode = b.dataset.v; redraw(); }));
   $("rgDir")?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { keep(); dr.direction = b.dataset.v; redraw(); }));
   $("rgCard").querySelectorAll("[data-rgdel]").forEach((b) => b.addEventListener("click", () => { keep(); dr.countries = dr.countries.filter((c) => c !== b.dataset.rgdel); redraw(); }));
@@ -4009,7 +4023,7 @@ async function regionCard(local) {   // local: redraw from the data already read
   });
   $("rgSync")?.addEventListener("click", async (e) => { e.target.disabled = true; await post("/api/region/sync", { org_id: x.org_id }).catch(() => {}); rgView.msg = "Syncing…"; setTimeout(reload, 2500); });
   rgView.dirty = dirty;
-  if (!local && (x.running || x.routers.some((r) => r.state === "loading") || g.running)) setTimeout(() => { if ($("rgCard") && !rgView.dirty) reload(); }, 5000);
+  if (!local && (x.running || x.routers.some((r) => r.state === "loading") || g.running || tl.running)) setTimeout(() => { if ($("rgCard") && !rgView.dirty) reload(); }, 5000);
 }
 
 // what "blocked" means for one address right now - each with its own Unblock (fail2ban here guards SSH to TikManager's
