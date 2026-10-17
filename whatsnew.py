@@ -31,6 +31,9 @@ SLIDES_2_0 = [
     {"id": "dashboards", "title": "Dashboards", "img": None, "view": "dashboard", "who": "tech",
      "text": "The Dashboard has tabs, like Report Center: Overview, Network, Security and Maintenance. Click any tile to jump "
              "to its list or open the page that deals with it."},
+    {"id": "isps", "title": "ISPs and outages", "img": None, "view": "isps", "who": "tech",
+     "text": "Network > ISPs: which provider each router's internet links use, and a possible-outage warning (and alert) when "
+             "several routers on the same ISP drop together - so you know whether to call the ISP or go to the site."},
     {"id": "critical-checks", "title": "Critical checks", "img": None, "view": "checks", "who": "tech",
      "text": "Monitoring > Critical checks: make sure a client's routers can always reach an address - a server, a phone system, "
              "the far end of a VPN. Every router pings it each minute (with exclusions, tags or chosen routers) and an alert "

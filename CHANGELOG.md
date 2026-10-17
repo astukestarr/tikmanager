@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.17 - 2026-10-17
+
+- **Each router's ISP, per internet link** - shown on the router page (Internet links > ISP) and found every 10 minutes:
+  the link's own public address looked up in the IPinfo data (provider name, ASN, country); behind a modem's or the
+  carrier's NAT, the public address the router actually reaches TikManager from (its WireGuard endpoint - this also keeps
+  the router's public address current); for LTE / 5G, the operator the modem reports. A backup link behind NAT is
+  remembered from when it last carried traffic.
+- **Network > ISPs** - every ISP your routers use, with each router and link on it, its status and public address, and
+  known problems: **possible outage** when several routers on the same ISP lose that link or go offline together (at
+  least 2, and at least 30% of its links); routers without a detected ISP are listed too.
+- **Cloudflare Radar** (optional, free API token with Radar Read - Network > ISPs or Admin > Integrations) - Cloudflare's
+  verified outages for each ISP in use, last 7 days, checked every 30 minutes.
+- **Alerts**: a new **Possible ISP outage** alert (one per ISP, listing the routers), and internet-link-down alerts now
+  say when other routers on the same ISP are down too ("likely an ISP outage") or Cloudflare reports one. The Network
+  dashboard has an **ISP outages** tile.
+- The IPinfo data now keeps each network's ASN (downloaded again with the next daily update).
+
 ## 2.0.0-beta.16 - 2026-10-17
 
 - **Critical checks** (Monitoring > Critical checks, and a card on each router's page) - addresses a client's routers must

@@ -61,6 +61,7 @@ import compliance
 import dashboards
 from messages import Messages
 from checks import CheckError, Checks
+from isp import ISPs
 from roles import ADMIN as ROLE_ADMIN, LABEL as PERM_LABEL, NONE as ROLE_NONE, Roles, rule_for
 import whatsnew
 from f2b import F2b
@@ -156,7 +157,9 @@ flowlog = Flows(db, settings, geo, poller.client, routerlogs)
 msgs = Messages(db)
 roles = Roles(db, settings.tech_admins.split(","))
 checks = Checks(db, poller.client)   # critical checks: addresses a client's routers must reach (pinged from each router)
-alerts.checks = checks   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
+alerts.checks = checks
+isps = ISPs(db, settings, geo, wg, lambda: integ.config("cloudflare").get("token", ""))   # which ISP each router's links use; outages
+alerts.isps = isps   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -605,7 +608,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(rows)
         if path == "/api/integrations":
             self.require(tech=True, admin=True)
-            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"), "mail": integ.public("mail"), "ipinfo": integ.public("ipinfo"),
+            return self.json({"cw": integ.public("cw"), "itg": integ.public("itg"), "github": integ.public("github"), "mail": integ.public("mail"), "ipinfo": integ.public("ipinfo"), "cloudflare": integ.public("cloudflare"),
                               "itg_last_sync": json.loads(db.setting("itg_last_sync") or "null"), "itg_sync": integ.sync_state,
                               # set up elsewhere, shown on the Integrations page too
                               "teams": {"configured": integ.configured("teams")}, "webhooks": {"count": len(alerts.webhooks.public())},
@@ -1000,6 +1003,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/rules":
             self.require(tech=True)
             return self.json({"rules": routerlogs.rules(), "severities": LOG_SEVERITIES})
+        if path == "/api/isps":   # Network > ISPs: every ISP the routers use, their links and any known problems
+            s = self.require()
+            where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
+            rows = db.q(f"SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where}", args)
+            undetected = [{"id": r["id"], "name": r["name"], "org": r["org"] or "", "online": r["online"]} for r in rows
+                          if json.loads(r["isp_state"] or "{}") and not json.loads(r["isp_info"] or "{}")]
+            return self.json({"isps": isps.summary(rows), "undetected": undetected, "geo": bool(geo.meta()),
+                              "radar": {"configured": bool(integ.config("cloudflare").get("token")), "at": isps.radar["at"], "error": isps.radar["error"]},
+                              "can_detect": self.can(s, "devices"), "can_token": self.can(s, "integrations")})
         if path == "/api/checks":   # Monitoring > Critical checks: checks with each router's result (?org_id=)
             s = self.require(tech=True)
             org = int(q["org_id"]) if str(q.get("org_id") or "").isdigit() else None
@@ -1028,7 +1040,7 @@ class Handler(BaseHTTPRequestHandler):
             rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                             WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args)
             board = m.group(1)
-            out = (dashboards.network(db, rows) if board == "network" else dashboards.maintenance(db, rows) if board == "maintenance"
+            out = (dashboards.network(db, rows, isps) if board == "network" else dashboards.maintenance(db, rows) if board == "maintenance"
                    else dashboards.mobile(db, rows, s["kind"] == "tech") if board == "mobile"
                    else dashboards.security(db, rows, geo if geo.meta() else None, autoblock, region))
             return self.json({**out, "read_at": time.time()})
@@ -1187,6 +1199,7 @@ class Handler(BaseHTTPRequestHandler):
             d["sec_info"] = json.loads(d.get("sec_info") or "null")
             d["health"] = json.loads(d.get("health") or "{}")
             d["isp_state"] = json.loads(d.get("isp_state") or "{}")
+            d["isp_info"] = json.loads(d.get("isp_info") or "{}")
             d["bgp_state"] = json.loads(d.get("bgp_state") or "null")
             d["isp_ifaces"] = json.loads(d.get("isp_ifaces") or "null")
             d["tags"] = json.loads(d.get("tags") or "[]")
@@ -2491,6 +2504,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "webhook saved", h["name"], self.client_ip(), detail=h["format"])
             return self.json({"ok": True, "id": h["id"]})
+        if path == "/api/isps/detect":   # look up every router's ISP now (and Cloudflare Radar)
+            self.require(tech=True, perm="devices")
+            threading.Thread(target=lambda: (isps.detect(), isps.refresh_radar(force=True)), daemon=True, name="isp-detect").start()
+            return self.json({"ok": True})
+        if path == "/api/isps/radar-token":   # {token}: Cloudflare Radar API token (stored encrypted)
+            s = self.require(tech=True, perm="integrations")
+            b = self.body()
+            integ.save("cloudflare", {"token": str(b.get("token") or "").strip(), "clear": ["token"] if b.get("clear") else []})
+            db.audit(s["email"], "integration settings changed", "Cloudflare Radar", self.client_ip())
+            threading.Thread(target=lambda: isps.refresh_radar(force=True), daemon=True, name="radar").start()
+            return self.json({"ok": True})
         if path == "/api/checks":   # add / change a critical check
             s = self.require(tech=True, perm="devices")
             try:
@@ -3041,6 +3065,7 @@ def main():
     region.start()
     flowlog.start()
     checks.start()
+    isps.start()
     try:
         msgs.sync_releases()   # this version's release notes in everyone's Message Center
         msgs.seed_guides()     # built-in guides (putting TikManager on your phone), once

@@ -796,3 +796,9 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .ck-sum { display: inline-flex; gap: 6px; } .ck-body { padding: 0 2px 12px; }
 .ck-scope { margin: 4px 0 8px; flex-wrap: wrap; }
 .ck-routers { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px 12px; max-height: 220px; overflow-y: auto; padding: 6px 0; }
+/* Network > ISPs */
+.isp-list { display: flex; flex-direction: column; } .isp { border-top: 1px solid var(--border); } .isp:first-child { border-top: 0; }
+.isp-head { all: unset; box-sizing: border-box; width: 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 2px; cursor: pointer; }
+.isp-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.isp-sum { display: inline-flex; flex-wrap: wrap; gap: 6px; } .isp-body { padding: 0 2px 12px; }
+.isp-radar { padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid var(--bad); background: var(--bg); border-radius: 6px; }

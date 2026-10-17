@@ -46,6 +46,19 @@ class WireGuard:
         if valid_key(pubkey):
             self._wg("set", self.s.wg_interface, "peer", pubkey, "remove")
 
+    def endpoints(self):
+        """{public key: public IP} - where each router's tunnel comes from now (`wg show <if> endpoints`; needs the same
+        CAP_NET_ADMIN as `wg set`). Empty in dev mode."""
+        if self.s.dev:
+            return {}
+        r = subprocess.run(["wg", "show", self.s.wg_interface, "endpoints"], capture_output=True, text=True, timeout=15)
+        out = {}
+        for line in r.stdout.splitlines() if r.returncode == 0 else []:
+            parts = line.split()
+            if len(parts) == 2 and valid_key(parts[0]) and parts[1] != "(none)":
+                out[parts[0]] = parts[1].rsplit(":", 1)[0].strip("[]")
+        return out
+
     def sync(self, peers):
         """Re-apply every adopted router's peer (at startup)."""
         for pubkey, ip in peers:

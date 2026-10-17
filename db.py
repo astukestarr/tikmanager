@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS devices (
   flows_on INTEGER NOT NULL DEFAULT 0, flows_prev TEXT,   -- Flows pilot: on, and the Traffic Flow settings to put back
   bgp_state TEXT,                           -- BGP peers (JSON {name: {up, remote, as, since, uptime, prefixes}}); NULL = no BGP
   isp_ifaces TEXT, isp_state TEXT,         -- internet links: chosen interfaces (JSON, null = automatic) and their state
+  isp_info TEXT,                            -- which ISP each internet link uses (isp.py): {link: {name, asn, cc, ip, how, at}}
   last_reboot REAL, last_reboot_why TEXT,  -- last restart TikManager noticed (uptime went back): upgrade / unexpected
   tags TEXT,                               -- JSON list of tags (technicians), e.g. ["core", "poe-switch"]
   kind_override TEXT,                      -- router / switch / ap when the automatic guess (devkind.py) is wrong
@@ -341,7 +342,7 @@ class DB:
                              ("lc_suggest", "TEXT"), ("lc_suggest_name", "TEXT"), ("lc_suggest_why", "TEXT"),
                              ("dm_mode", "TEXT"), ("dm_flagged", "INTEGER"), ("dm_info", "TEXT"), ("dm_checked", "REAL"),
                              ("sec_target", "TEXT"), ("cve_n", "INTEGER"), ("cve_max", "REAL"), ("sec_info", "TEXT"), ("sec_version", "TEXT"),
-                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT"), ("bgp_state", "TEXT"), ("bgp_at", "REAL"), ("flows_on", "INTEGER NOT NULL DEFAULT 0"), ("flows_prev", "TEXT"),
+                             ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT"), ("bgp_state", "TEXT"), ("bgp_at", "REAL"), ("flows_on", "INTEGER NOT NULL DEFAULT 0"), ("flows_prev", "TEXT"), ("isp_info", "TEXT"),
                              ("last_reboot", "REAL"), ("last_reboot_why", "TEXT"), ("tags", "TEXT"), ("kind_override", "TEXT")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")

@@ -37,7 +37,7 @@ def _checks_down(db, rows):
     return down, total
 
 
-def network(db, rows, now=None):
+def network(db, rows, isps=None, now=None):
     now = now or time.time()
     ids = [r["id"] for r in rows]
     ph = ",".join("?" * len(ids)) or "NULL"
@@ -61,7 +61,10 @@ def network(db, rows, now=None):
     flaps = db.q(f"""SELECT e.device_id AS id, d.name, COUNT(*) AS n FROM events e JOIN devices d ON d.id = e.device_id
                      WHERE e.device_id IN ({ph}) AND e.ts > ? AND e.kind='link down' GROUP BY e.device_id ORDER BY n DESC LIMIT 10""", (*ids, now - 86400)) if ids else []
     cdown, ctotal = _checks_down(db, rows)
-    return {"checks_down": cdown, "checks_total": ctotal,
+    groups = isps.summary(rows) if isps else []
+    return {"checks_down": cdown, "checks_total": ctotal, "isps_total": len(groups),
+            "isp_problems": [{"name": g["name"], "asn": g["asn"], "affected": g["affected"], "links": len(g["links"]), "outage": g["outage"],
+                              "radar": any(r.get("ongoing") for r in g["radar"])} for g in groups if g["affected"] or any(r.get("ongoing") for r in g["radar"])],
             "online": sum(1 for r in rows if r["online"]), "total": len(rows), "links_total": links_total, "links_down": links_down,
             "bgp_total": bgp_total, "bgp_down": bgp_down, "avg_latency": round(sum(lats) / len(lats), 1) if lats else None,
             "lossy": [x for x in stat("loss") if x["value"] > 0], "latency": stat("lat"), "cpu": stat("cpu"), "mem": stat("mem"), "flaps": flaps}

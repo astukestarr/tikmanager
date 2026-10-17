@@ -253,6 +253,7 @@ function dashNetwork(x) {
       ${dTile(`${x.online}/${x.total}`, "Routers online", x.online < x.total ? "warn" : "good", "", "routers/router")}
       ${dTile(x.links_down.length, "Internet links down", x.links_down.length ? "bad" : "good", `of ${x.links_total}`, "@dnLinks")}
       ${x.bgp_total ? dTile(x.bgp_down.length, "BGP peers down", x.bgp_down.length ? "bad" : "good", `of ${x.bgp_total}`, "@dnBgp") : ""}
+      ${x.isps_total ? dTile(x.isp_problems.filter((g) => g.outage || g.radar).length, "ISP outages", x.isp_problems.some((g) => g.outage || g.radar) ? "bad" : "good", `of ${x.isps_total} ISPs`, "isps") : ""}
       ${x.checks_total ? dTile(x.checks_down.length, "Critical checks down", x.checks_down.length ? "bad" : "good", `of ${x.checks_total}`, "@dnChecks") : ""}
       ${dTile(x.avg_latency != null ? `${x.avg_latency} ms` : "—", "Average latency", "", "last hour", "@dnLat")}
       ${dTile(x.lossy.length, "Routers with packet loss", x.lossy.length ? "warn" : "good", "last hour", "@dnLoss")}</div>
@@ -1007,11 +1008,12 @@ function ispCard(d) {
   const now = Date.now() / 1000;
   return `<div class="card"><div class="row"><h2>Internet links</h2><span class="spacer"></span>
       ${links.some(([, l]) => !l.up) ? `<span class="status warn small">${links.filter(([, l]) => !l.up).length} down</span>` : `<span class="status ok small">all up</span>`}</div>
-    <div class="table-wrap"><table><thead><tr><th>Link</th><th>Status</th><th>Address</th><th>For</th><th></th></tr></thead><tbody>
-    ${links.map(([n, l]) => `<tr><td><span class="mono">${esc(n)}</span>${l.comment ? ` <span class="muted small">${esc(l.comment)}</span>` : ""}</td>
+    <div class="table-wrap"><table><thead><tr><th>Link</th><th>ISP</th><th>Status</th><th>Address</th><th>For</th><th></th></tr></thead><tbody>
+    ${links.map(([n, l]) => { const i = (d.isp_info || {})[n]; return `<tr><td><span class="mono">${esc(n)}</span>${l.comment ? ` <span class="muted small">${esc(l.comment)}</span>` : ""}</td>
+      <td class="small">${i ? `<a href="#isps">${esc(i.name)}</a>${i.asn ? ` <span class="muted">AS${i.asn}</span>` : ""}${i.stale ? ` <span class="muted">(last seen)</span>` : ""}` : `<span class="muted">—</span>`}</td>
       <td>${l.up ? `<span class="dot on"></span>up` : `<span class="dot off"></span><b class="status err">down</b>`}</td>
       <td class="mono small">${esc(l.addr || "")}</td><td class="small nowrap">${l.since ? durShort(now - l.since) : ""}</td>
-      <td>${l.active ? `<span class="pill" title="The default route uses this link now">carrying traffic</span>` : ""}</td></tr>`).join("")}</tbody></table></div>
+      <td>${l.active ? `<span class="pill" title="The default route uses this link now">carrying traffic</span>` : ""}</td></tr>`; }).join("")}</tbody></table></div>
     <p class="small muted">Events and an alert when a link goes down, comes back or changes address. Which interfaces count is set on the Settings tab.</p></div>`;
 }
 // router page > Flows (pilot, flows.py): conversations through the router from Traffic Flow (IPFIX), like UniFi's Insights > Flows
@@ -1555,6 +1557,57 @@ async function adminTechs() {
   }));
 }
 
+// --- Network > ISPs (isp.py): every ISP the routers use, which routers / links are on it, and known problems ---------------
+const ispView = { open: null };
+const ISP_STATE = { up: ["dot on", "up"], down: ["dot off", "down"], "router offline": ["dot off", "router offline"], unknown: ["dot pending", "unknown (router offline)"] };
+async function ispsPage() {
+  const x = await api("/api/isps");
+  const bad = x.isps.filter((g) => g.outage || g.radar.some((r) => r.ongoing));
+  const day = (s) => s ? new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  $("main").innerHTML = `<div class="row"><div><h1>ISPs</h1><p class="muted">Every internet provider your routers use - found from each internet link's public address
+      (or, behind a modem's NAT, the address the router reaches TikManager from), every 10 minutes - and whether one seems to be down.</p></div>
+      <span class="spacer"></span>${x.can_detect ? `<button class="btn" type="button" id="ispDetect">Check now</button>` : ""}</div>
+    ${bad.length ? `<div class="ab-warn"><b>${bad.length} ISP${bad.length === 1 ? "" : "s"} with problems:</b> ${bad.map((g) => esc(g.name)).join(", ")} - several of your routers on
+      ${bad.length === 1 ? "it" : "each"} lost the link or went offline together${bad.some((g) => g.radar.some((r) => r.ongoing)) ? ", or Cloudflare Radar reports an outage" : ""}. Probably the ISP, not the sites.</div>` : ""}
+    ${x.geo ? "" : `<div class="ab-warn small">ISP names come from the IPinfo data - add your free IPinfo token on Security &gt; Blocking (Region blocking) first.</div>`}
+    <div class="card">${x.isps.length ? `<div class="isp-list">${x.isps.map((g) => {
+        const ongoing = g.radar.filter((r) => r.ongoing);
+        return `<div class="isp ${ispView.open === g.key ? "open" : ""}">
+          <button type="button" class="isp-head" data-ispopen="${esc(g.key)}" aria-expanded="${ispView.open === g.key}">
+            <span><b>${esc(g.name)}</b> <span class="small muted">${g.asn ? `AS${g.asn}` : ""}${g.cc ? ` · ${esc(g.cc)}` : ""} · ${g.routers} router${g.routers === 1 ? "" : "s"}, ${g.links.length} link${g.links.length === 1 ? "" : "s"}</span></span>
+            <span class="isp-sum">${g.outage ? `<span class="pill up-failed">possible outage</span>` : ""}${ongoing.length ? `<span class="pill up-failed">Radar: outage</span>` : ""}
+              ${g.down ? `<span class="pill up-sched">${g.down} link${g.down === 1 ? "" : "s"} down</span>` : ""}${g.offline ? `<span class="pill up-sched">${g.offline} router${g.offline === 1 ? "" : "s"} offline</span>` : ""}
+              ${!g.affected && !ongoing.length ? `<span class="pill up-done">OK</span>` : ""}</span></button>
+          ${ispView.open === g.key ? `<div class="isp-body">
+            ${g.radar.length ? `<div class="isp-radar">${g.radar.map((r) => `<div class="small"><b>${r.ongoing ? "Ongoing" : "Ended"}</b> - ${esc(r.summary || r.cause || "outage")}
+              <span class="muted">${day(r.start)}${r.end ? ` to ${day(r.end)}` : ""}</span>${r.link ? ` <a href="${esc(r.link)}" target="_blank" rel="noopener noreferrer">details</a>` : ""}</div>`).join("")}
+              <div class="small muted">Cloudflare Radar - last 7 days</div></div>` : ""}
+            <div class="table-wrap"><table><thead><tr><th>Router</th><th>Link</th><th>Status</th><th>Public address</th><th>Since</th></tr></thead><tbody>
+            ${g.links.map((l) => { const [dot, label] = ISP_STATE[l.state] || ["dot pending", l.state];
+              return `<tr class="click" data-dev="${l.device_id}"><td>${esc(l.router)}${!me.org && l.org ? ` <span class="muted small">${esc(l.org)}</span>` : ""}</td>
+                <td><span class="mono">${esc(l.link)}</span>${l.comment ? ` <span class="muted small">${esc(l.comment)}</span>` : ""}${l.active ? ` <span class="pill" title="Carries the router's traffic now">active</span>` : ""}</td>
+                <td class="small"><span class="${dot}"></span>${esc(label)}</td>
+                <td class="small"><span class="mono">${esc(l.ip)}</span>${l.how ? `<div class="muted">${esc(l.how)}${l.stale ? " · last seen" : ""}</div>` : ""}</td>
+                <td class="small nowrap">${l.since && l.state !== "up" ? ago(l.since) : ""}</td></tr>`; }).join("")}</tbody></table></div></div>` : ""}</div>`; }).join("")}</div>`
+      : `<p class="muted">No ISPs found yet. They're looked up every 10 minutes${x.geo ? "" : " once the IPinfo data is downloaded"}.</p>`}</div>
+    ${x.undetected.length ? `<div class="card"><h2>Routers without a detected ISP (${x.undetected.length})</h2><p class="small muted">Their internet links have private addresses and
+      TikManager couldn't see the public address they reach it from yet (or there's no IPinfo data for it). Backup links behind a modem show up once they've carried traffic.</p>
+      <p class="small">${x.undetected.map((r) => `<a href="#router/${r.id}">${esc(r.name)}</a>${r.org && !me.org ? ` <span class="muted">${esc(r.org)}</span>` : ""}`).join(" · ")}</p></div>` : ""}
+    <div class="card"><h2>Cloudflare Radar</h2><p class="small muted">Optional: Cloudflare's verified internet outages for each ISP above (free - create an API token with
+      <b>Radar Read</b> at dash.cloudflare.com &gt; My Profile &gt; API Tokens). Checked every 30 minutes.</p>
+      <p class="small">${x.radar.configured ? `Connected${x.radar.at ? ` · checked ${ago(x.radar.at)}` : ""}` : "Not set up"}${x.radar.error ? ` <span class="status err">${esc(x.radar.error)}</span>` : ""}</p>
+      ${x.can_token ? `<div class="row"><input id="cfToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="${x.radar.configured ? "saved - leave blank to keep" : "API token"}">
+        <button class="btn" type="button" id="cfSave">Save token</button>${x.radar.configured ? `<button class="btn ghost" type="button" id="cfClear">Remove</button>` : ""}<span class="status small" id="cfMsg"></span></div>` : ""}</div>`;
+  const again = () => ispsPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
+  bindRows();
+  $("main").querySelectorAll("[data-ispopen]").forEach((b) => b.addEventListener("click", () => { ispView.open = ispView.open === b.dataset.ispopen ? null : b.dataset.ispopen; again(); }));
+  $("ispDetect")?.addEventListener("click", async (e) => { e.target.disabled = true; e.target.textContent = "Checking…"; await post("/api/isps/detect"); setTimeout(again, 4000); });
+  const tok = async (body) => { try { await post("/api/isps/radar-token", body); $("cfMsg").textContent = "Saved."; $("cfMsg").className = "status small ok"; setTimeout(again, 3000); }
+    catch (e) { $("cfMsg").textContent = e.message; $("cfMsg").className = "status small err"; } };
+  $("cfSave")?.addEventListener("click", () => tok({ token: $("cfToken").value }));
+  $("cfClear")?.addEventListener("click", () => tok({ clear: true }));
+}
+
 // --- Critical checks (checks.py): addresses a client's routers must reach, pinged from each router ------------------------
 const ckView = { org: "", open: null };
 const ckState = (r) => !r.online ? ["", "router offline"] : r.up === 1 ? ["up-done", "reachable"] : r.up === 0 ? ["up-failed", "unreachable"]
@@ -1683,6 +1736,8 @@ const INTEGRATIONS = [
     about: "Alerts to Slack, Discord, ntfy or any HTTPS endpoint (Alerts page)." },
   { id: "ubnt", name: "UniFi & UISP", cat: "Network", color: "#006fff",
     about: "UniFi (unifi.ui.com) and UISP sites and devices - your accounts and clients' own - each site assigned to a client." },
+  { id: "cloudflare", name: "Cloudflare Radar", cat: "Network", color: "#f38020", link: "isps",
+    about: "Verified internet outages for the ISPs your routers use (free API token) - set up on Network > ISPs." },
   { id: "ipinfo", name: "IPinfo", cat: "Security", color: "#3f65f5", link: "region",
     about: "Country data (IPinfo Lite, free) for region blocking - set up on Security > Blocking." },
   { id: "github", name: "GitHub script library", cat: "Scripts", color: "#24292f", test: true,
@@ -1726,6 +1781,7 @@ async function adminIntegrations() {
     document.querySelectorAll("[data-iopen]").forEach((b) => b.addEventListener("click", () => {
       const x = INTEGRATIONS.find((y) => y.id === b.dataset.iopen);
       if (x.link === "alerts") return go("alerts");
+      if (x.link === "isps") return go("isps");
       if (x.link === "region") return go("blocking").then?.(() => setTimeout(() => $("rgCard")?.scrollIntoView({ block: "start" }), 600));
       if (x.link === "system") return admin("system").then(() => setTimeout(() => (x.id === "offsite" ? $("offCard") : $("cfDomains")?.closest(".card"))?.scrollIntoView({ block: "start" }), 400));
       intView.open = x.id;
@@ -5476,7 +5532,7 @@ const NAV = [
     { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" },
     { view: "unifi", label: "UniFi / UISP", count: "unifi", who: "unifi" }] },
   { group: "Network", icon: "network", items: [
-    { view: "sites", label: "Site map" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
+    { view: "sites", label: "Site map" }, { view: "isps", label: "ISPs" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
     { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
     { view: "health", label: "Router health", who: "tech" }, { view: "checks", label: "Critical checks", who: "tech" },
@@ -5626,7 +5682,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

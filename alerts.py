@@ -47,6 +47,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "firmware": ("New RouterOS available for a router", False, None, None),
     "unifi": ("UniFi / UISP site has offline devices (one alert per site)", True, "minutes", 10),
     "bgp": ("BGP peer down (a configured BGP connection without an established session)", True, "minutes", 3),
+    "isp_outage": ("Possible ISP outage (several routers on the same ISP lost that link or went offline together - Network > ISPs)", True, None, None),
     "critical": ("Critical check down (a router can't reach an address it must - Monitoring > Critical checks)", True, "minutes", 2),
     "remote_access": ("Remote access: someone connected from a new address, or their key was used from two places (clears after an hour)", True, None, None),
 }
@@ -143,6 +144,16 @@ class Alerts:
                     out[f"reboot:{d['id']}:{int(d['last_reboot'])}"] = ("reboot", d["id"], d["org_id"], f"{label(d)} restarted unexpectedly",
                         f"It restarted at {time.strftime('%Y-%m-%d %H:%M', time.localtime(d['last_reboot']))} without an upgrade - power, a crash "
                         "(the router's log may say) or someone restarting it. Now up again.")
+        isps = getattr(self, "isps", None)
+        if k.get("isp_outage", {}).get("on") and isps:
+            for g in isps.summary(devs):
+                if g["outage"]:
+                    hit = [x for x in g["links"] if x["state"] in ("down", "router offline")]
+                    names = sorted({x["router"] for x in hit})
+                    out[f"isp_outage:{g['key']}"] = ("isp_outage", None, None, short(f"Possible {g['name']} outage: {len(names)} routers affected"),
+                        f"{len(hit)} of {len(g['links'])} internet links on {g['name']}" + (f" (AS{g['asn']})" if g["asn"] else "")
+                        + f" are down or their routers offline: {', '.join(names[:15])}{'...' if len(names) > 15 else ''}. Probably the ISP rather than the sites - "
+                        "check its status page or call it." + (f" Cloudflare Radar: {g['radar'][0]['summary']}" if any(r.get('ongoing') for r in g["radar"]) else ""))
         if k["isp"]["on"]:
             limit = now - k["isp"]["minutes"] * 60
             for d in devs:
@@ -152,9 +163,11 @@ class Alerts:
                     if not l.get("up") and (l.get("since") or now) < limit:
                         name = n + (f" ({l['comment']})" if l.get("comment") else "")
                         others = [x for x, y in json.loads(d["isp_state"]).items() if y.get("up") and x != n]
+                        hint = isps.hint(d["id"], n) if isps else ""
                         out[f"isp:{d['id']}:{n}"] = ("isp", d["id"], d["org_id"], f"{label(d)}: internet link {name} is down",
                                                      f"Down since {time.strftime('%Y-%m-%d %H:%M', time.localtime(l.get('since') or now))}. "
-                                                     + (f"Running on {', '.join(others)}." if others else "No other internet link is up - reachable some other way."))
+                                                     + (f"Running on {', '.join(others)}." if others else "No other internet link is up - reachable some other way.")
+                                                     + (f" {hint}." if hint else ""))
         if k.get("bgp", {}).get("on"):
             limit = now - k["bgp"]["minutes"] * 60
             for d in devs:

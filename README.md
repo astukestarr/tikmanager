@@ -196,6 +196,14 @@ dashboard: what needs attention, a router search, alerts and events).
 It's the same TikManager: everything stays on your server, sign-in works as in the browser, and updates arrive with
 the server's - there's nothing to update on the phone.
 
+## ISPs
+
+**Network > ISPs** lists every internet provider your routers use - found per internet link from its public address, or
+(behind a modem's NAT) the address the router reaches TikManager from, or the LTE operator - with each router and link on
+it. When several routers on the same ISP lose that link or go offline together it shows **possible outage**, raises the
+**Possible ISP outage** alert and adds a hint to their link-down alerts. Optionally, a free Cloudflare Radar API token
+adds Cloudflare's verified outages per ISP.
+
 ## Critical checks
 
 **Monitoring > Critical checks**: addresses a client's routers must reach - "every router at Acme can get to
