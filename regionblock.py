@@ -8,8 +8,10 @@
   router's own addresses, addresses people actually used in the last 90 days (TikManager and router sign-ins, remote
   access connections) and the auto-block whitelist - in Block mode they're cut out of the list, in Allow mode added to it.
 - On the router: one address list (LIST) whose entries have a timeout, so they live in RAM only - no flash writes, no
-  bloated backups - and are refreshed weekly; firewall filter rules with connection-state=new on the internet links, so
-  replies and TikManager's own tunnel are never touched; a startup scheduler that disables those rules after a reboot
+  bloated backups - and are refreshed weekly; firewall filter rules with connection-state=new on the internet links jump
+  to TikManager's own chains, whose first rules send TikManager's addresses (web address and WireGuard endpoint) straight
+  back - so TikManager can't be blocked whatever the list holds - before the drop. Rule changes are made like Safe Mode:
+  an undo is armed on the router first and cancelled only once TikManager can still reach it; a startup scheduler that disables those rules after a reboot
   (the list is gone then - in Allow mode an empty list would block everything) until TikManager has reloaded it.
 - Small routers: a list that would take more than RAM_SHARE of the router's free memory isn't loaded at all; entries go in
   BATCH at a time with pauses, slowing down when the CPU is busy and stopping (to continue later) when it stays busy;
@@ -29,7 +31,12 @@ from routeros import RouterError
 
 LIST = "tikmanager-geo"
 TAG = "TikManager region blocking"
-BOOT = "tikmanager-geo-boot"
+CHAIN_IN, CHAIN_OUT = "tikmanager-geo-in", "tikmanager-geo-out"
+UNDO = "tikmanager-geo-undo"
+UNDO_SCRIPT = (f'/ip firewall filter remove [find comment~"^{TAG}"]\n'
+               f'/system scheduler remove [find where name="{UNDO}"]\n/system script remove [find where name="{UNDO}"]\n')
+CUTOFF_PAUSE = 24 * 3600        # after losing a router on a rule change, no automatic retry for this long (Sync now retries)
+PRIVATE_V4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
 TIMEOUT = "14d"
 REFRESH_EVERY = 6 * 86400       # entries' timeouts are renewed this often
 BATCH, REMOVE_BATCH = 150, 25
@@ -54,6 +61,7 @@ class RegionBlock:
         self.lock = threading.Lock()
         self.running = False
         self.again = False   # a change came in while a round was running: run another straight after
+        self.cutoff = {}     # device id -> when a rule change cut TikManager off (the router undid it)
 
     # --- policies -------------------------------------------------------------------------------------------------
     def policies(self):
@@ -99,12 +107,7 @@ class RegionBlock:
         ips.update(r["public_ip"] for r in self.db.q("SELECT DISTINCT public_ip FROM ra_sessions WHERE started_at > ? AND public_ip <> ''", (since,)))
         ips.update(r["ip"] for r in self.db.q("""SELECT DISTINCT ip FROM sec_events WHERE kind='login_ok' AND ts > ? AND ip <> ''
                                                  AND NOT (source='router' AND user='tikmanager')""", (since,)))
-        try:   # TikManager's own public address (the routers' tunnels go to it)
-            host = urllib.parse.urlparse(getattr(self.s, "public_url", "") or "").hostname
-            if host:
-                ips.update(a[4][0] for a in socket.getaddrinfo(host, None, socket.AF_INET))
-        except OSError:
-            pass
+        ips.update(self.tm_ips())
         nets = []
         for x in list(ips) + list((self.autoblock.settings().get("whitelist") if self.autoblock else None) or []) + list((pol or {}).get("exceptions") or []):
             try:
@@ -114,6 +117,18 @@ class RegionBlock:
             if n.version == 4 and n.is_global:
                 nets.append(n)
         return list(ipaddress.collapse_addresses(nets))
+
+    def tm_ips(self):
+        """TikManager's own IPv4 addresses: its web address and the WireGuard endpoint the routers dial."""
+        hosts = {urllib.parse.urlparse(getattr(self.s, "public_url", "") or "").hostname,
+                 str(getattr(self.s, "wg_endpoint", "") or "").rpartition(":")[0].strip("[]") or None}
+        out = set()
+        for h in filter(None, hosts):
+            try:
+                out.update(a[4][0] for a in socket.getaddrinfo(h, None, socket.AF_INET))
+            except OSError:
+                pass
+        return sorted(out)
 
     @staticmethod
     def effective(pol, did):
@@ -193,7 +208,7 @@ class RegionBlock:
         return True, f"about {need / 1e6:.1f} MB of {free / 1e6:.0f} MB free"
 
     # --- syncing -------------------------------------------------------------------------------------------------
-    def run_once(self, org_id=None):
+    def run_once(self, org_id=None, manual=False):
         """Bring every router in line with its client's policy (one router at a time)."""
         with self.lock:
             if self.running:
@@ -211,6 +226,10 @@ class RegionBlock:
                     pol = self.effective(pol, d["id"])
                 active = bool(pol and pol.get("enabled") and pol.get("countries") and d["id"] not in (pol.get("skip") or []))
                 st = self.state(d["id"])
+                if manual:
+                    self.cutoff.pop(d["id"], None)
+                elif active and time.time() - self.cutoff.get(d["id"], 0) < CUTOFF_PAUSE:
+                    continue
                 try:
                     if not active:
                         if st and st["state"] != "off":
@@ -264,16 +283,21 @@ class RegionBlock:
         if not wans:
             self._set(did, state="error", detail="TikManager doesn't know this router's internet links yet (router page > Settings > Internet links).")
             return
+        tm = self.tm_ips()
+        if not tm:
+            self._set(did, state="error", detail="Couldn't look up TikManager's own address, so nothing was changed (the rules need it so "
+                                                 "TikManager can never be blocked).")
+            return
         cl = self.client(d)
         pushed = self._pushed(did)
         rules = [r for r in cl.fw_rules("filter") or [] if str(r.get("comment") or "").startswith(TAG)]
         lost = bool(pushed) and (any(r.get("disabled") == "true" for r in rules) or not cl.al_find(LIST, next(iter(pushed))))
         if lost:   # rebooted (the startup scheduler disabled the rules) or the list was cleared: load it again
             pushed = set()
-        steady = (st.get("state") == "synced" and st.get("target_hash") == th and not lost and len(rules) == len(self._bodies(pol, wans))
+        steady = (st.get("state") == "synced" and st.get("target_hash") == th and not lost and len(rules) == len(self._bodies(pol, wans, tm))
                   and now - (st.get("refreshed_at") or 0) < REFRESH_EVERY)
         if steady:
-            self._set(did, hits=sum(int(r.get("packets") or 0) for r in rules), checked_at=now)
+            self._set(did, hits=self._hits(rules), checked_at=now)
             return
         if st.get("mode") and (st.get("mode") != pol["mode"]) and rules:   # Block <-> Allow: the old rules go before the list changes
             self._remove_rules(cl)
@@ -303,47 +327,72 @@ class RegionBlock:
         elif add or lost:
             refreshed = now
         cl.geo_boot_guard(True, f"/ip firewall filter disable [find comment~\"^{TAG}\"]")
-        self._ensure_rules(cl, pol, wans)
+        self._ensure_rules(cl, d, pol, wans, tm)
         rules = [r for r in cl.fw_rules("filter") or [] if str(r.get("comment") or "").startswith(TAG)]
         self._set(did, state="synced", detail=f"{len(want):,} entries · {why}", entries=len(want), target_hash=th, mode=pol["mode"],
-                  synced_at=now, refreshed_at=refreshed, checked_at=now, hits=sum(int(r.get("packets") or 0) for r in rules))
+                  synced_at=now, refreshed_at=refreshed, checked_at=now, hits=self._hits(rules))
         if add or rem or lost:
             self.db.event(did, d["org_id"], "region blocking",
                           f"{'Reloaded after a restart: ' if lost else ''}{pol['mode']} {', '.join(pol['countries'])} ({pol['direction']}) - "
                           f"{len(want):,} entries (+{len(add):,} / -{len(rem):,})")
 
     @staticmethod
-    def _bodies(pol, wans):
+    def _hits(rules):
+        return sum(int(r.get("packets") or 0) for r in rules if r.get("action") == "drop")
+
+    @staticmethod
+    def _bodies(pol, wans, tm):
+        """New connections on the internet links jump to TikManager's chains; there TikManager's addresses (and, in Allow
+        mode, private addresses - an upstream router or CGNAT) return to the router's own rules first, then the drop."""
         neg = "!" if pol["mode"] == "allow" else ""
+        safe = list(tm) + (list(PRIVATE_V4) if pol["mode"] == "allow" else [])
         out = []
         if pol["direction"] in ("incoming", "both"):
+            out += [{"chain": CHAIN_IN, "src-address": a, "action": "return", "comment": f"{TAG}: never block TikManager" if a in tm else f"{TAG}: private"} for a in safe]
+            out.append({"chain": CHAIN_IN, "src-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: incoming"})
             for w in wans:
-                out.append({"chain": "input", "in-interface": w, "connection-state": "new", "src-address-list": neg + LIST, "action": "drop",
-                            "comment": f"{TAG}: incoming"})
-                out.append({"chain": "forward", "in-interface": w, "connection-state": "new", "connection-nat-state": "dstnat",
-                            "src-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: incoming (port forwards)"})
+                out.append({"chain": "input", "in-interface": w, "connection-state": "new", "action": "jump", "jump-target": CHAIN_IN, "comment": f"{TAG}"})
+                out.append({"chain": "forward", "in-interface": w, "connection-state": "new", "connection-nat-state": "dstnat", "action": "jump",
+                            "jump-target": CHAIN_IN, "comment": f"{TAG}: port forwards"})
         if pol["direction"] in ("outgoing", "both"):
+            out += [{"chain": CHAIN_OUT, "dst-address": a, "action": "return", "comment": f"{TAG}: never block TikManager" if a in tm else f"{TAG}: private"} for a in safe]
+            out.append({"chain": CHAIN_OUT, "dst-address-list": neg + LIST, "action": "drop", "comment": f"{TAG}: outgoing"})
             for w in wans:
-                out.append({"chain": "forward", "out-interface": w, "connection-state": "new", "dst-address-list": neg + LIST, "action": "drop",
-                            "comment": f"{TAG}: outgoing"})
+                out.append({"chain": "forward", "out-interface": w, "connection-state": "new", "action": "jump", "jump-target": CHAIN_OUT, "comment": f"{TAG}: outgoing"})
         return out
 
-    def _ensure_rules(self, cl, pol, wans):
-        """The policy's rules at the top of their chains, enabled; replaced as a set when anything differs."""
-        keyf = lambda r: tuple(str(r.get(k) or "") for k in ("chain", "in-interface", "out-interface", "connection-nat-state",
-                                                             "src-address-list", "dst-address-list"))
-        want = self._bodies(pol, wans)
+    def _ensure_rules(self, cl, d, pol, wans, tm):
+        """The policy's rules, enabled; replaced as a set when anything differs - like Safe Mode: an undo that removes them
+        is armed on the router first and cancelled only once TikManager can still reach the router."""
+        keyf = lambda r: tuple(str(r.get(k) or "") for k in ("chain", "action", "jump-target", "in-interface", "out-interface", "connection-nat-state",
+                                                             "src-address", "dst-address", "src-address-list", "dst-address-list"))
+        want = self._bodies(pol, wans, tm)
         rules = cl.fw_rules("filter") or []
         mine = [r for r in rules if str(r.get("comment") or "").startswith(TAG)]
-        if sorted(map(keyf, mine)) == sorted(map(keyf, want)) and all(r.get("disabled") != "true" for r in mine):
+        if [keyf(r) for r in mine if r["chain"] in (CHAIN_IN, CHAIN_OUT)] == [keyf(b) for b in want if b["chain"] in (CHAIN_IN, CHAIN_OUT)] \
+                and sorted(map(keyf, mine)) == sorted(map(keyf, want)) and all(r.get("disabled") != "true" for r in mine):
             return
+        cl.undo_arm(UNDO, UNDO_SCRIPT, "5m")   # armed before the change: if TikManager is cut off, the router undoes it by itself
         for r in mine:
             cl.fw_remove("filter", r[".id"])
+        for b in want:   # TikManager's chains, in order (returns before the drop)
+            if b["chain"] in (CHAIN_IN, CHAIN_OUT):
+                cl.fw_add("filter", b)
         rules = cl.fw_rules("filter") or []
-        for b in reversed(want):   # each one before the same first rule of its chain, so they end up in order
+        for b in reversed([b for b in want if b["chain"] not in (CHAIN_IN, CHAIN_OUT)]):   # the jumps at the top of input / forward
             first = next((r for r in rules if r.get("chain") == b["chain"] and r.get("dynamic") != "true"
                           and not str(r.get("comment") or "").startswith(TAG)), None)
             cl.fw_add("filter", b, before=first[".id"] if first else None)
+        time.sleep(3)
+        try:
+            cl.alive()
+        except RouterError:
+            self.cutoff[d["id"]] = time.time()
+            self.db.event(d["id"], d["org_id"], "region blocking", "TikManager lost the router after adding the region rules - the router takes them "
+                                                                   "off by itself within 5 minutes. Not retried automatically for 24 hours (Sync now retries).")
+            raise RouterError("Lost the router after adding the rules - the router removes them by itself within 5 minutes. "
+                              "Not retried automatically for 24 hours; Sync now tries again.") from None
+        cl.undo_cancel(UNDO)
 
     def _remove_rules(self, cl):
         for r in cl.fw_rules("filter") or []:
@@ -381,5 +430,5 @@ class RegionBlock:
     def start(self):
         threading.Thread(target=self.loop, daemon=True, name="regionblock").start()
 
-    def kick(self, org_id=None):
-        threading.Thread(target=self.run_once, args=(org_id,), daemon=True, name="regionblock-now").start()
+    def kick(self, org_id=None, manual=True):
+        threading.Thread(target=self.run_once, args=(org_id, manual), daemon=True, name="regionblock-now").start()

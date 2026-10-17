@@ -2383,7 +2383,7 @@ class Handler(BaseHTTPRequestHandler):
                 def run():
                     try:
                         geo.update()
-                        region.kick()
+                        region.kick(manual=False)
                     except GeoError:
                         pass   # shown on the page (geo.state)
                 threading.Thread(target=run, daemon=True, name="geo-update").start()

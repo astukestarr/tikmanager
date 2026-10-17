@@ -3809,8 +3809,8 @@ async function regionCard(local) {   // local: redraw from the data already read
     : g.token_set || g.dev ? "not downloaded yet" : "needs an IPinfo Lite token (free)";
   $("rgCard").innerHTML = `<div class="row"><h2>Region blocking</h2><span class="pill ${x.policy?.enabled ? "ab-on" : ""}">${x.policy?.enabled ? `${x.policy.mode === "allow" ? "Allow only" : "Block"} · ${x.policy.countries.length} countr${x.policy.countries.length === 1 ? "y" : "ies"}` : "Off"}</span>
       <span class="spacer"></span><label class="field rg-org">Client <select id="rgOrg">${x.orgs.map((o) => `<option value="${o.id}" ${o.id === x.org_id ? "selected" : ""}>${esc(o.name)}${o.on ? " ●" : ""}</option>`).join("")}</select></label></div>
-    <p class="small muted">Drop new connections from (or to) whole countries on this client's routers. Replies and connections already open aren't touched, nor is
-      TikManager's tunnel. Never blocked: TikManager, the routers' own addresses, addresses your people actually used in the last 90 days (sign-ins,
+    <p class="small muted">Drop new connections from (or to) whole countries on this client's routers. Replies and connections already open aren't touched, and TikManager's
+      own addresses are let through before any rule drops anything; rule changes are tested like Safe Mode. Never blocked: TikManager, the routers' own addresses, addresses your people actually used in the last 90 days (sign-ins,
       remote access) and the auto-block whitelist. The list lives in each router's memory only (no flash writes, not in backups) and is loaded a little at a
       time; a router where it would take more than a quarter of its free memory is skipped.</p>
     <div class="rg-data small"><span>Country data: ${data}</span>

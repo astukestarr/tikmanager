@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.3 - 2026-10-16
+
+- **Region blocking can never block TikManager** - the rules are now jumps (new connections on the internet links) into
+  TikManager's own chains, `tikmanager-geo-in` / `tikmanager-geo-out`, whose first rules return TikManager's addresses
+  (its web address and the WireGuard endpoint the routers dial) to the router's normal rules before anything is dropped -
+  whatever the country list holds. In Allow mode private addresses (an upstream router, CGNAT) return too. If
+  TikManager's address can't be looked up, nothing is changed.
+- **Safe Mode for region rules** - before changing a router's region rules TikManager arms an undo on the router, then
+  checks it can still reach the router; if not, the router removes the region rules by itself within 5 minutes, an event
+  says so, and that router isn't retried automatically for 24 hours (**Sync now** retries).
+- Dropped counts only the drop rules.
+
 ## 2.0.0-beta.2 - 2026-10-16
 
 - **Region blocking: typing a country works** - the country boxes (Countries, and Let through here per router) now
