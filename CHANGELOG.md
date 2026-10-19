@@ -3,6 +3,54 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0 - 2026-10-19
+
+TikManager 2 - the full release of 2.0.0-beta.1 to beta.25. A new major version for its size, but **no manual steps**:
+existing data, settings and routers keep working - upgrade with the button. (The updater opens UDP 2055 on the tunnel
+only, for Flows. Region blocking and the ISP names need a free IPinfo Lite token - Security > Blocking.)
+
+**Security**
+- **Region blocking** (Security > Blocking) - per client, Block or Allow only a list of countries, Incoming, Outgoing or
+  Both, with per-router exceptions (leave a router out, or let countries through on just that router). Country data from
+  IPinfo Lite, downloaded daily by TikManager. Built for small routers: a RAM-only address list loaded in batches with a
+  CPU watchdog, skipped where it would need more than a quarter of the free memory, rules held off after a restart until
+  the list is back. TikManager, the routers' own addresses and addresses your people use are never blocked; TikManager's
+  own addresses are let through before any drop rule, and rule changes are tested like Safe Mode.
+- **Block known bad networks** - Spamhaus DROP and FireHOL Level 1, both directions, per client.
+- **Security menu** - Sign-ins & events, Blocking, Vulnerabilities and Compliance under their own heading; Monitoring >
+  Performance & security is now **Router health**.
+- **Technician roles** - build roles from individual permissions (devices, router configuration, Winbox, upgrades,
+  backups, remote access, VPNs, tasks, Flows, blocking, clients, technicians, alerts, integrations, settings); pick the
+  role new Microsoft sign-ins get, or have them wait for one. The server enforces every permission.
+- **Routers' HTTPS certificates are pinned** - a changed certificate is refused (never accepted silently, never a reason to
+  drop to HTTP) until a technician trusts it.
+- Security review fixes: configuration backups need the backups permission; task placeholders are escaped; links from
+  outside data open http(s) only.
+
+**Monitoring**
+- **Critical checks** - addresses a client's routers must reach (all routers, tagged routers or chosen ones, with
+  exclusions), pinged every minute from each router (optionally from its LAN address), with a Critical check down alert,
+  a filter, and a card on each router page.
+- **ISPs** (Network > ISPs) - each router's ISP per internet link, a possible-outage warning and alert when several
+  routers on the same ISP drop together, and Cloudflare Radar outages (optional free token, with Test).
+- **Flows (pilot)** - router page > Flows: who talks to what, with names, country, organisation and service, filters,
+  CSV and what blocking dropped. Opt-in per router (128 MB+), over the tunnel.
+
+**Dashboards and the app**
+- **Dashboard boards** - Overview, Network, Security and Maintenance tabs; every tile clicks through; the refresh keeps
+  your board and place.
+- **Phone dashboard** - opens on phones: what needs attention, router search, alerts; and TikManager **installs as an
+  app** (Android: Install app; iPhone: Add to Home Screen) with its own icon.
+- **Message Center** - the bell: release notes and notices for each person, acknowledged one by one or all at once,
+  including a guide to putting TikManager on your phone.
+
+**Updates and adoption**
+- Upgrade now checks for updates first, so a newer beta is never refused.
+- Each version tag gets a GitHub Release automatically; installs and updates download its file, so **Downloads from
+  GitHub** (Version & updates) counts them.
+- Re-adopting a router repairs a TikManager firewall rule left pointing at a removed interface, removes old tunnel
+  addresses and accepts the tunnel's port.
+
 ## 2.0.0-beta.25 - 2026-10-19
 
 - **Critical checks filter, by router** - typing a router's name kept every check that router is on (a check for all of a
