@@ -197,12 +197,18 @@ def tour(release, kind):
 
 
 def key():
-    """What a person's "seen" record belongs to: the release, and whether it's still in beta (a full release resets)."""
-    return __version__ if "-" not in __version__ else __version__.split("-")[0] + "-beta"
+    """What a person's "seen" record belongs to: the release, and whether it's still in beta (a full release resets).
+    Patch releases after it (2.0.1, 2.0.2-beta.1...) share the full release's record - no tour again for a fix."""
+    base = __version__.split("-")[0]
+    if base != RELEASE:
+        return RELEASE
+    return __version__ if "-" not in __version__ else base + "-beta"
 
 
 def active():
-    return __version__.split("-")[0] == RELEASE
+    """The slides cover the release and its patch releases (2.0.x): upgrading from 1.46 straight to 2.0.1 still shows them."""
+    minor = lambda v: v.split("-")[0].rsplit(".", 1)[0]
+    return minor(__version__) == minor(RELEASE)
 
 
 def for_person(kind, saved):

@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.1 - 2026-10-19
+
+The full release of 2.0.1-beta.1 to beta.4 - fixes for big and busy routers, no manual steps.
+
+- **Firewall tab on big routers** - rules show as soon as they're read; address lists (tens of thousands of entries with
+  region blocking / known bad networks) are counted in the background instead of holding up the tab. Rule reads get a
+  minute on core routers.
+- **Flows can't slow TikManager down any more** - at most 40 flow packets a second are read per router; the rest are
+  dropped unread.
+- **Flows packet sampling** - every packet, 1 in 10, 1 in 100 or 1 in 1,000 (RouterOS 7), picked when turning Flows on
+  and changeable any time; bytes are multiplied back up. A router over budget is sampled more thinly by itself, and Flows
+  is turned off only when even 1 in 1,000 is too much.
+- **Routers with WebFig over HTTP off** no longer show offline for 10 minutes after one slow HTTPS answer.
+- **What's new** - the 2.0 tour also shows for anyone upgrading straight to 2.0.1 (not again for those who've seen it).
+
 ## 2.0.1-beta.4 - 2026-10-19
 
 - **Flows on busy and core routers: packet sampling** - when turning Flows on, pick how much the router looks at: every
