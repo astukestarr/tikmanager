@@ -112,7 +112,9 @@ fi
 status running "Downloading $VER from github.com/$REPO"
 WORK=$(mktemp -d /tmp/tm-update.XXXXXX)
 trap 'rm -rf "$WORK" "${COPY:-$0}"' EXIT
-if ! curl -fsSL -H "User-Agent: TikManager-updater" -o "$WORK/release.tar.gz" "https://github.com/$REPO/archive/refs/tags/v$VER.tar.gz"; then
+# the release's download file first (GitHub counts those downloads - .github/workflows/release.yml), else the tag's archive
+if ! curl -fsSL -H "User-Agent: TikManager-updater" -o "$WORK/release.tar.gz" "https://github.com/$REPO/releases/download/v$VER/tikmanager-$VER.tar.gz" \
+   && ! curl -fsSL -H "User-Agent: TikManager-updater" -o "$WORK/release.tar.gz" "https://github.com/$REPO/archive/refs/tags/v$VER.tar.gz"; then
   status failed "Couldn't download v$VER (does the tag exist?)"; exit 1
 fi
 tar -xzf "$WORK/release.tar.gz" -C "$WORK" --no-same-owner

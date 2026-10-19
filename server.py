@@ -759,6 +759,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise HttpError(404, "There's no tour for that release.")
                 return self.json(t)
             return self.json(whatsnew.for_person(s["kind"], user_prefs(s["user_id"]).get("whatsnew")))
+        if path == "/api/admin/downloads":   # Version & updates > Downloads from GitHub (installs + updates per version)
+            self.require(tech=True, perm="settings")
+            try:
+                return self.json({"repo": updates.repo, "versions": updates.downloads()})
+            except Exception as e:  # noqa: BLE001 - offline / rate-limited
+                raise HttpError(502, f"Couldn't read the releases from GitHub: {e}"[:200]) from None
         if path == "/api/whats-new/history":   # Version & updates > What's new in past releases
             self.require(tech=True)
             return self.json(whatsnew.history())

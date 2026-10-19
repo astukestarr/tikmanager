@@ -1,0 +1,40 @@
+# A GitHub Release for every version tag (vX.Y.Z or vX.Y.Z-beta.N): the download file tikmanager-<version>.tar.gz,
+# with that version's CHANGELOG.md section as the notes (betas marked as pre-releases). The installer (deploy/get.sh)
+# and the one-click updater (deploy/self-update.sh) download that file, so the release's download count shows how many
+# installations installed or updated to each version. Nothing to do by hand: push the tag and this runs.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the download and the notes
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          grep -q "__version__ = \"$VER\"" version.py || { echo "version.py isn't $VER"; exit 1; }
+          git archive --format=tar.gz --prefix="tikmanager-$VER/" -o "tikmanager-$VER.tar.gz" HEAD
+          awk -v h="## $VER" 'index($0, h) == 1 && (length($0) == length(h) || substr($0, length(h) + 1, 1) == " ") {p = 1; next}
+                              /^## / && p {exit} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          PRE=""
+          case "$VER" in *-beta.*) PRE="--prerelease" ;; esac
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "tikmanager-$VER.tar.gz" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "tikmanager-$VER.tar.gz" --title "TikManager $VER" --notes-file notes.md --verify-tag $PRE
+          fi

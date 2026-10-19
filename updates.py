@@ -116,6 +116,28 @@ class Updates:
                 break
         return out
 
+    def downloads(self):
+        """How many times each version's download file was fetched from GitHub (installs + one-click updates; the
+        Release workflow publishes the files). [{version, beta, published, downloads}], newest first; cached an hour."""
+        hit = getattr(self, "_dl", None)
+        if hit and time.time() - hit[0] < 3600:
+            return hit[1]
+        out = []
+        if self.repo and re.fullmatch(r"[\w.-]+/[\w.-]+", self.repo):
+            for page in (1, 2):
+                batch = self._get(f"https://api.github.com/repos/{self.repo}/releases?per_page=100&page={page}") or []
+                for r in batch if isinstance(batch, list) else []:
+                    tag = str(r.get("tag_name") or "")
+                    if not vtuple(tag):
+                        continue
+                    out.append({"version": tag.lstrip("v"), "beta": bool(r.get("prerelease")), "published": r.get("published_at"),
+                                "downloads": sum(int(a.get("download_count") or 0) for a in r.get("assets") or [] if str(a.get("name", "")).endswith(".tar.gz"))})
+                if len(batch) < 100:
+                    break
+        out.sort(key=lambda x: vtuple(x["version"]), reverse=True)
+        self._dl = (time.time(), out)
+        return out
+
     def check(self):
         if not self.repo or not re.fullmatch(r"[\w.-]+/[\w.-]+", self.repo):
             self.latest.update(error="No update repository configured (TM_UPDATE_REPO).", checked_at=time.time())

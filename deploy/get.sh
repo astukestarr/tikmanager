@@ -91,7 +91,9 @@ fi
 echo "== Downloading TikManager $VER from github.com/$REPO"
 WORK=$(mktemp -d /tmp/tikmanager-install.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
-curl -fsSL -H "$UA" -o "$WORK/release.tar.gz" "https://github.com/$REPO/archive/refs/tags/v$VER.tar.gz" \
+# the release's download file first (GitHub counts those downloads), else the tag's archive
+curl -fsSL -H "$UA" -o "$WORK/release.tar.gz" "https://github.com/$REPO/releases/download/v$VER/tikmanager-$VER.tar.gz" \
+  || curl -fsSL -H "$UA" -o "$WORK/release.tar.gz" "https://github.com/$REPO/archive/refs/tags/v$VER.tar.gz" \
   || { echo "Couldn't download v$VER (does that version exist?)"; exit 1; }
 tar -xzf "$WORK/release.tar.gz" -C "$WORK" --no-same-owner
 SRC=$(find "$WORK" -mindepth 1 -maxdepth 1 -type d | head -1)

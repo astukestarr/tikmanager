@@ -2843,8 +2843,24 @@ async function versionCard() {
       : !busy && u.checked_at && !u.error ? `<p class="small muted">No releases have been published yet.</p>` : ""}
     <div class="actions"><button class="btn" type="button" id="verCheckCard" ${busy ? "disabled" : ""}>Check for updates</button><span class="status" id="verStatus"></span></div>
     <details class="wn-hist" id="wnHistBox"><summary>What's new in past releases</summary><div id="wnHist"><p class="small muted">Loading…</p></div></details>
+    <details class="wn-hist" id="dlBox"><summary>Downloads from GitHub</summary><div id="dlList"><p class="small muted">Loading…</p></div></details>
     ${securityBox(u.security || {}, u)}`;
   $("wnHistBox")?.addEventListener("toggle", (e) => { if (e.target.open && !e.target.dataset.loaded) { e.target.dataset.loaded = "1"; wnHistory(); } });
+  $("dlBox")?.addEventListener("toggle", async (e) => {
+    if (!e.target.open || e.target.dataset.loaded) return;
+    e.target.dataset.loaded = "1";
+    try {
+      const x = await api("/api/admin/downloads");
+      const total = x.versions.reduce((n, v) => n + v.downloads, 0);
+      $("dlList").innerHTML = x.versions.length ? `<p class="small muted">Each install and one-click update downloads its version's file from github.com/${esc(x.repo)},
+          and GitHub counts them - ${total.toLocaleString()} in all. Versions published before the counting began have no file, so they show 0. Updated hourly.</p>
+        <div class="table-wrap"><table><thead><tr><th>Version</th><th>Published</th><th>Downloads</th></tr></thead><tbody>
+        ${x.versions.slice(0, 30).map((v) => `<tr><td>${esc(v.version)}${v.beta ? ` <span class="pill">beta</span>` : ""}</td>
+          <td class="small">${v.published ? new Date(v.published).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : ""}</td>
+          <td class="num">${v.downloads.toLocaleString()}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="small muted">No GitHub Releases yet. They're made automatically for each version tag pushed from now on.</p>`;
+    } catch (err) { $("dlList").innerHTML = `<p class="small status err">${esc(err.message)}</p>`; }
+  });
   el.querySelectorAll(".sec-howto").forEach((b) => b.addEventListener("click", () => {
     const box = b.nextElementSibling, open = box.classList.toggle("hidden") === false;
     b.setAttribute("aria-expanded", String(open));

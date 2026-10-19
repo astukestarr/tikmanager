@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.19 - 2026-10-19
+
+- **Install and update counts** - every version tag pushed to GitHub now gets a GitHub Release automatically
+  (`.github/workflows/release.yml`): the download file `tikmanager-<version>.tar.gz` and that version's changelog
+  section as notes, betas marked as pre-releases. The installer and the one-click updater download that file (falling
+  back to the tag's archive for older versions), so GitHub counts each install and update per version - shown on Admin >
+  Settings > Version & updates > **Downloads from GitHub**.
+
 ## 2.0.0-beta.18 - 2026-10-19
 
 - **Routers' HTTPS certificates are pinned** - every HTTPS connection to a router now checks the certificate against the
