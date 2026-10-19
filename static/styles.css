@@ -802,3 +802,4 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .isp-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .isp-sum { display: inline-flex; flex-wrap: wrap; gap: 6px; } .isp-body { padding: 0 2px 12px; }
 .isp-radar { padding: 8px 12px; margin-bottom: 8px; border-left: 3px solid var(--bad); background: var(--bg); border-radius: 6px; }
+.fl-filters { display: flex; flex-wrap: wrap; gap: 8px; } .fl-sel { margin: 0; min-width: 140px; } .fl-sel select { max-width: 220px; }

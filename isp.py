@@ -164,9 +164,9 @@ class ISPs:
         token = self.token_fn()
         if not token:
             self.radar.update(by_asn={}, error=None)
-            return
+            return {"error": "No Cloudflare token saved."}
         if not force and time.time() - self.radar["at"] < RADAR_EVERY:
-            return
+            return None
         asns = set()
         for r in self.db.q("SELECT isp_info FROM devices WHERE state='adopted' AND isp_info IS NOT NULL"):
             try:
@@ -195,7 +195,8 @@ class ISPs:
                               "link": a.get("linkedUrl") if str(a.get("linkedUrl") or "").startswith("https://") else ""})
             if items:
                 by[asn] = items
-        self.radar.update(at=time.time(), by_asn=by if not err else self.radar["by_asn"], error=err)
+        self.radar.update(at=time.time(), by_asn=by if not err else self.radar["by_asn"], error=err, checked=len(asns))
+        return {"error": err, "asns": len(asns), "with_outages": len(by), "ongoing": sum(1 for v in by.values() for r in v if r.get("ongoing"))}
 
     # --- background ----------------------------------------------------------------------------------------------
     def loop(self):

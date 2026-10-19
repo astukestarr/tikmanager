@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.22 - 2026-10-19
+
+From the 2.0 beta test:
+
+- **Critical checks: a filter** - type part of a check's name, address, client, tag or router to narrow the list.
+- **Flows: filter dropdowns** - Client, Country, Service and Direction above the list (clicking a value in the table still
+  filters too).
+- **Version & updates: What's new in past releases / Downloads from GitHub stay open** - they closed by themselves while a
+  check was running and the card refreshed.
+- **Network > ISPs: Test for the Cloudflare Radar token** - checks it straight away and says what came back.
+
 ## 2.0.0-beta.21 - 2026-10-19
 
 - **Region blocking: the Include checkbox snapped back** when ticked or unticked, so leaving a router out looked like it

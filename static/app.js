@@ -1033,6 +1033,18 @@ function ispCard(d) {
 const flView = { id: null, hours: 24, view: "all", q: "", f: {} };
 const FL_FILTERS = [["local", "Client"], ["remote", "Destination"], ["country", "Country"], ["org", "Organisation"], ["port", "Port"], ["proto", "Protocol"], ["dir", "Direction"]];
 const flBytes = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${(n / 1e3).toFixed(0)} KB` : `${n} B`;
+// the Flows filter dropdowns: their choices come from what's listed now (plus a value already filtered on)
+function flSelects(x) {
+  const uniq = (pairs) => [...new Map(pairs.filter(([v]) => v !== "" && v != null)).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), undefined, { numeric: true }));
+  const rows = x.rows || [];
+  const keep = (k, list) => flView.f[k] && !list.some(([v]) => String(v) === String(flView.f[k])) ? [[flView.f[k], flView.f[k]], ...list] : list;
+  return [
+    ["local", "Client", keep("local", uniq(rows.map((r) => [r.local, r.local_name ? `${r.local_name} (${r.local})` : r.local])))],
+    ["country", "Country", keep("country", uniq(rows.map((r) => [r.country, r.country_name || r.country])))],
+    ["port", "Service", keep("port", uniq(rows.filter((r) => r.port).map((r) => [r.port, r.service])))],
+    ["dir", "Direction", keep("dir", uniq(rows.map((r) => [r.dir, { out: "Outgoing", in: "Incoming", local: "Local", transit: "Transit" }[r.dir] || r.dir])))],
+  ].filter(([, , opts]) => opts.length);
+}
 async function flowsTab(d) {
   if (flView.id !== d.id) Object.assign(flView, { id: d.id, f: {}, q: "", view: "all" });
   const qs = new URLSearchParams({ hours: flView.hours, view: flView.view, q: flView.q, ...flView.f });
@@ -1069,9 +1081,11 @@ async function flowsTab(d) {
       <div class="seg fl-seg" role="group">${[[1, "1h"], [24, "1D"], [168, "1W"]].map(([h, l]) => `<button type="button" data-flh="${h}" class="${flView.hours === h ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="small muted fl-h">Flows</div>
       ${[["all", "All flows"], ["blocked", "Blocked (region / known bad)"]].map(([k, l]) => `<label class="chk"><input type="radio" name="flView" value="${k}" ${flView.view === k ? "checked" : ""}> ${l}</label>`).join("")}
+      <div class="fl-filters">${flSelects(x).map(([k, label, opts]) => `<label class="field fl-sel">${label}<select data-flsel="${k}">
+        <option value="">Any</option>${opts.map(([v, l]) => `<option value="${esc(String(v))}" ${String(flView.f[k] ?? "") === String(v) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`).join("")}</div>
       ${Object.keys(flView.f).length ? `<div class="small muted fl-h">Filters</div><div class="rg-chips">${Object.entries(flView.f).map(([k, v]) =>
         `<span class="rg-chip">${esc((FL_FILTERS.find((f) => f[0] === k) || [k, k])[1])}: ${esc(k === "proto" ? ({ 6: "TCP", 17: "UDP", 1: "ICMP" }[v] || v) : v)}<button type="button" class="rg-x" data-flclear="${k}" aria-label="Remove filter">×</button></span>`).join("")}</div>
-        <button class="linkish small" type="button" id="flClear">Clear filters</button>` : `<p class="small muted">Click a client, destination, country, service… to filter on it.</p>`}
+        <button class="linkish small" type="button" id="flClear">Clear filters</button>` : `<p class="small muted">Pick a filter above, or click any client, destination, country or service in the table.</p>`}
       <div class="fl-h"><a class="btn small" href="/api/devices/${d.id}/flows.csv?${qs}" download>Download CSV</a></div>
       <div class="small muted fl-h">${esc(ago2)}</div>
       ${canWrite() && x.on ? `<button class="linkish small" type="button" id="flOff">Turn Flows off</button>` : ""}
@@ -1105,6 +1119,7 @@ async function flowsTab(d) {
   root.querySelectorAll("[name=flView]").forEach((r) => r.addEventListener("change", () => { flView.view = r.value; again(); }));
   root.querySelectorAll("[data-flf]").forEach((b) => b.addEventListener("click", () => { flView.f[b.dataset.flf] = b.dataset.flv; again(); }));
   root.querySelectorAll("[data-flclear]").forEach((b) => b.addEventListener("click", () => { delete flView.f[b.dataset.flclear]; again(); }));
+  root.querySelectorAll("[data-flsel]").forEach((s) => s.addEventListener("change", () => { if (s.value) flView.f[s.dataset.flsel] = s.value; else delete flView.f[s.dataset.flsel]; again(); }));
   $("flClear")?.addEventListener("click", () => { flView.f = {}; again(); });
   $("flOff")?.addEventListener("click", async (e) => {
     if (!confirm("Turn Flows off on this router? Its previous Traffic Flow settings are put back; what was collected stays until it ages out.")) return;
@@ -1610,7 +1625,7 @@ async function ispsPage() {
       <b>Radar Read</b> at dash.cloudflare.com &gt; My Profile &gt; API Tokens). Checked every 30 minutes.</p>
       <p class="small">${x.radar.configured ? `Connected${x.radar.at ? ` · checked ${ago(x.radar.at)}` : ""}` : "Not set up"}${x.radar.error ? ` <span class="status err">${esc(x.radar.error)}</span>` : ""}</p>
       ${x.can_token ? `<div class="row"><input id="cfToken" type="password" autocomplete="new-password" spellcheck="false" placeholder="${x.radar.configured ? "saved - leave blank to keep" : "API token"}">
-        <button class="btn" type="button" id="cfSave">Save token</button>${x.radar.configured ? `<button class="btn ghost" type="button" id="cfClear">Remove</button>` : ""}<span class="status small" id="cfMsg"></span></div>` : ""}</div>`;
+        <button class="btn" type="button" id="cfSave">Save token</button>${x.radar.configured ? `<button class="btn" type="button" id="cfTest">Test</button><button class="btn ghost" type="button" id="cfClear">Remove</button>` : ""}<span class="status small" id="cfMsg"></span></div>` : ""}</div>`;
   const again = () => ispsPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
   bindRows();
   $("main").querySelectorAll("[data-ispopen]").forEach((b) => b.addEventListener("click", () => { ispView.open = ispView.open === b.dataset.ispopen ? null : b.dataset.ispopen; again(); }));
@@ -1619,10 +1634,16 @@ async function ispsPage() {
     catch (e) { $("cfMsg").textContent = e.message; $("cfMsg").className = "status small err"; } };
   $("cfSave")?.addEventListener("click", () => tok({ token: $("cfToken").value }));
   $("cfClear")?.addEventListener("click", () => tok({ clear: true }));
+  $("cfTest")?.addEventListener("click", async (e) => {
+    e.target.disabled = true; $("cfMsg").textContent = "Testing…"; $("cfMsg").className = "status small";
+    try { const r = await post("/api/isps/radar-test"); $("cfMsg").textContent = r.detail; $("cfMsg").className = `status small ${r.ok ? "ok" : "err"}`; }
+    catch (err) { $("cfMsg").textContent = err.message; $("cfMsg").className = "status small err"; }
+    e.target.disabled = false;
+  });
 }
 
 // --- Critical checks (checks.py): addresses a client's routers must reach, pinged from each router ------------------------
-const ckView = { org: "", open: null };
+const ckView = { org: "", open: null, q: "" };
 const ckState = (r) => !r.online ? ["", "router offline"] : r.up === 1 ? ["up-done", "reachable"] : r.up === 0 ? ["up-failed", "unreachable"]
   : r.fails ? ["up-sched", `failing (${r.fails})`] : ["up-cancelled", "waiting"];
 const ckScope = (c, routers) => {
@@ -1678,8 +1699,9 @@ async function checksPage() {
       system, the other end of a VPN. Each router pings them every minute; one that stops answering raises an alert (Alerts &gt; Critical check down).</p></div>
       <span class="spacer"></span>${x.can_edit ? `<button class="btn primary" type="button" id="ckNew">New check</button>` : ""}</div>
     <div class="card"><div class="row"><select id="ckOrgF" aria-label="Client"><option value="">All clients</option>${x.orgs.map((o) => `<option value="${o.id}" ${String(o.id) === ckView.org ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
+        <input id="ckQ" type="search" placeholder="Filter by check, address, client or router" aria-label="Filter checks" value="${esc(ckView.q)}">
         <span class="spacer"></span><span class="small ${down ? "status err" : "muted"}">${down ? `${down} router${down === 1 ? " can't" : "s can't"} reach a critical address` : `${x.checks.length} check${x.checks.length === 1 ? "" : "s"}${x.checks.length ? " - all reachable" : ""}`}</span></div>
-      ${x.checks.length ? `<div class="ck-list">${x.checks.map((c) => `<div class="ck ${ckView.open === c.id ? "open" : ""}">
+      ${x.checks.length ? `<div class="ck-list">${x.checks.map((c) => `<div class="ck ${ckView.open === c.id ? "open" : ""}" data-cktext="${esc([c.name, c.target, c.org, c.tag, ...c.results.map((r) => r.name)].join(" ").toLowerCase())}">
           <button type="button" class="ck-head" data-ckopen="${c.id}" aria-expanded="${ckView.open === c.id}">
             <span class="ck-name"><b>${esc(c.name)}</b> <span class="mono small">${esc(c.target)}</span>${c.enabled ? "" : ` <span class="pill">paused</span>`}
               <span class="small muted">· ${esc(c.org || "")} · ${ckScope(c, x.routers)}</span></span>
@@ -1697,6 +1719,16 @@ async function checksPage() {
   const again = () => checksPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
   $("ckNew")?.addEventListener("click", () => checkEditor(null, ckView.org ? { org_id: +ckView.org } : {}));
   $("ckOrgF").addEventListener("change", (e) => { ckView.org = e.target.value; again(); });
+  const ckFilter = () => {   // filtered in place - no reload, the box keeps its focus
+    const q = ckView.q.trim().toLowerCase();
+    let shown = 0;
+    $("main").querySelectorAll("[data-cktext]").forEach((el) => { el.hidden = !!q && !el.dataset.cktext.includes(q); shown += el.hidden ? 0 : 1; });
+    let none = $("ckNone");
+    if (q && !shown && !none) { $("main").querySelector(".ck-list")?.insertAdjacentHTML("afterend", `<p class="small muted" id="ckNone">No check matches.</p>`); }
+    else if ((!q || shown) && none) none.remove();
+  };
+  $("ckQ").addEventListener("input", (e) => { ckView.q = e.target.value; ckFilter(); });
+  ckFilter();
   $("main").querySelectorAll("[data-ckopen]").forEach((b) => b.addEventListener("click", () => { const id = +b.dataset.ckopen; ckView.open = ckView.open === id ? null : id; again(); }));
   $("main").querySelectorAll("[data-ckedit]").forEach((b) => b.addEventListener("click", () => checkEditor(x.checks.find((c) => c.id === +b.dataset.ckedit))));
   $("main").querySelectorAll("[data-ckrun]").forEach((b) => b.addEventListener("click", async () => { b.disabled = true; b.textContent = "Checking…"; await post(`/api/checks/${b.dataset.ckrun}/run`); setTimeout(again, 4000); }));
@@ -2809,6 +2841,7 @@ function watchUpdates() {
 async function versionCard() {
   const el = $("verCard");
   if (!el) return;
+  const reopen = ["wnHistBox", "dlBox"].filter((id) => $(id)?.open);   // the card redraws itself while a check runs: keep these open
   let u;
   try { u = await api("/api/version"); }
   catch { el.innerHTML = `<h2>Version &amp; updates</h2><p class="muted">Restarting… this page reloads when the new version is up.</p>`; setTimeout(versionCard, 4000); return; }
@@ -2904,6 +2937,7 @@ async function versionCard() {
       e.target.disabled = false; $("verStatus").textContent = err.message; $("verStatus").className = "status err";
     }
   });
+  reopen.forEach((id) => { if ($(id)) $(id).open = true; });   // fires their toggle handlers, which load them again
   if (busy || u.security?.running || u.reachability?.running) setTimeout(versionCard, 4000);
 }
 

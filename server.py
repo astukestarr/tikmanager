@@ -2524,6 +2524,13 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, perm="devices")
             threading.Thread(target=lambda: (isps.detect(), isps.refresh_radar(force=True)), daemon=True, name="isp-detect").start()
             return self.json({"ok": True})
+        if path == "/api/isps/radar-test":   # check the Cloudflare Radar token now and say what came back
+            self.require(tech=True, perm="integrations")
+            r = isps.refresh_radar(force=True) or {}
+            if r.get("error"):
+                return self.json({"ok": False, "detail": r["error"]})
+            return self.json({"ok": True, "detail": f"Connected - checked {r['asns']} ISP network{'s' if r['asns'] != 1 else ''}: "
+                              + (f"{r['with_outages']} with outages in the last 7 days ({r['ongoing']} ongoing)." if r["with_outages"] else "no outages reported in the last 7 days.")})
         if path == "/api/isps/radar-token":   # {token}: Cloudflare Radar API token (stored encrypted)
             s = self.require(tech=True, perm="integrations")
             b = self.body()
