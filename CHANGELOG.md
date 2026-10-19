@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.21 - 2026-10-19
+
+- **Region blocking: the Include checkbox snapped back** when ticked or unticked, so leaving a router out looked like it
+  did nothing. It now keeps your change, the row says "left out when saved" / "included when saved", and Save and apply
+  stores it.
+
 ## 2.0.0-beta.20 - 2026-10-19
 
 Security review fixes:

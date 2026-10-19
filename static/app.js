@@ -4384,13 +4384,13 @@ async function regionCard(local) {   // local: redraw from the data already read
       ${x.routers.map((r) => { const free = r.mem_total ? r.mem_total - (r.mem_used || 0) : null, [cls, label] = RG_STATE[r.state || "off"] || ["", r.state];
         return `<tr><td><a href="#router/${r.id}">${esc(r.name)}</a>${r.online ? "" : ` <span class="small muted">(offline)</span>`}</td>
           <td class="small nowrap">${free != null ? `${Math.round(free / 1e6)} MB${r.fits === false ? ` <span class="status warn">too little for this list</span>` : ""}` : "—"}</td>
-          <td class="small">${r.skip ? `<span class="pill">left out</span>` : `<span class="pill ${cls}">${esc(label)}</span>`}${r.detail ? `<div class="small muted">${esc(r.detail)}</div>` : ""}</td>
+          <td class="small">${dr.skip.includes(r.id) ? `<span class="pill">${r.skip ? "left out" : "left out when saved"}</span>` : !r.skip ? `<span class="pill ${cls}">${esc(label)}</span>` : `<span class="pill">included when saved</span>`}${r.detail ? `<div class="small muted">${esc(r.detail)}</div>` : ""}</td>
           <td class="small"><div class="rg-chips rg-rchips">${(dr.router_allow[r.id] || []).map((c) => `<span class="rg-chip">${esc(byCode[c]?.name || c)}${canWrite()
               ? ` <button type="button" class="rg-x" data-rgrdel="${r.id}:${c}" aria-label="Stop letting ${esc(byCode[c]?.name || c)} through">×</button>` : ""}</span>`).join("")}
             ${canWrite() ? `<span class="rg-pick"><input class="rg-radd" data-rgradd="${r.id}" placeholder="+ country" autocomplete="off" spellcheck="false" aria-label="Let a country through on ${esc(r.name)}"></span>` : ""}</div></td>
           <td class="small">${r.entries != null && r.state && r.state !== "off" ? r.entries.toLocaleString() : ""}</td>
           <td class="small">${r.hits ? Number(r.hits).toLocaleString() : ""}</td>
-          <td><input type="checkbox" data-rgskip="${r.id}" ${r.skip ? "" : "checked"} ${canWrite() ? "" : "disabled"} aria-label="Include ${esc(r.name)}"></td></tr>`; }).join("")}</tbody></table></div>`
+          <td><input type="checkbox" data-rgskip="${r.id}" ${dr.skip.includes(r.id) ? "" : "checked"} ${canWrite() ? "" : "disabled"} aria-label="Include ${esc(r.name)}"></td></tr>`; }).join("")}</tbody></table></div>`
       : `<p class="small muted">This client has no routers.</p>`}
     <p class="small muted">Let through here: countries this one router lets through even though the client's policy doesn't - in Block mode they're
       left off its list, in Allow mode added to it.</p>` : ""}
