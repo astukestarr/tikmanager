@@ -63,12 +63,26 @@ def stage2(s, device: dict, api_password: str) -> str:
 /interface wireguard set [find name=$tm] disabled=no comment="TikManager"
 /interface wireguard peers remove [find interface=$tm]
 /interface wireguard peers add interface=$tm public-key={_q(s.wg_server_pubkey)} endpoint-address={_q(host)} endpoint-port={int(port or 51820)} allowed-address={srv}/32 persistent-keepalive=25s comment="TikManager controller"
+# old tunnel addresses too (an earlier tikmanager interface that was removed leaves its address behind)
 /ip address remove [find interface=$tm]
+/ip address remove [find comment="TikManager"]
 /ip address add address={ip}/32 network={srv} interface=$tm comment="TikManager"
+# the accept rule for TikManager: added if missing; an existing one is pointed at this interface (it may still name a
+# removed one), switched on and moved to the top
 :if ([:len [/ip firewall filter find comment="TikManager"]] = 0) do={{
   :if ([:len [/ip firewall filter find]] > 0) do={{
     /ip firewall filter add chain=input in-interface=$tm src-address={srv} action=accept comment="TikManager" place-before=0
   }} else={{ /ip firewall filter add chain=input in-interface=$tm src-address={srv} action=accept comment="TikManager" }}
+}} else={{
+  /ip firewall filter set [find comment="TikManager"] chain=input in-interface=$tm src-address={srv} action=accept disabled=no
+  :do {{ /ip firewall filter move [find comment="TikManager"] destination=0 }} on-error={{}}
+}}
+# the tunnel's own UDP port: TikManager can reach the router even after its firewall's connection tracking has
+# forgotten the tunnel (short udp-timeout). WireGuard ignores anything not signed by TikManager's key.
+:local wgport [/interface wireguard get [find name=$tm] listen-port]
+/ip firewall filter remove [find comment="TikManager tunnel"]
+:if ([:len [/ip firewall filter find]] > 0) do={{
+  /ip firewall filter add chain=input protocol=udp dst-port=$wgport action=accept comment="TikManager tunnel" place-before=0
 }}
 :if ([:len [/user group find name=$tm]] = 0) do={{ /user group add name=$tm policy=read,write,policy,test,api,rest-api,sensitive,reboot comment="TikManager" }}
 /user remove [find name=$tm]

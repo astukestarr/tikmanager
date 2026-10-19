@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.23 - 2026-10-19
+
+- **Re-adopting a router repairs TikManager's firewall rule** - when the router's `tikmanager` interface had been removed
+  (a reset, or by hand) and the adoption command was run again, the new interface was created but the existing
+  "TikManager" accept rule still named the removed one (`in-interface=*E`, "no interface"), so the router's own firewall
+  dropped TikManager. The adoption command now points that rule at the current interface, switches it on and moves it to
+  the top; removes tunnel addresses left on a removed interface; and accepts the tunnel's UDP port
+  ("TikManager tunnel"), so a short connection-tracking UDP timeout (e.g. `udp-timeout=10s`) can't cut TikManager off.
+  WireGuard ignores anything not signed with TikManager's key, so that port reveals nothing.
+
 ## 2.0.0-beta.22 - 2026-10-19
 
 From the 2.0 beta test:
