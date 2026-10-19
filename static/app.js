@@ -643,9 +643,14 @@ async function router(id) {
       ${adopted && tab === "settings" && canWrite() ? ispSettings(d) : ""}
       ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Management connection</h2>
         <p class="small muted">How TikManager talks to this router's REST API - always inside its encrypted WireGuard tunnel.</p>
-        ${d.api_tls_port ? `<p><span class="pill up-done">HTTPS</span> on port <b>${esc(String(d.api_tls_port))}</b>${d.api_tls_fp ? ` <span class="small muted mono" title="Certificate SHA-256 when it was switched">${esc(d.api_tls_fp.slice(0, 16))}…</span>` : ""}</p>
-          <p class="small muted">If HTTPS ever stops answering, TikManager carries on over HTTP (while WebFig over HTTP is on) and records an event.
-            Once this works, Router health offers to turn WebFig over HTTP off.</p>
+        ${d.api_tls_port ? `<p><span class="pill up-done">HTTPS</span> on port <b>${esc(String(d.api_tls_port))}</b></p>
+          <p class="small">Trusted certificate (pinned): <span class="mono small" title="SHA-256">${d.api_tls_fp ? esc(d.api_tls_fp) : "trusted on first connection"}</span></p>
+          ${d.api_tls_new ? `<div class="ab-warn"><b>The router presented a different HTTPS certificate</b> - TikManager isn't using it (and won't fall back to HTTP for it)
+            until you trust it. Expected after the certificate was renewed or replaced; if nobody changed it, find out why first.
+            <div class="small">New: <span class="mono">${esc(d.api_tls_new)}</span></div>
+            ${can("config") ? `<div class="actions"><button class="btn primary small" type="button" id="tlsTrust" data-fp="${esc(d.api_tls_new)}">Trust the new certificate</button><span class="status small" id="tlsSt"></span></div>` : ""}</div>` : ""}
+          <p class="small muted">If HTTPS stops answering, TikManager carries on over HTTP (while WebFig over HTTP is on) and records an event - but a <b>changed certificate</b>
+            is never accepted that way. Once HTTPS works, Router health offers to turn WebFig over HTTP off.</p>
           <div class="row"><button class="btn" type="button" id="mgHttp">Use HTTP again</button><span class="status" id="mgSt"></span></div>`
         : `<p><span class="pill up-run">HTTP</span> - the REST API on the router's www service.</p>
           <p class="small muted"><b>Switch to HTTPS</b> sets up www-ssl and moves TikManager to it only once HTTPS answers - HTTP keeps working meanwhile.
@@ -741,6 +746,12 @@ async function router(id) {
     catch (e) { rView.hold = false; b.disabled = false; $("mgSt").textContent = e.message; $("mgSt").className = "status err"; }
   };
   $("mgHttps")?.addEventListener("click", () => mg(true));
+  $("tlsTrust")?.addEventListener("click", async (e) => {
+    if (!confirm("Trust this new certificate for this router from now on?")) return;
+    e.target.disabled = true;
+    try { await post(`/api/devices/${d.id}/tls-trust`, { fp: e.target.dataset.fp }); router(d.id); }
+    catch (err) { e.target.disabled = false; $("tlsSt").textContent = err.message; $("tlsSt").className = "status small err"; }
+  });
   $("mgHttp")?.addEventListener("click", () => mg(false));
   if ($("rvRoot")) rvTab(d).catch(() => {});
   if ($("rtRoot")) routingTab(d).catch(() => {});

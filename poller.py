@@ -33,10 +33,28 @@ class Poller:
         if self.s.dev:
             return SimRouter(d["id"], d["name"])
         tls = d.get("api_tls_port") if time.time() - self._tls_down.get(d["id"], 0) > 600 else None   # HTTPS failed just now: HTTP for 10 min
-        cl = RouterOS(d["tunnel_ip"], "tikmanager", derive(self.key, f"router-api:{d['id']}"), port=d.get("api_port") or 80, tls_port=tls)
+        cl = RouterOS(d["tunnel_ip"], "tikmanager", derive(self.key, f"router-api:{d['id']}"), port=d.get("api_port") or 80, tls_port=tls,
+                      tls_fp=d.get("api_tls_fp") or None)
         if tls:
             cl.on_fallback = lambda why, d=d: self._tls_fallback(d, why)
+            cl.on_tls_seen = lambda fp, d=d: self._tls_first(d, fp)
+            cl.on_cert_changed = lambda fp, d=d: self._tls_changed(d, fp)
         return cl
+
+    def _tls_first(self, d, fp):
+        """No pinned certificate yet (switched before pinning): trust this one from now on."""
+        if self.db.run("UPDATE devices SET api_tls_fp=? WHERE id=? AND (api_tls_fp IS NULL OR api_tls_fp='')", (fp, d["id"])) is not None:
+            d["api_tls_fp"] = fp
+
+    def _tls_changed(self, d, fp):
+        """A different HTTPS certificate: keep it aside for a technician to trust, and say so once per new certificate."""
+        cur = self.db.one("SELECT api_tls_new FROM devices WHERE id=?", (d["id"],)) or {}
+        if cur.get("api_tls_new") != fp:
+            self.db.run("UPDATE devices SET api_tls_new=? WHERE id=?", (fp, d["id"]))
+            self.db.event(d["id"], d["org_id"], "https certificate changed",
+                          f"The router's HTTPS certificate changed (now SHA-256 {fp}, trusted {d.get('api_tls_fp')}). TikManager won't use it - or fall "
+                          "back to HTTP - until a technician trusts it on the router's Settings tab. Expected if the certificate was renewed or replaced; "
+                          "if nobody changed it, find out why first.")
 
     def _tls_fallback(self, d, why):
         """HTTPS to a router that's set to use it didn't connect, and the client went on over HTTP: say so (every 6 hours at most)."""

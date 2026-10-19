@@ -189,7 +189,7 @@ def switch_https(d, user, cl=None):
         except RouterError:
             pass
         raise RouterError(f"HTTPS didn't answer over the tunnel ({e}) - www-ssl was put back as it was and TikManager stays on HTTP.") from None
-    db.run("UPDATE devices SET api_tls_port=?, api_tls_fp=? WHERE id=?", (info["port"], fp, d["id"]))
+    db.run("UPDATE devices SET api_tls_port=?, api_tls_fp=?, api_tls_new=NULL WHERE id=?", (info["port"], fp, d["id"]))
     what = f"HTTPS on port {info['port']}" + (" (new self-signed certificate)" if info.get("created_cert") else "") + \
         (f"; www-ssl available from {info['allowed']}" if "address" in info.get("changed", {}) or "available-from" in info.get("changed", {}) else "")
     db.event(d["id"], d["org_id"], "management https", f"TikManager now manages the router over {what} (by {user})")
@@ -1220,7 +1220,7 @@ class Handler(BaseHTTPRequestHandler):
                                           ORDER BY finished_at DESC LIMIT 1""", (d["id"],))
             d["events"] = db.q("SELECT ts, kind, detail FROM events WHERE device_id=? ORDER BY ts DESC LIMIT 50", (d["id"],))
             if s["kind"] != "tech":   # clients see their router, not TikManager's internal bookkeeping about it
-                for k in ("wg_pubkey", "token_expires", "notes", "api_port", "api_tls_port", "api_tls_fp", "created_by", "thumb_tried", "itg_config_id",
+                for k in ("wg_pubkey", "token_expires", "notes", "api_port", "api_tls_port", "api_tls_fp", "api_tls_new", "created_by", "thumb_tried", "itg_config_id",
                           "itg_synced_at", "itg_error", "vpn_inv_at", "ros_checked", "name_custom", "lc_checked"):
                     d.pop(k, None)
             return self.json(d)
@@ -1893,6 +1893,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(502, str(e)) from None
             db.audit(s["email"], "flows turned " + ("on" if on else "off"), d["name"], self.client_ip())
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/tls-trust", path):   # {fp}: trust the router's new HTTPS certificate (the one shown)
+            s = self.require(tech=True, perm="config")
+            d = self.device_for(s, m.group(1))
+            fp = str(self.body().get("fp") or "")
+            if not d.get("api_tls_new") or fp != d["api_tls_new"]:
+                raise HttpError(400, "That isn't the certificate the router presented - reload the page.")
+            db.run("UPDATE devices SET api_tls_fp=?, api_tls_new=NULL WHERE id=?", (fp, d["id"]))
+            db.audit(s["email"], "router HTTPS certificate trusted", d["name"], self.client_ip(), org_id=d["org_id"], detail=f"{d.get('api_tls_fp')} -> {fp}")
+            db.event(d["id"], d["org_id"], "https certificate trusted", f"{s['email']} trusted the new HTTPS certificate (SHA-256 {fp}).")
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/bgp-check", path):   # BGP card > Check now
             s = self.require(tech=True)
             d = self.device_for(s, m.group(1))
@@ -1916,7 +1926,7 @@ class Handler(BaseHTTPRequestHandler):
                 db.audit(s["email"], "management https", d["name"], self.client_ip(), org_id=d["org_id"])
                 poller.collect_vpns(db.one("SELECT * FROM devices WHERE id=?", (d["id"],)))
                 return self.json({"ok": True, "message": msg})
-            db.run("UPDATE devices SET api_tls_port=NULL, api_tls_fp=NULL WHERE id=?", (d["id"],))   # nothing changes on the router
+            db.run("UPDATE devices SET api_tls_port=NULL, api_tls_fp=NULL, api_tls_new=NULL WHERE id=?", (d["id"],))   # nothing changes on the router
             db.audit(s["email"], "management http", d["name"], self.client_ip(), org_id=d["org_id"])
             db.event(d["id"], d["org_id"], "management https", f"TikManager switched back to HTTP for this router (by {s['email']})")
             return self.json({"ok": True, "message": "TikManager uses HTTP for this router again (www-ssl was left as it is)."})

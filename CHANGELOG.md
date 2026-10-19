@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.18 - 2026-10-19
+
+- **Routers' HTTPS certificates are pinned** - every HTTPS connection to a router now checks the certificate against the
+  SHA-256 TikManager saw when it switched the router to HTTPS (routers switched before this: the first certificate seen
+  from now on). A different certificate is refused - never silently accepted and never a reason to fall back to HTTP -
+  the router shows the error, an event records the old and new fingerprints, and **Trust the new certificate** on the
+  router's Settings tab (Management connection; "config" permission) accepts it when the change was expected (a renewed
+  or replaced certificate). Before, the certificate was recorded but not checked.
+
 ## 2.0.0-beta.17 - 2026-10-17
 
 - **Each router's ISP, per internet link** - shown on the router page (Internet links > ISP) and found every 10 minutes:

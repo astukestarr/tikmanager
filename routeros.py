@@ -38,13 +38,49 @@ class CutOff(RouterError):
 
 
 # HTTPS to the router runs inside TikManager's WireGuard tunnel, where the router is already authenticated by its
-# WireGuard key - the certificate (often self-signed, or the client's own and renewed now and then) isn't verified;
-# TLS adds encryption on the router's side and lets WebFig over plain HTTP be switched off.
+# WireGuard key. Its certificate is usually self-signed, so it isn't checked against a CA - it's *pinned* instead: the
+# SHA-256 of the certificate TikManager saw when it switched the router to HTTPS (devices.api_tls_fp; first use when
+# that's missing). A different certificate is refused (CertChanged) - never silently accepted, and never a reason to drop
+# to HTTP - until a technician trusts the new one on the router page.
 TLS = ssl.create_default_context()
-TLS.check_hostname, TLS.verify_mode = False, ssl.CERT_NONE
+TLS.check_hostname, TLS.verify_mode = False, ssl.CERT_NONE   # the pin below does the checking
 HTTPS_CERT = "tikmanager-https"
 PRIVATE = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 TLS_PORTS = (8443, 9443, 10443, 18443)   # for www-ssl when 443 is taken (SSTP, another service)
+
+
+class CertChanged(RouterError):
+    """The router's HTTPS certificate isn't the pinned one."""
+    def __init__(self, seen, pinned):
+        self.seen, self.pinned = seen, pinned
+        super().__init__(f"The router's HTTPS certificate changed (now SHA-256 {seen[:16]}..., trusted {pinned[:16]}...) - TikManager doesn't use it "
+                         "until a technician trusts the new certificate (router page > Settings > Management connection).")
+
+
+class _PinnedHTTPS(urllib.request.HTTPSHandler):
+    """HTTPS that compares the server certificate's SHA-256 with the pinned one right after the handshake."""
+
+    def __init__(self, pin, seen_cb=None):
+        super().__init__(context=TLS)
+        self.pin, self.seen_cb = pin, seen_cb
+
+    def https_open(self, req):
+        return self.do_open(self._connection, req, context=TLS)
+
+    def _connection(self, host, **kw):
+        conn = http.client.HTTPSConnection(host, **kw)
+        connect = conn.connect
+
+        def checked():
+            connect()
+            got = hashlib.sha256(conn.sock.getpeercert(binary_form=True) or b"").hexdigest()
+            if self.pin and got != self.pin:
+                conn.close()
+                raise CertChanged(got, self.pin)
+            if not self.pin and self.seen_cb:
+                self.seen_cb(got)
+        conn.connect = checked
+        return conn
 
 
 def _yes(v):
@@ -63,7 +99,7 @@ def _covers(addr_list, ip):
 
 
 class RouterOS:
-    def __init__(self, ip, user, password, timeout=8, port=80, tls_port=None):
+    def __init__(self, ip, user, password, timeout=8, port=80, tls_port=None, tls_fp=None):
         self.ip = ip
         self.base = f"http://{ip}/rest" if int(port) == 80 else f"http://{ip}:{int(port)}/rest"
         self.tls_base = f"https://{ip}:{int(tls_port)}/rest" if tls_port else None
@@ -72,15 +108,23 @@ class RouterOS:
         self.fell_back = False     # HTTPS didn't connect, this client carries on over HTTP
         self.on_fallback = None    # poller: record it (once in a while) and avoid HTTPS for a few minutes
         self.tls_only = False      # no HTTP fallback (proving HTTPS alone works before WebFig over HTTP goes off)
+        self.tls_fp = tls_fp       # the pinned certificate SHA-256 (None: trust and report the first one seen - on_tls_seen)
+        self.on_tls_seen = None    # poller: save a first-seen fingerprint
+        self.on_cert_changed = None   # poller: record a changed certificate
 
     def _send(self, base, method, path, body, timeout, ctx):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(base + path, data=data, method=method,
                                      headers={"Authorization": self.auth, "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout, context=ctx) as r:
+            opener = urllib.request.build_opener(_PinnedHTTPS(self.tls_fp, self.on_tls_seen)) if ctx is not None else urllib.request.build_opener()
+            with opener.open(req, timeout=timeout or self.timeout) as r:
                 raw = r.read()
                 return json.loads(raw) if raw else None
+        except CertChanged as e:
+            if self.on_cert_changed:
+                self.on_cert_changed(e.seen)
+            raise
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:200]
             if e.code == 401:

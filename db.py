@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS devices (
   loc_source TEXT,                          -- manual / gps (manual always wins)
   api_port INTEGER,                         -- the router's www (REST) port, reported when it runs the adoption command
   api_tls_port INTEGER,                     -- www-ssl port when TikManager manages the router over HTTPS (NULL = HTTP)
-  api_tls_fp TEXT,                          -- that certificate's SHA-256 when it was switched (shown; not enforced - see routeros.TLS)                         -- VPNs already configured on the router (raw, whitelisted fields)
+  api_tls_fp TEXT,                          -- that certificate's SHA-256, pinned: a different one is refused (routeros.CertChanged)
+  api_tls_new TEXT,                         -- a different certificate the router presented, waiting to be trusted                         -- VPNs already configured on the router (raw, whitelisted fields)
   created_at REAL NOT NULL, created_by TEXT
 );
 CREATE INDEX IF NOT EXISTS devices_org ON devices(org_id);
@@ -335,7 +336,7 @@ class DB:
                              ("last_backup_try", "REAL"), ("last_backup_error", "TEXT"), ("thumb_slug", "TEXT"), ("thumb_tried", "REAL"), ("networks", "TEXT"),
                              ("ros_channel", "TEXT"), ("ros_latest", "TEXT"), ("ros_checked", "REAL"),
                              ("itg_config_id", "TEXT"), ("itg_synced_at", "REAL"), ("itg_error", "TEXT"),
-                             ("vpn_inv", "TEXT"), ("vpn_inv_at", "REAL"), ("api_port", "INTEGER"), ("api_tls_port", "INTEGER"), ("api_tls_fp", "TEXT"),
+                             ("vpn_inv", "TEXT"), ("vpn_inv_at", "REAL"), ("api_port", "INTEGER"), ("api_tls_port", "INTEGER"), ("api_tls_fp", "TEXT"), ("api_tls_new", "TEXT"),
                              ("lat", "REAL"), ("lon", "REAL"), ("location", "TEXT"), ("loc_source", "TEXT"),
                              ("neighbors", "TEXT"), ("neighbors_at", "REAL"), ("wg_port", "INTEGER"),
                              ("fw_factory", "TEXT"), ("lc_slug", "TEXT"), ("lc_status", "TEXT"), ("lc_made", "TEXT"), ("lc_checked", "REAL"),
