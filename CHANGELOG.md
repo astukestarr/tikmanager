@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.24 - 2026-10-19
+
+- **Dashboard: the 30-second refresh jumped to another board and back to the top** - opened from the left menu, the
+  refresh redrew the board last picked in this browser (which another tab, or the installed app, may have changed)
+  instead of the one on screen. It now refreshes the board you're looking at and keeps your place on the page.
+
 ## 2.0.0-beta.23 - 2026-10-19
 
 - **Re-adopting a router repairs TikManager's firewall rule** - when the router's `tikmanager` interface had been removed

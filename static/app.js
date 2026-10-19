@@ -5755,8 +5755,11 @@ async function go(v, arg) {
   try {
     await (v === "router" ? router(arg) : VIEWS[v](arg));
     // auto-refresh, skipped while someone is typing in a field on the page
+    // the dashboard refreshes the board on screen (not the last one picked - another tab may have changed that) and keeps
+    // the scroll position
     if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || vpnHold || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
-      (v === "router" ? router(arg) : dashboard(arg)).catch(() => {}); }, 30000);
+      const y = window.scrollY, board = v === "dashboard" ? $("main").dataset.board || arg : null;
+      (v === "router" ? router(arg) : dashboard(board)).then(() => { if (v === "dashboard" && $("main").dataset.board === board) window.scrollTo({ top: y }); }).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => { if (!$("dlg").open) upgradesView().catch(() => {}); }, 20000);
     // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)
     if (v === "health") timer = setInterval(() => { if (hView.busy || document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; healthPage().catch(() => {}); }, 60000);
