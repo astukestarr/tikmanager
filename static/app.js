@@ -1701,7 +1701,8 @@ async function checksPage() {
     <div class="card"><div class="row"><select id="ckOrgF" aria-label="Client"><option value="">All clients</option>${x.orgs.map((o) => `<option value="${o.id}" ${String(o.id) === ckView.org ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>
         <input id="ckQ" type="search" placeholder="Filter by check, address, client or router" aria-label="Filter checks" value="${esc(ckView.q)}">
         <span class="spacer"></span><span class="small ${down ? "status err" : "muted"}">${down ? `${down} router${down === 1 ? " can't" : "s can't"} reach a critical address` : `${x.checks.length} check${x.checks.length === 1 ? "" : "s"}${x.checks.length ? " - all reachable" : ""}`}</span></div>
-      ${x.checks.length ? `<div class="ck-list">${x.checks.map((c) => `<div class="ck ${ckView.open === c.id ? "open" : ""}" data-cktext="${esc([c.name, c.target, c.org, c.tag, ...c.results.map((r) => r.name)].join(" ").toLowerCase())}">
+      <div id="ckHits" class="ck-hits"></div>
+      ${x.checks.length ? `<div class="ck-list">${x.checks.map((c) => `<div class="ck ${ckView.open === c.id ? "open" : ""}" data-cktext="${esc([c.name, c.target, c.org, c.tag].join(" ").toLowerCase())}" data-ckrouters="${esc(c.results.map((r) => r.name).join("|").toLowerCase())}">
           <button type="button" class="ck-head" data-ckopen="${c.id}" aria-expanded="${ckView.open === c.id}">
             <span class="ck-name"><b>${esc(c.name)}</b> <span class="mono small">${esc(c.target)}</span>${c.enabled ? "" : ` <span class="pill">paused</span>`}
               <span class="small muted">· ${esc(c.org || "")} · ${ckScope(c, x.routers)}</span></span>
@@ -1719,12 +1720,23 @@ async function checksPage() {
   const again = () => checksPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
   $("ckNew")?.addEventListener("click", () => checkEditor(null, ckView.org ? { org_id: +ckView.org } : {}));
   $("ckOrgF").addEventListener("change", (e) => { ckView.org = e.target.value; again(); });
-  const ckFilter = () => {   // filtered in place - no reload, the box keeps its focus
+  // filtered in place - no reload, the box keeps its focus. A check matches by its name, address, client or tag, or by one
+  // of its routers - and routers that match are listed with their result for each check, above the list
+  const ckFilter = () => {
     const q = ckView.q.trim().toLowerCase();
     let shown = 0;
-    $("main").querySelectorAll("[data-cktext]").forEach((el) => { el.hidden = !!q && !el.dataset.cktext.includes(q); shown += el.hidden ? 0 : 1; });
+    $("main").querySelectorAll("[data-cktext]").forEach((el) => {
+      el.hidden = !!q && !el.dataset.cktext.includes(q) && !el.dataset.ckrouters.split("|").some((n) => n.includes(q));
+      shown += el.hidden ? 0 : 1;
+    });
+    const hits = q ? x.checks.flatMap((c) => c.results.filter((r) => r.name.toLowerCase().includes(q)).map((r) => ({ c, r }))) : [];
+    $("ckHits").innerHTML = hits.length ? `<div class="small muted">Routers matching "${esc(ckView.q.trim())}" - ${hits.length} result${hits.length === 1 ? "" : "s"}</div>
+      <div class="table-wrap"><table><thead><tr><th>Router</th><th>Check</th><th>Status</th><th>Reply</th><th>Checked</th></tr></thead><tbody>
+      ${hits.map(({ c, r }) => { const [cls, l] = ckState(r); return `<tr><td><a href="#router/${r.device_id}">${esc(r.name)}</a></td>
+        <td>${esc(c.name)} <span class="mono small muted">${esc(c.target)}</span></td><td><span class="pill ${cls}">${l}</span>${r.up === 0 && r.detail ? `<div class="small muted">${esc(r.detail)}</div>` : ""}</td>
+        <td class="small">${r.latency != null ? `${r.latency} ms` : ""}</td><td class="small nowrap">${r.last_at ? ago(r.last_at) : ""}</td></tr>`; }).join("")}</tbody></table></div>` : "";
     let none = $("ckNone");
-    if (q && !shown && !none) { $("main").querySelector(".ck-list")?.insertAdjacentHTML("afterend", `<p class="small muted" id="ckNone">No check matches.</p>`); }
+    if (q && !shown && !none) { $("main").querySelector(".ck-list")?.insertAdjacentHTML("afterend", `<p class="small muted" id="ckNone">No check or router matches.</p>`); }
     else if ((!q || shown) && none) none.remove();
   };
   $("ckQ").addEventListener("input", (e) => { ckView.q = e.target.value; ckFilter(); });

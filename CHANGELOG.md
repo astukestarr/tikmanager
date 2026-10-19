@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.25 - 2026-10-19
+
+- **Critical checks filter, by router** - typing a router's name kept every check that router is on (a check for all of a
+  client's routers includes all of them), so the list barely changed. Now matching routers are listed with their result
+  for each check right under the filter box, and checks still narrow by name, address, client or tag.
+
 ## 2.0.0-beta.24 - 2026-10-19
 
 - **Dashboard: the 30-second refresh jumped to another board and back to the top** - opened from the left menu, the
