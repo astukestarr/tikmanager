@@ -30,6 +30,11 @@ MAX_KEYS = 4000
 KEEP_DAYS = 7
 MAX_ROWS = 1_500_000
 MIN_MEM = 100 * 1024 * 1024       # 64 MB routers are left out
+# protecting TikManager itself: a busy core router can send thousands of flow packets a second, and reading them all would
+# starve everything else. Each router gets PACKETS_PER_SEC packets read per second (template packets always); the rest are
+# dropped unread. A router over budget for OVERLOAD_MINUTES minutes in a row gets Flows turned off, with an event.
+PACKETS_PER_SEC = 40
+OVERLOAD_MINUTES = 5
 TF_SETTINGS = {"enabled": "yes", "interfaces": "all", "cache-entries": "4k", "active-flow-timeout": "1m", "inactive-flow-timeout": "15s"}
 TF_KEEP = ("enabled", "interfaces", "cache-entries", "active-flow-timeout", "inactive-flow-timeout")
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16")]
@@ -145,6 +150,8 @@ class Flows:
         self.seen = {}          # device id -> last record time
         self.devmap, self.devmap_at = {}, 0
         self.leases = {}        # device id -> (read at, {ip: name}, FastTrack on?)
+        self.budget = {}        # exporter address -> [second, packets read this second, packets dropped this minute, minute]
+        self.overload = {}      # exporter address -> minutes in a row over budget
         self._pruned = 0
 
     # --- turning it on / off ---------------------------------------------------------------------------------
@@ -268,6 +275,8 @@ class Flows:
                 print(f"  Flows: listening on {host}:{FLOW_PORT}/udp")
                 while True:
                     data, (src, _port) = sock.recvfrom(65535)
+                    if not self._allow(src, data):
+                        continue
                     try:
                         recs = self.parser.parse(src, data)
                         if recs:
@@ -278,9 +287,56 @@ class Flows:
                 print(f"  Flows: can't listen on {host}:{FLOW_PORT} ({e}) - retrying in a minute")
                 time.sleep(60)
 
+    @staticmethod
+    def _has_template(data):
+        """Does this packet start with a template set? (always read - without templates nothing can be decoded)"""
+        if len(data) < 24:
+            return False
+        ver = int.from_bytes(data[:2], "big")
+        off = 16 if ver == 10 else 20
+        sid = int.from_bytes(data[off:off + 2], "big")
+        return sid in ((2, 3) if ver == 10 else (0, 1))
+
+    def _allow(self, src, data):
+        now = time.time()
+        sec, minute = int(now), int(now // 60)
+        b = self.budget.get(src)
+        if b is None or b[3] != minute:
+            if b is not None:   # a minute finished: was it over budget?
+                self.overload[src] = self.overload.get(src, 0) + 1 if b[2] > 0 else 0
+            b = self.budget[src] = [sec, 0, 0, minute]
+        if b[0] != sec:
+            b[0], b[1] = sec, 0
+        if b[1] >= PACKETS_PER_SEC and not self._has_template(data):
+            b[2] += 1
+            return False
+        b[1] += 1
+        return True
+
+    def _shed(self):
+        """Routers that kept sending more than TikManager reads: turn their Flows off (they'd only ever be a sample)."""
+        for src, n in list(self.overload.items()):
+            if n < OVERLOAD_MINUTES:
+                continue
+            self.overload[src] = 0
+            d = self.db.one("SELECT * FROM devices WHERE tunnel_ip=? AND flows_on=1", (src,))
+            if not d:
+                continue
+            try:
+                self.disable(d)
+            except Exception:  # noqa: BLE001 - router unreachable: at least stop counting it
+                self.db.run("UPDATE devices SET flows_on=0 WHERE id=?", (d["id"],))
+                self.devmap_at = 0
+            self.db.event(d["id"], d["org_id"], "flows", f"Flows turned off by TikManager: the router sent more flow records than TikManager reads "
+                          f"({PACKETS_PER_SEC} packets a second) for {OVERLOAD_MINUTES} minutes - too busy a router for Flows.")
+
     def loop(self):
         while True:
             time.sleep(10)
+            try:
+                self._shed()
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
             try:
                 if getattr(self.s, "dev", False):
                     self._simulate()

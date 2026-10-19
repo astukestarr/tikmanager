@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.1-beta.2 - 2026-10-19
+
+- **Flows on a busy core router slowed all of TikManager** - a router carrying a lot of traffic sends thousands of flow
+  packets a second, and TikManager read every one, so its requests to routers started timing out (routers flapping
+  offline, the Firewall tab not loading). Each router's flow packets are now read up to 40 a second (templates always) and
+  the rest dropped unread, and a router that stays over that for 5 minutes gets Flows turned off, with an event saying
+  why. Flows is meant for branch routers, not the core.
+
 ## 2.0.1-beta.1 - 2026-10-19
 
 - **Firewall tab stuck on "Reading the rules…" on big routers** - reading every filter / NAT rule (and the address lists)
