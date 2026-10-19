@@ -3309,6 +3309,7 @@ async function loadFirewall(d, note) {
   clearInterval(fwTimer);
   const v = rView.fw || (rView.fw = { sec: "filter", chain: "", list: "", q: "" });
   let f, entries = [];
+  if (!card.querySelector("table")) card.innerHTML = `<h2>Firewall &amp; NAT</h2><p class="muted">Reading the firewall from the router - a big core router can take up to a minute…</p>`;
   try {
     f = await api(`/api/devices/${d.id}/firewall`);
     if (v.sec === "address-list") {
@@ -3324,11 +3325,12 @@ async function loadFirewall(d, note) {
   const ql = v.q.toLowerCase();
   const shownEntries = entries.filter((e) => !ql || `${e.address} ${e.comment || ""}`.toLowerCase().includes(ql));
   const edit = f.can_edit, p = f.pending;
-  const tabs = [["filter", "Filter", f.filter.length], ["nat", "NAT", f.nat.length], ["address-list", "Address lists", f.address_lists.length]];
+  const listsLoaded = f.address_lists_loaded;
+  const tabs = [["filter", "Filter", f.filter.length], ["nat", "NAT", f.nat.length], ["address-list", "Address lists", listsLoaded ? f.address_lists.length : "…"]];
   card.innerHTML = `<div class="row"><h2>Firewall &amp; NAT</h2>
       <div class="seg" role="group" aria-label="Rule set">${tabs.map(([k, l, n]) =>
         `<button type="button" data-fwsec="${k}" class="${v.sec === k ? "on" : ""}">${l} (${n})</button>`).join("")}</div>
-      ${isList ? `<select id="fwList" aria-label="Address list">${f.address_lists.map((l) => `<option value="${esc(l)}" ${l === v.list ? "selected" : ""}>${esc(l)} (${f.address_list_counts[l] || 0})</option>`).join("")}</select>
+      ${isList ? `<select id="fwList" aria-label="Address list">${f.address_lists.map((l) => `<option value="${esc(l)}" ${l === v.list ? "selected" : ""}>${esc(l)}${listsLoaded ? ` (${(f.address_list_counts[l] || 0).toLocaleString()})` : ""}</option>`).join("")}</select>
         <input id="fwQ" type="search" placeholder="Search address or comment" aria-label="Search the list" value="${esc(v.q)}">`
         : `<select id="fwChain" aria-label="Chain"><option value="">All chains</option>${chains.map((c) => `<option ${c === v.chain ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`}
       <span class="spacer"></span>
@@ -3375,6 +3377,16 @@ async function loadFirewall(d, note) {
       TikManager off) the router undoes the changes by itself. TikManager's own rules and dynamic rules are locked.</p>`;
   const status = (msg, cls = "") => { $("fwStatus").textContent = msg; $("fwStatus").className = `status ${cls}`; };
   if (note) status(note[0], note[1]);
+  if (!listsLoaded && !v.listsBusy) {   // every address list and its size: slow on a router with big blocklists, so after the rules
+    v.listsBusy = true;
+    api(`/api/devices/${d.id}/firewall/lists`).then((r) => {   // the next load gets them from the server's cache
+      v.listsBusy = false;
+      const b = document.querySelector('#fwCard [data-fwsec="address-list"]');
+      if (b) b.textContent = `Address lists (${Object.keys(r.counts).length})`;
+      if (v.sec === "address-list" && $("fwCard")) loadFirewall(d);
+    })
+      .catch(() => { v.listsBusy = false; });
+  }
   card.querySelectorAll("[data-fwsec]").forEach((b) => b.addEventListener("click", () => { v.sec = b.dataset.fwsec; v.chain = ""; v.q = ""; loadFirewall(d); }));
   $("fwChain")?.addEventListener("change", () => { v.chain = $("fwChain").value; loadFirewall(d); });
   $("fwList")?.addEventListener("change", () => { v.list = $("fwList").value; v.q = ""; loadFirewall(d); });

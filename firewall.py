@@ -197,6 +197,7 @@ class Firewall:
         self.pending = {}   # device id -> {"until", "by", "changes": [...], "fw_script", "al_undo": [...]}
         self.busy = set()
         self.lock = threading.Lock()
+        self.al_cache = {}  # device id -> (read at, {list: entries}) - address lists are slow to count on a big router
 
     def _pending(self, d, r=None):
         p = self.pending.get(d["id"])
@@ -222,10 +223,25 @@ class Firewall:
         p = self._pending(d, r)
         opts = quiet(r.fw_options, {}) or {}
         pend = p and {k: p[k] for k in ("until", "by", "changes")}
-        return {**rules, **{k: opts.get(k, [] if k != "address_list_counts" else {})
-                            for k in ("address_lists", "address_list_counts", "interfaces", "interface_lists")},
+        # address lists: the ones the rules use now (instant), all of them with their sizes from lists() - loaded after
+        used = {str(x.get(k) or "").lstrip("!") for sec in SECTIONS for x in rules[sec] for k in ("src-address-list", "dst-address-list")}
+        hit = self.al_cache.get(d["id"])
+        return {**rules, "address_lists": sorted(set(hit[1]) if hit else used - {""}), "address_list_counts": hit[1] if hit else {},
+                "address_lists_loaded": bool(hit), **{k: opts.get(k, []) for k in ("interfaces", "interface_lists")},
                 "pending": pend and {**pend, "seconds": None if p["until"] is None else max(0, int(p["until"] - time.time()))},
                 "actions": ACTIONS, "fields": FIELDS, "test_minutes": TEST_MINUTES}
+
+    def lists(self, d, fresh=False) -> dict:
+        """Every address list on the router and its size (kept 10 minutes; address-list changes refresh it)."""
+        hit = self.al_cache.get(d["id"])
+        if hit and not fresh and time.time() - hit[0] < 600:
+            return hit[1]
+        try:
+            counts = self.client_for(d).al_counts()
+        except RouterError as e:
+            raise FirewallError(f"Couldn't count the address lists: {e}") from None
+        self.al_cache[d["id"]] = (time.time(), counts)
+        return counts
 
     def entries(self, d, name) -> list:
         if not re.fullmatch(LIST_NAME, name or ""):
@@ -250,6 +266,8 @@ class Firewall:
             return self._change(d, user, sec, op, b)
         finally:
             self.busy.discard(d["id"])
+            if sec == ALIST:
+                self.al_cache.pop(d["id"], None)
 
     def _script(self, p, fw_script=None, inverse=None):
         return "\n".join(([inverse] if inverse else []) + p["al_undo"]) + "\n" + (fw_script or p["fw_script"] or "") + TRAILER

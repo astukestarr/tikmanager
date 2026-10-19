@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.1-beta.3 - 2026-10-19
+
+- **Firewall tab still slow to load on a router with region blocking or big blocklists** - counting the address lists
+  meant reading every entry (tens of thousands with region blocking / known bad networks), which ran past its limit and
+  held up the whole tab for a minute and a half. The rules now show as soon as they're read, and the address lists are
+  counted separately in the background (kept for 10 minutes; changing an address list refreshes them).
+
 ## 2.0.1-beta.2 - 2026-10-19
 
 - **Flows on a busy core router slowed all of TikManager** - a router carrying a lot of traffic sends thousands of flow

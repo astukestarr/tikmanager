@@ -915,20 +915,24 @@ class RouterOS:
     FW_MENUS = {"filter": "/ip/firewall/filter", "nat": "/ip/firewall/nat", "address-list": "/ip/firewall/address-list", "raw": "/ip/firewall/raw"}
 
     BIG_READ = 60   # seconds for reads that can be large on a core router (every firewall rule, every address-list entry)
+    AL_READ = 180   # every address-list entry's list name: tens of thousands on a router with region blocking
 
     def fw_rules(self, section):
         return self._req("GET", self.FW_MENUS[section], timeout=self.BIG_READ) or []
 
     def fw_options(self):
-        """What the rule editor offers in its pulldowns: address lists (only each entry's list name is read - lists can
-        be large), interfaces and interface lists."""
+        """What the rule editor offers in its pulldowns: interfaces and interface lists (address lists: al_counts)."""
         names = lambda path, key="name": sorted({x.get(key) for x in self.optional(lambda: self.get(path), []) or [] if x.get(key)})
+        return {"interfaces": names("/interface?.proplist=name"), "interface_lists": names("/interface/list?.proplist=name")}
+
+    def al_counts(self):
+        """Every address list and its size. Only each entry's list name is read, but on a router with region blocking or
+        big blocklists that is tens of thousands of entries - slow, so the firewall page loads it separately."""
         counts = {}
-        for x in self.optional(lambda: self._req("GET", "/ip/firewall/address-list?.proplist=list", timeout=self.BIG_READ), []) or []:
+        for x in self._req("GET", "/ip/firewall/address-list?.proplist=list", timeout=self.AL_READ) or []:
             if x.get("list"):
                 counts[x["list"]] = counts.get(x["list"], 0) + 1
-        return {"address_lists": sorted(counts), "address_list_counts": counts,
-                "interfaces": names("/interface?.proplist=name"), "interface_lists": names("/interface/list?.proplist=name")}
+        return counts
 
     def al_entries(self, name):
         """The entries of one address list (like /ip firewall address-list print where list=...)."""
@@ -1338,11 +1342,13 @@ class SimRouter:
         return [x for x in self.al_entries(name) if x.get("address") == address]
 
     def fw_options(self):
+        return {"interfaces": ["bridge", "ether1", "ether2", "ether3", "ether4", "ether5", "tikmanager", "wlan1"], "interface_lists": ["LAN", "WAN"]}
+
+    def al_counts(self):
         counts = {}
         for x in self._fw()["fw"]["address-list"]:
             counts[x["list"]] = counts.get(x["list"], 0) + 1
-        return {"address_lists": sorted(counts), "address_list_counts": counts,
-                "interfaces": ["bridge", "ether1", "ether2", "ether3", "ether4", "ether5", "tikmanager", "wlan1"], "interface_lists": ["LAN", "WAN"]}
+        return counts
 
     def _fw_find(self, section, rid):
         rules = self._fw()["fw"][section]
