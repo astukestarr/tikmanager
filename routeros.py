@@ -99,7 +99,7 @@ def _covers(addr_list, ip):
 
 
 class RouterOS:
-    def __init__(self, ip, user, password, timeout=8, port=80, tls_port=None, tls_fp=None):
+    def __init__(self, ip, user, password, timeout=8, port=80, tls_port=None, tls_fp=None, http_first=False):
         self.ip = ip
         self.base = f"http://{ip}/rest" if int(port) == 80 else f"http://{ip}:{int(port)}/rest"
         self.tls_base = f"https://{ip}:{int(tls_port)}/rest" if tls_port else None
@@ -111,6 +111,8 @@ class RouterOS:
         self.tls_fp = tls_fp       # the pinned certificate SHA-256 (None: trust and report the first one seen - on_tls_seen)
         self.on_tls_seen = None    # poller: save a first-seen fingerprint
         self.on_cert_changed = None   # poller: record a changed certificate
+        self.http_first = http_first  # HTTPS failed a few minutes ago: try HTTP first, and HTTPS when HTTP is refused
+        self.on_https_back = None     # poller: HTTPS answered again (HTTP was refused) - leave the fallback
 
     def _send(self, base, method, path, body, timeout, ctx):
         data = json.dumps(body).encode() if body is not None else None
@@ -140,6 +142,15 @@ class RouterOS:
     def _req(self, method, path, body=None, timeout=None, safe=False):
         """safe: a read that changes nothing (GETs always), so an answer cut off over HTTPS may be asked for again."""
         safe = safe or method == "GET"
+        if self.http_first and self.tls_base and not self.fell_back:
+            try:
+                return self._send(self.base, method, path, body, timeout, None)
+            except NoConnection:   # HTTP refused (WebFig over HTTP is off on this router): HTTPS is the only way in
+                self.http_first = False
+                r = self._send(self.tls_base, method, path, body, max(timeout or self.timeout, 20), TLS)
+                if self.on_https_back:
+                    self.on_https_back()
+                return r
         if self.tls_base and not self.fell_back:
             try:
                 return self._send(self.tls_base, method, path, body, timeout, TLS)
@@ -903,15 +914,17 @@ class RouterOS:
     # --- firewall filter / NAT rules (firewall.py drives these, with an automatic undo) -------------------------------
     FW_MENUS = {"filter": "/ip/firewall/filter", "nat": "/ip/firewall/nat", "address-list": "/ip/firewall/address-list", "raw": "/ip/firewall/raw"}
 
+    BIG_READ = 60   # seconds for reads that can be large on a core router (every firewall rule, every address-list entry)
+
     def fw_rules(self, section):
-        return self.get(self.FW_MENUS[section]) or []
+        return self._req("GET", self.FW_MENUS[section], timeout=self.BIG_READ) or []
 
     def fw_options(self):
         """What the rule editor offers in its pulldowns: address lists (only each entry's list name is read - lists can
         be large), interfaces and interface lists."""
         names = lambda path, key="name": sorted({x.get(key) for x in self.optional(lambda: self.get(path), []) or [] if x.get(key)})
         counts = {}
-        for x in self.optional(lambda: self.get("/ip/firewall/address-list?.proplist=list"), []) or []:
+        for x in self.optional(lambda: self._req("GET", "/ip/firewall/address-list?.proplist=list", timeout=self.BIG_READ), []) or []:
             if x.get("list"):
                 counts[x["list"]] = counts.get(x["list"], 0) + 1
         return {"address_lists": sorted(counts), "address_list_counts": counts,
@@ -919,7 +932,7 @@ class RouterOS:
 
     def al_entries(self, name):
         """The entries of one address list (like /ip firewall address-list print where list=...)."""
-        return self.get(f"/ip/firewall/address-list?list={urllib.parse.quote(name)}") or []
+        return self._req("GET", f"/ip/firewall/address-list?list={urllib.parse.quote(name)}", timeout=self.BIG_READ) or []
 
     def al_find(self, name, address):
         """The entries for one address on one list (without reading the whole list)."""

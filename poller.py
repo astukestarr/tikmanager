@@ -32,10 +32,13 @@ class Poller:
     def client(self, d):
         if self.s.dev:
             return SimRouter(d["id"], d["name"])
-        tls = d.get("api_tls_port") if time.time() - self._tls_down.get(d["id"], 0) > 600 else None   # HTTPS failed just now: HTTP for 10 min
+        tls = d.get("api_tls_port")
+        # HTTPS failed just now: HTTP first for 10 minutes - and HTTPS again at once if HTTP is refused (WebFig over HTTP off)
+        recent = time.time() - self._tls_down.get(d["id"], 0) <= 600
         cl = RouterOS(d["tunnel_ip"], "tikmanager", derive(self.key, f"router-api:{d['id']}"), port=d.get("api_port") or 80, tls_port=tls,
-                      tls_fp=d.get("api_tls_fp") or None)
+                      tls_fp=d.get("api_tls_fp") or None, http_first=bool(tls and recent))
         if tls:
+            cl.on_https_back = lambda d=d: self._tls_down.pop(d["id"], None)
             cl.on_fallback = lambda why, d=d: self._tls_fallback(d, why)
             cl.on_tls_seen = lambda fp, d=d: self._tls_first(d, fp)
             cl.on_cert_changed = lambda fp, d=d: self._tls_changed(d, fp)

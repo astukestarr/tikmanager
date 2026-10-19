@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.1-beta.1 - 2026-10-19
+
+- **Firewall tab stuck on "Reading the rules…" on big routers** - reading every filter / NAT rule (and the address lists)
+  had the usual 8 seconds, which a core router with a large ruleset can't answer in; the read timed out after a long
+  wait. These reads now get a minute.
+- **Routers with WebFig over HTTP off showed offline for 10 minutes after one slow HTTPS answer** - after an HTTPS hiccup
+  TikManager used HTTP for 10 minutes, and HTTP is refused on those routers. Now a refused HTTP goes straight back to
+  HTTPS (with a longer timeout), and the router stays online.
+
 ## 2.0.0 - 2026-10-19
 
 TikManager 2 - the full release of 2.0.0-beta.1 to beta.25. A new major version for its size, but **no manual steps**:
