@@ -1060,11 +1060,14 @@ async function flowsTab(d) {
         timeouts) and sends the records to TikManager over the tunnel only. It costs the router a little CPU per connection, so try it on bigger
         routers first and watch the CPU on the Overview. Turning it off puts the router's previous Traffic Flow settings back.
         Kept ${7} days in 10-minute summaries.</p>
+      <p class="small muted">On a busy or core router, sample: the router then looks at only 1 packet in 10, 100 or 1,000, and TikManager multiplies
+        the bytes back up - estimates, but the top talkers and destinations show the same. (Sampling needs RouterOS 7.) If a router sends more than
+        TikManager reads, TikManager samples more thinly by itself, and turns Flows off only if even 1 in 1,000 is too much.</p>
       ${small ? `<p class="small status warn">This router has ${Math.round(x.mem_total / 2 ** 20)} MB of memory - Flows is only for routers with 128 MB or more.</p>`
-        : canWrite() ? `<div class="actions"><button class="btn primary" type="button" id="flOn" ${d.online ? "" : "disabled"}>Turn on Flows</button><span class="status small" id="flMsg"></span></div>` : ""}</div>`;
+        : canWrite() ? `<div class="actions">${`<select id="flSample" aria-label="How much to record">${[[1, "Every packet - branch routers"], [10, "1 packet in 10"], [100, "1 in 100 - busy routers"], [1000, "1 in 1,000 - core routers"]].map(([n, l]) => `<option value="${n}" ${n === 1 ? "selected" : ""}>${l}</option>`).join("")}</select>`}<button class="btn primary" type="button" id="flOn" ${d.online ? "" : "disabled"}>Turn on Flows</button><span class="status small" id="flMsg"></span></div>` : ""}</div>`;
     $("flOn")?.addEventListener("click", async (e) => {
       e.target.disabled = true;
-      try { await post(`/api/devices/${d.id}/flows`, { on: true }); $("flMsg").textContent = "On - the first records arrive within a minute or two."; $("flMsg").className = "status small ok"; setTimeout(() => flowsTab(d).catch(() => {}), 2500); }
+      try { await post(`/api/devices/${d.id}/flows`, { on: true, sample: +$("flSample").value }); $("flMsg").textContent = "On - the first records arrive within a minute or two."; $("flMsg").className = "status small ok"; setTimeout(() => flowsTab(d).catch(() => {}), 2500); }
       catch (err) { e.target.disabled = false; $("flMsg").textContent = err.message; $("flMsg").className = "status small err"; }
     });
     return;
@@ -1088,7 +1091,9 @@ async function flowsTab(d) {
         <button class="linkish small" type="button" id="flClear">Clear filters</button>` : `<p class="small muted">Pick a filter above, or click any client, destination, country or service in the table.</p>`}
       <div class="fl-h"><a class="btn small" href="/api/devices/${d.id}/flows.csv?${qs}" download>Download CSV</a></div>
       <div class="small muted fl-h">${esc(ago2)}</div>
-      ${canWrite() && x.on ? `<button class="linkish small" type="button" id="flOff">Turn Flows off</button>` : ""}
+      ${x.on && x.sample > 1 ? `<div class="small muted">Sampling 1 packet in ${x.sample.toLocaleString()} - bytes are estimates</div>` : ""}
+      ${canWrite() && x.on ? `<label class="field fl-sel">Sampling ${`<select id="flSampleOn" aria-label="How much to record">${[[1, "Every packet - branch routers"], [10, "1 packet in 10"], [100, "1 in 100 - busy routers"], [1000, "1 in 1,000 - core routers"]].map(([n, l]) => `<option value="${n}" ${n === x.sample ? "selected" : ""}>${l}</option>`).join("")}</select>`}</label><span class="status small" id="flSampleMsg"></span>
+        <button class="linkish small" type="button" id="flOff">Turn Flows off</button>` : ""}
     </aside>
     <div class="fl-main">
       ${blocked ? `<div class="fl-tops">${top("Blocked by country", x.top_country, "country", (t) => `${t.hits} sample${t.hits === 1 ? "" : "s"}`)}</div>
@@ -1121,6 +1126,11 @@ async function flowsTab(d) {
   root.querySelectorAll("[data-flclear]").forEach((b) => b.addEventListener("click", () => { delete flView.f[b.dataset.flclear]; again(); }));
   root.querySelectorAll("[data-flsel]").forEach((s) => s.addEventListener("change", () => { if (s.value) flView.f[s.dataset.flsel] = s.value; else delete flView.f[s.dataset.flsel]; again(); }));
   $("flClear")?.addEventListener("click", () => { flView.f = {}; again(); });
+  $("flSampleOn")?.addEventListener("change", async (e) => {
+    e.target.disabled = true;
+    try { await post(`/api/devices/${d.id}/flows`, { sample: +e.target.value }); again(); }
+    catch (err) { e.target.disabled = false; $("flSampleMsg").textContent = err.message; $("flSampleMsg").className = "status small err"; }
+  });
   $("flOff")?.addEventListener("click", async (e) => {
     if (!confirm("Turn Flows off on this router? Its previous Traffic Flow settings are put back; what was collected stays until it ages out.")) return;
     e.target.disabled = true;

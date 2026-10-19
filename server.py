@@ -1894,14 +1894,25 @@ class Handler(BaseHTTPRequestHandler):
             except RaError as e:
                 raise HttpError(400, str(e)) from None
             return self.json({"ok": True, **remote.info(d["id"])})
-        if m := re.fullmatch(r"/api/devices/(\d+)/flows", path):   # {on}: turn the Flows pilot on / off for this router
+        if m := re.fullmatch(r"/api/devices/(\d+)/flows", path):   # {on, sample}: turn the Flows pilot on / off, or {sample}: change sampling
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))
-            on = bool(self.body().get("on"))
-            if on and not d["online"]:
+            b = self.body()
+            on = bool(b.get("on"))
+            try:
+                sample = int(b.get("sample") or 1)
+            except (TypeError, ValueError):
+                raise HttpError(400, "Pick how much to sample.") from None
+            if (on or "on" not in b) and not d["online"]:
                 raise HttpError(400, "The router is offline.")
             try:
-                flowlog.enable(d) if on else flowlog.disable(d)
+                if "on" not in b:
+                    if not d.get("flows_on"):
+                        raise ValueError("Flows is off on this router.")
+                    flowlog.set_sample(d, sample, f" - by {s['email']}")
+                    db.audit(s["email"], f"flows sampling 1 in {sample}", d["name"], self.client_ip())
+                    return self.json({"ok": True})
+                flowlog.enable(d, sample) if on else flowlog.disable(d)
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
             except RouterError as e:

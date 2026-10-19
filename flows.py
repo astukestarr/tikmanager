@@ -35,8 +35,11 @@ MIN_MEM = 100 * 1024 * 1024       # 64 MB routers are left out
 # dropped unread. A router over budget for OVERLOAD_MINUTES minutes in a row gets Flows turned off, with an event.
 PACKETS_PER_SEC = 40
 OVERLOAD_MINUTES = 5
+# packet sampling (RouterOS 7): the router looks at 1 packet in n, so a busy router sends far fewer records. Bytes and packets
+# are multiplied back up by n - estimates, good for "who are the top talkers". Over budget, TikManager raises it a step first.
+SAMPLES = (1, 10, 100, 1000)
 TF_SETTINGS = {"enabled": "yes", "interfaces": "all", "cache-entries": "4k", "active-flow-timeout": "1m", "inactive-flow-timeout": "15s"}
-TF_KEEP = ("enabled", "interfaces", "cache-entries", "active-flow-timeout", "inactive-flow-timeout")
+TF_KEEP = ("enabled", "interfaces", "cache-entries", "active-flow-timeout", "inactive-flow-timeout", "packet-sampling", "sampling-interval", "sampling-space")
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16")]
 PROTO = {1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP", 58: "ICMPv6"}
 SERVICES = {20: "FTP data", 21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 67: "DHCP", 80: "HTTP", 110: "POP3", 123: "NTP",
@@ -155,7 +158,9 @@ class Flows:
         self._pruned = 0
 
     # --- turning it on / off ---------------------------------------------------------------------------------
-    def enable(self, d):
+    def enable(self, d, sample=1):
+        if sample not in SAMPLES:
+            raise ValueError("Pick how much to sample.")
         if (d.get("mem_total") or 0) and d["mem_total"] < MIN_MEM:
             raise ValueError(f"This router has {d['mem_total'] // 2**20} MB of memory - Flows is only for routers with 128 MB or more.")
         cl = self.client(d)
@@ -166,17 +171,42 @@ class Flows:
         if str(prev.get("enabled")) == "true":   # already in use (another collector): leave its interfaces and cache as they are
             settings = {"enabled": "yes"}
         cl.traffic_flow_on(settings, self.target_ip(), FLOW_PORT, d["tunnel_ip"])
-        self.db.run("UPDATE devices SET flows_on=1 WHERE id=?", (d["id"],))
+        if sample > 1:
+            try:
+                cl.traffic_flow_sample(sample)
+            except RouterError as e:
+                self.disable(self.db.one("SELECT * FROM devices WHERE id=?", (d["id"],)))
+                raise ValueError(self._no_sampling(e)) from None
+        self.db.run("UPDATE devices SET flows_on=1, flows_sample=? WHERE id=?", (sample, d["id"]))
         self.devmap_at = 0
-        self.db.event(d["id"], d["org_id"], "flows", "Flows turned on (Traffic Flow to TikManager over the tunnel)")
+        self.db.event(d["id"], d["org_id"], "flows", "Flows turned on (Traffic Flow to TikManager over the tunnel)"
+                      + (f", sampling 1 packet in {sample}" if sample > 1 else ""))
+
+    @staticmethod
+    def _no_sampling(e):
+        if "unknown parameter" in str(e):
+            return "This router's RouterOS can't sample Traffic Flow (packet sampling needs RouterOS 7) - use Every packet, or upgrade it."
+        return f"Couldn't set sampling: {e}"
+
+    def set_sample(self, d, sample, why=""):
+        """Change the sampling while Flows is on."""
+        if sample not in SAMPLES:
+            raise ValueError("Pick how much to sample.")
+        try:
+            self.client(d).traffic_flow_sample(sample)
+        except RouterError as e:
+            raise ValueError(self._no_sampling(e)) from None
+        self.db.run("UPDATE devices SET flows_sample=? WHERE id=?", (sample, d["id"]))
+        self.devmap_at = 0
+        self.db.event(d["id"], d["org_id"], "flows", (f"Flows sampling 1 packet in {sample}" if sample > 1 else "Flows sampling off - every packet") + why)
 
     def disable(self, d):
         if d["online"]:
             prev = json.loads(d.get("flows_prev") or "{}")
-            restore = {k: v for k, v in prev.items() if v not in (None, "")}
+            restore = {k: {"true": "yes", "false": "no"}.get(v, v) for k, v in prev.items() if v not in (None, "")}
             restore["enabled"] = "yes" if str(prev.get("enabled")) == "true" else "no"
             self.client(d).traffic_flow_off(restore, self.target_ip(), FLOW_PORT)
-        self.db.run("UPDATE devices SET flows_on=0, flows_prev=NULL WHERE id=?", (d["id"],))
+        self.db.run("UPDATE devices SET flows_on=0, flows_prev=NULL, flows_sample=1 WHERE id=?", (d["id"],))
         self.devmap_at = 0
         self.db.event(d["id"], d["org_id"], "flows", "Flows turned off - Traffic Flow settings put back")
 
@@ -187,14 +217,14 @@ class Flows:
     def _device_for(self, src):
         if time.time() - self.devmap_at > 60:
             self.devmap = {}
-            for d in self.db.q("SELECT id, tunnel_ip, networks, wan_ip, public_ip FROM devices WHERE state='adopted' AND flows_on=1"):
+            for d in self.db.q("SELECT id, tunnel_ip, networks, wan_ip, public_ip, flows_sample FROM devices WHERE state='adopted' AND flows_on=1"):
                 nets = []
                 for n in json.loads(d["networks"] or "[]"):
                     try:
                         nets.append(ipaddress.ip_network(n.get("network") or "", strict=False))
                     except ValueError:
                         pass
-                self.devmap[d["tunnel_ip"]] = (d["id"], nets, {d["wan_ip"], d["public_ip"]} - {None, ""})
+                self.devmap[d["tunnel_ip"]] = (d["id"], nets, {d["wan_ip"], d["public_ip"]} - {None, ""}, max(1, d["flows_sample"] or 1))
             self.devmap_at = time.time()
         return self.devmap.get(src)
 
@@ -210,7 +240,7 @@ class Flows:
         dev = self._device_for(src)
         if not dev:
             return
-        did, nets, own = dev
+        did, nets, own, n = dev
         now = now or time.time()
         bucket = int(now // BUCKET) * BUCKET
         self.seen[did] = now
@@ -218,7 +248,7 @@ class Flows:
             for r in records:
                 s, t = r["src"], r["dst"]
                 sl, tl = self._local(s, nets, own), self._local(t, nets, own)
-                sp, dp, proto, b = r.get("sport", 0), r.get("dport", 0), r.get("proto", 0), r.get("bytes", 0)
+                sp, dp, proto, b = r.get("sport", 0), r.get("dport", 0), r.get("proto", 0), r.get("bytes", 0) * n
                 if sl and not tl:
                     local, remote, up, down = s, t, b, 0
                     port, dirn = (dp, "out") if dp <= sp or dp < 1024 else (sp, "in")
@@ -243,7 +273,7 @@ class Flows:
                         cur = self.buf[key] = [0, 0, 0, 0]
                 cur[0] += up
                 cur[1] += down
-                cur[2] += r.get("packets", 0)
+                cur[2] += r.get("packets", 0) * n
                 cur[3] += 1
 
     def flush(self):
@@ -322,6 +352,14 @@ class Flows:
             d = self.db.one("SELECT * FROM devices WHERE tunnel_ip=? AND flows_on=1", (src,))
             if not d:
                 continue
+            cur = d.get("flows_sample") or 1
+            nxt = next((s for s in SAMPLES if s > cur), None)
+            if nxt:   # sample more thinly first - turn it off only when even 1 in 1000 is too much (or the router can't sample)
+                try:
+                    self.set_sample(d, nxt, f" - raised by TikManager: the router sent more flow records than it reads ({PACKETS_PER_SEC} packets a second)")
+                    continue
+                except (ValueError, RouterError):
+                    pass
             try:
                 self.disable(d)
             except Exception:  # noqa: BLE001 - router unreachable: at least stop counting it
@@ -432,7 +470,7 @@ class Flows:
         return {"rows": out[:int(f.get("limit") or 500)], "count": len(out), "total": total, "hours": hours,
                 "top_remote": tops("remote"), "top_local": tops("local", lambda k: names.get(k) or k),
                 "top_country": tops("country", lambda k: cn.get(k, k)), "top_org": tops("org"), "top_service": tops("service"),
-                "last_seen": self.seen.get(d["id"]), "on": bool(d.get("flows_on")), "bucket": BUCKET,
+                "last_seen": self.seen.get(d["id"]), "on": bool(d.get("flows_on")), "bucket": BUCKET, "sample": d.get("flows_sample") or 1, "samples": SAMPLES,
                 "fasttrack": bool((self.leases.get(d["id"]) or (0, 0, False))[2])}
 
     @staticmethod

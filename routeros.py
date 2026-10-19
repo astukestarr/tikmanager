@@ -1015,6 +1015,16 @@ class RouterOS:
                     raise
         self._req("POST", "/ip/traffic-flow/set", settings, timeout=20)
 
+    def traffic_flow_sample(self, n):
+        """Packet sampling: Traffic Flow looks at 1 packet in n (RouterOS 7). n=1 turns sampling off."""
+        body = {"packet-sampling": "no"} if n <= 1 else {"packet-sampling": "yes", "sampling-interval": "1", "sampling-space": str(n - 1)}
+        try:
+            self._req("POST", "/ip/traffic-flow/set", body, timeout=20)
+        except RouterError as e:
+            if n <= 1 and "unknown parameter" in str(e):
+                return   # no sampling on this RouterOS - so it isn't sampling either
+            raise
+
     def traffic_flow_off(self, restore, dst, port):
         for t in self._tf_mine(dst, port):
             self._req("DELETE", f"/ip/traffic-flow/target/{t['.id']}", timeout=20)
@@ -1624,6 +1634,10 @@ class SimRouter:
         st = self._sim()
         st["tf"] = {**self.traffic_flow(), **{k: ("true" if v == "yes" else v) for k, v in settings.items()}}
         st["tf_target"] = {"dst-address": dst, "port": str(port), "src-address": src}
+
+    def traffic_flow_sample(self, n):
+        st = self._sim()
+        st["tf"] = {**self.traffic_flow(), "packet-sampling": "true" if n > 1 else "false", "sampling-interval": "1", "sampling-space": str(max(0, n - 1))}
 
     def traffic_flow_off(self, restore, dst=None, port=None):
         st = self._sim()

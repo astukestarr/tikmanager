@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.1-beta.4 - 2026-10-19
+
+- **Flows on busy and core routers: packet sampling** - when turning Flows on, pick how much the router looks at: every
+  packet (branch routers), 1 in 10, 1 in 100 or 1 in 1,000 (core routers), and change it any time in the Flows sidebar.
+  TikManager multiplies the bytes and packets back up, so the figures are estimates, but the top talkers, destinations and
+  countries come out the same. A router that sends more than TikManager reads is now sampled more thinly by itself, a
+  step every 5 minutes, and Flows is turned off only when even 1 in 1,000 is too much (or the router can't sample).
+  Sampling needs RouterOS 7; turning Flows off puts the router's own sampling settings back.
+
 ## 2.0.1-beta.3 - 2026-10-19
 
 - **Firewall tab still slow to load on a router with region blocking or big blocklists** - counting the address lists
