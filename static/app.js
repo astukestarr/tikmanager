@@ -46,6 +46,8 @@ async function api(path, opts = {}) {
 const post = (path, data = {}) => api(path, { method: "POST", body: JSON.stringify(data) });
 const isTech = () => me.kind === "tech";
 // what a technician's role lets them change (roles.py); the server checks every change as well
+// a link from data (an outside service, a stored URL): only http(s) - never javascript: or data:
+const safeUrl = (u) => /^https?:\/\//i.test(String(u || "")) ? String(u) : "#";
 const can = (p) => isTech() && (me.perms || []).includes(p);
 const canWrite = () => isTech() && (me.perms || []).length > 0;
 const adminArea = () => ["settings", "techs", "integrations", "alerts"].some(can);
@@ -1591,7 +1593,7 @@ async function ispsPage() {
               ${!g.affected && !ongoing.length ? `<span class="pill up-done">OK</span>` : ""}</span></button>
           ${ispView.open === g.key ? `<div class="isp-body">
             ${g.radar.length ? `<div class="isp-radar">${g.radar.map((r) => `<div class="small"><b>${r.ongoing ? "Ongoing" : "Ended"}</b> - ${esc(r.summary || r.cause || "outage")}
-              <span class="muted">${day(r.start)}${r.end ? ` to ${day(r.end)}` : ""}</span>${r.link ? ` <a href="${esc(r.link)}" target="_blank" rel="noopener noreferrer">details</a>` : ""}</div>`).join("")}
+              <span class="muted">${day(r.start)}${r.end ? ` to ${day(r.end)}` : ""}</span>${r.link ? ` <a href="${esc(safeUrl(r.link))}" target="_blank" rel="noopener noreferrer">details</a>` : ""}</div>`).join("")}
               <div class="small muted">Cloudflare Radar - last 7 days</div></div>` : ""}
             <div class="table-wrap"><table><thead><tr><th>Router</th><th>Link</th><th>Status</th><th>Public address</th><th>Since</th></tr></thead><tbody>
             ${g.links.map((l) => { const [dot, label] = ISP_STATE[l.state] || ["dot pending", l.state];
@@ -2569,7 +2571,7 @@ async function libraryDialog() {
     $("libList").querySelectorAll("[data-path]").forEach((b) => b.addEventListener("click", () => libraryScript(b.dataset.path)));
   };
   $("dlgBody").innerHTML = `<h2>Community script library</h2>
-    <p class="small muted">Scripts shared by other TikManager users in <a href="${esc(lib.url)}" target="_blank" rel="noopener noreferrer">${esc(lib.repo)}</a>, reviewed by its owner before
+    <p class="small muted">Scripts shared by other TikManager users in <a href="${esc(safeUrl(lib.url))}" target="_blank" rel="noopener noreferrer">${esc(lib.repo)}</a>, reviewed by its owner before
       they're added. Importing copies a script into your own list - nothing runs until you run it.</p>
     <div class="row"><input id="libQ" type="search" placeholder="Search name, description, tag, author" aria-label="Search the library">
       <span class="spacer"></span><button class="btn" type="button" id="libRefresh">Refresh</button><button class="btn" type="button" data-close>Close</button></div>
@@ -2585,7 +2587,7 @@ async function libraryScript(path) {
   try { s = await api(`/api/library/script?path=${encodeURIComponent(path)}`); } catch (e) { alert(e.message); return; }
   dialog(`<h2>${esc(s.name)}</h2>
     <p class="small muted">${esc(s.description || "")}${s.author ? ` · by ${esc(s.author)}` : ""}${s.routeros ? ` · RouterOS ${esc(s.routeros)}` : ""} ·
-      <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">view on GitHub</a></p>
+      <a href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">view on GitHub</a></p>
     ${s.warnings.length ? `<div class="lib-warn"><b>Read these lines before you run it:</b><ul class="small">${s.warnings.map((w) => `<li>line ${w.line}: ${esc(w.text)} - <span class="mono">${esc(w.code)}</span></li>`).join("")}</ul></div>`
       : `<p class="small status ok">No commands that usually need a second look - still read it before running it on a router.</p>`}
     <pre class="code script-box lib-body">${esc(s.body)}</pre>
@@ -2638,7 +2640,7 @@ async function shareDialog(s, canShare) {
     try {
       const r = await post("/api/library/share", { id: s.id, name: $("shName").value, description: $("shDesc").value, tags: $("shTags").value,
         routeros: $("shRos").value, body: $("shBody").value, confirmed });
-      $("dlgBody").innerHTML = `<h2>Shared - thank you</h2><p>Pull request opened: <a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.url)}</a></p>
+      $("dlgBody").innerHTML = `<h2>Shared - thank you</h2><p>Pull request opened: <a href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">${esc(r.url)}</a></p>
         <p class="small muted">It appears in the library once the owner merges it.</p><div class="actions"><button class="btn" type="button" data-close>Close</button></div>`;
       $("dlgBody").querySelector("[data-close]").onclick = () => $("dlg").close();
     } catch (e) { $("shGo").disabled = false; $("shStatus").textContent = e.message; $("shStatus").className = "status err"; }
@@ -2833,7 +2835,7 @@ async function versionCard() {
     ${u.error ? `<p class="small status err">${esc(u.error)}</p>` : ""}
     ${busy ? `<p class="status">Upgrading to ${esc(st.version)}: ${esc(st.detail || "")}…</p>` : result}
     ${u.available && !busy ? `<div class="up-box avail"><b>TikManager ${esc(u.latest)} is available${u.latest_beta ? " (beta)" : ""}.</b>
-        ${u.url ? `<a href="${esc(u.url)}" target="_blank" rel="noopener noreferrer">What's new</a>` : ""}
+        ${u.url ? `<a href="${esc(safeUrl(u.url))}" target="_blank" rel="noopener noreferrer">What's new</a>` : ""}
         <p class="small muted">The server backs up the current version and the database, installs ${esc(u.latest)} and restarts (about a minute).
           If the new version doesn't start, it goes back to ${esc(u.version)} automatically. The server security check below runs again afterwards.</p>
         ${u.supported ? `<button class="btn primary" type="button" id="verUpgrade">Upgrade now</button>`
@@ -3029,7 +3031,7 @@ function obsBox(o) {
         : o.error ? `<span class="status err small">${esc(o.error)}</span>` : `<span class="small muted">Not scanned yet.</span>`}
       <span class="spacer"></span><button class="btn" type="button" id="obsScan">Scan now</button></div>
     <p class="small muted">Mozilla's HTTP Observatory checks ${esc(o.host)} from the internet - security headers, cookies, HTTPS redirects - weekly and after every
-      upgrade. Only the address is sent to Mozilla.${o.url ? ` <a href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">Full report</a>` : ""}</p></div>`;
+      upgrade. Only the address is sent to Mozilla.${o.url ? ` <a href="${esc(safeUrl(o.url))}" target="_blank" rel="noopener noreferrer">Full report</a>` : ""}</p></div>`;
 }
 
 // the read-only server check (deploy/check.sh), run as root daily, after upgrades and on request
@@ -3045,7 +3047,7 @@ function securityBox(s, u = {}) {
           <p class="small"><b>On the TikManager server:</b></p>` : ""}
         ${(f.cmds || []).length ? `<pre class="sec-cmd">${f.cmds.map(esc).join("\n")}</pre>` : ""}
         <p class="small muted">Run these on the TikManager server (SSH, as a user with sudo), then click <b>Run check</b>.
-          ${guide ? `<a href="${esc(guide)}" target="_blank" rel="noopener noreferrer">More in the guide</a>` : ""}</p></div>`;
+          ${guide ? `<a href="${esc(safeUrl(guide))}" target="_blank" rel="noopener noreferrer">More in the guide</a>` : ""}</p></div>`;
   };
   const row = (r) => `<li class="sec-${esc(r.status)}"><span class="sec-tag">${esc(r.status.toUpperCase())}</span><span class="small muted">${esc(r.section)}</span>
       <span>${esc(r.text)} ${fixFor(r)}</span></li>`;
@@ -4349,7 +4351,7 @@ async function regionCard(local) {   // local: redraw from the data already read
     <div class="rg-threat"><label class="chk"><input type="checkbox" id="rgThreats" ${dr.threats ? "checked" : ""} ${canWrite() && tl.entries ? "" : "disabled"}>
         <b>Block known bad networks</b> for this client - both directions</label>
       <div class="small muted">Hijacked and criminal networks, botnet controllers and the worst attackers:
-        ${tl.sources.map((s) => `<a href="${esc(s.info)}" target="_blank" rel="noopener">${esc(s.name)}</a>${s.entries ? ` (${s.entries.toLocaleString()})` : ""}`).join(" + ")}
+        ${tl.sources.map((s) => `<a href="${esc(safeUrl(s.info))}" target="_blank" rel="noopener">${esc(s.name)}</a>${s.entries ? ` (${s.entries.toLocaleString()})` : ""}`).join(" + ")}
         - ${tl.entries ? `${tl.entries.toLocaleString()} networks after merging, updated ${ago(tl.updated_at)}, refreshed daily` : "not downloaded yet"}.
         Small enough for every router (about ${mb(tl.entries || 4000)}). Works with or without region blocking; private addresses and everything that's never blocked stay out.</div>
       <div class="rg-data small">${tl.running ? `<span class="status">Downloading…</span>` : ""}${tl.error ? `<span class="status warn">${esc(tl.error)}</span>` : ""}

@@ -1278,7 +1278,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"versions": rows, "last_backup_at": d["last_backup_at"], "last_backup_error": d["last_backup_error"],
                               "can_view": s["kind"] == "tech"})
         if m := re.fullmatch(r"/api/backups/(\d+)(/download|/diff)?", path):
-            s = self.require(tech=True)   # configurations (with secrets) are for technicians only
+            s = self.require(tech=True, perm="backups")   # configurations hold secrets: technicians whose role has backups
             b = db.one("SELECT b.*, d.name AS device, d.identity FROM backups b JOIN devices d ON d.id = b.device_id WHERE b.id=?", (int(m.group(1)),))
             if not b:
                 raise HttpError(404, "Backup not found.")
@@ -1302,7 +1302,7 @@ class Handler(BaseHTTPRequestHandler):
                                        (SELECT MAX(ts) FROM backups b WHERE b.device_id=d.id) AS last_change
                                        FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE d.state='adopted' AND {where} ORDER BY o.name, d.name""", args))
         if path == "/api/backups/zip":   # every router's newest configuration in one zip: <client>/<router>_<date>.rsc
-            s = self.require(tech=True)
+            s = self.require(tech=True, perm="backups")
             org = q.get("org_id")
             rows = backups.latest_all({int(org)} if org and str(org).isdigit() else None)
             if not rows:

@@ -5,12 +5,13 @@
   once (now or at a time), daily at HH:MM, weekly on chosen days at HH:MM, or every N hours. Times are in the
   timezone of the person who made the task.
 - Script runs: optional backup first (on by default; the router is skipped if it fails), placeholders filled per router
-  ({{identity}} {{name}} {{client}} {{site}} {{wan_ip}} {{tunnel_ip}}), run via REST /execute, output kept per router.
-  At most 8 routers at a time. Offline routers are skipped, or (offline=wait) run when they come back within 24 hours.
+  ({{identity}} {{name}} {{client}} {{site}} {{wan_ip}} {{tunnel_ip}} - escaped for use inside "quotes"), run via REST
+  /execute, output kept per router. At most 8 routers at a time. Offline routers are skipped, or (offline=wait) run when they come back within 24 hours.
 - Upgrade runs: each target router with a newer RouterOS (or RouterBOARD firmware, if chosen) gets an upgrade job in
   upgrades.py - the same safe sequence as the Upgrades page; routers already up to date are recorded as skipped.
 """
 import json
+import re
 import threading
 import time
 import traceback
@@ -112,12 +113,20 @@ class Tasks:
             self.db.run("UPDATE tasks SET last_run=?, last_status=? WHERE id=?", (time.time(), "running" if devices else "no routers", task["id"]))
         return rid
 
+    @staticmethod
+    def _ros_text(v):
+        """A value made safe as RouterOS string content (inside "..."): \\ " $ ? escaped, control characters dropped - so a
+        router identity or site name can't add commands to a task's script."""
+        v = re.sub(r"[\x00-\x1f\x7f;\[\]{}]", " ", str(v))   # ; [ ] { } start commands when used unquoted
+        return v.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("?", "\\?")
+
     def _fill(self, body, d):
+        """{{placeholders}} -> this router's values, escaped for use inside a quoted RouterOS string."""
         org = self.db.one("SELECT name FROM orgs WHERE id=?", (d["org_id"],)) if d.get("org_id") else None
         vals = {"identity": d.get("identity") or d["name"], "name": d["name"], "client": org["name"] if org else "",
                 "site": d.get("site") or "", "wan_ip": d.get("wan_ip") or "", "tunnel_ip": d.get("tunnel_ip") or ""}
         for k, v in vals.items():
-            body = body.replace("{{" + k + "}}", str(v))
+            body = body.replace("{{" + k + "}}", self._ros_text(v))
         return body
 
     def _finish_result(self, res_id, status, output):

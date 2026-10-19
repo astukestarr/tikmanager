@@ -191,7 +191,8 @@ class ISPs:
                 out = a.get("outage") or {}
                 items.append({"start": a.get("startDate"), "end": a.get("endDate"), "ongoing": not a.get("endDate"),
                               "summary": a.get("description") or out.get("outageCause") or a.get("eventType") or "",
-                              "cause": out.get("outageCause") or "", "kind": out.get("outageType") or "", "link": a.get("linkedUrl") or ""})
+                              "cause": out.get("outageCause") or "", "kind": out.get("outageType") or "",
+                              "link": a.get("linkedUrl") if str(a.get("linkedUrl") or "").startswith("https://") else ""})
             if items:
                 by[asn] = items
         self.radar.update(at=time.time(), by_asn=by if not err else self.radar["by_asn"], error=err)

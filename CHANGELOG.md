@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.0.0-beta.20 - 2026-10-19
+
+Security review fixes:
+
+- **Configuration backups need the backups permission to view, compare or download** (one router or the all-routers
+  zip). They include secrets (passwords, keys); before, any technician could open them, Read-only included.
+- **Task placeholders are escaped** - `{{identity}}`, `{{name}}`, `{{site}}`, `{{client}}` are filled in as safe RouterOS
+  string content (quotes, `$`, `?` and backslashes escaped; `; [ ] { }` and control characters removed), so a router
+  identity (set on the router itself) can't add commands to a task's script. Use placeholders inside quotes.
+- **Links from outside data only open http(s) addresses** (Cloudflare Radar outage links and the other links built from
+  stored or downloaded URLs) - never `javascript:` or `data:` links.
+
 ## 2.0.0-beta.19 - 2026-10-19
 
 - **Install and update counts** - every version tag pushed to GitHub now gets a GitHub Release automatically
