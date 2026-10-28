@@ -5242,9 +5242,32 @@ async function raTab(d, note) {
       ${(x.users || []).length ? `<div class="table-wrap"><table><thead><tr><th>Person</th><th>Address</th><th>Status</th><th>Traffic</th><th>Config</th><th></th></tr></thead><tbody>${userRows}</tbody></table></div>`
         : `<p class="muted small">Nobody yet - add a person to get their WireGuard config.</p>`}
       <div class="u-mt14" id="raLog"></div>
-      <p class="small muted">Windows: install WireGuard, then <b>Import tunnel(s) from file</b> and pick the downloaded .conf, and click Activate. People without admin rights need
-        a one-time setting to switch tunnels on - or push the install and tunnel with your RMM (<span class="mono">wireguard /installtunnelservice &lt;file&gt;.conf</span> keeps it always on).</p></div>` : ""}`;
+      <div class="u-mt14">
+        <h3 class="u-m0">Connect on Windows</h3>
+        <p class="small muted">Once the person has their <b>.conf</b>, two ways to run it:</p>
+        <ol class="small">
+          <li><b>Simple (GUI):</b> install WireGuard, open it, <b>Import tunnel(s) from file</b>, pick the .conf, then click <b>Activate</b>.
+            People without admin rights need a one-time setting to let them switch tunnels on.</li>
+          <li><b>Always-on (Windows service):</b> runs the tunnel as a service, so it connects at startup with no WireGuard window open and
+            reconnects on its own - best for unattended or headless PCs. Install WireGuard, then run the command below in an
+            <b>elevated Command Prompt</b> (Run as administrator), pointing at the .conf you saved. Remove it later with
+            <span class="mono">wireguard.exe /uninstalltunnelservice &lt;name&gt;</span> (name = the .conf's file name, without <span class="mono">.conf</span>).</li>
+        </ol>
+        <p class="small muted u-m0"><b>1. Install WireGuard for Windows</b> - the download page:</p>
+        <div class="code" id="raWgUrl">https://www.wireguard.com/install/</div>
+        <div class="actions"><button class="btn small" type="button" id="raCopyUrl">Copy link</button></div>
+        <p class="small muted u-m0"><b>2. Run the tunnel as a service</b> - elevated Command Prompt; change the path to where you saved the .conf:</p>
+        <div class="code" id="raSvcCmd">"C:\\Program Files\\WireGuard\\wireguard.exe" /installtunnelservice "C:\\path\\to\\your.conf"</div>
+        <div class="actions"><button class="btn small" type="button" id="raCopyCmd">Copy command</button><span class="status" id="raInstallMsg"></span></div>
+        <p class="small muted">Or skip the file entirely - the <b>RMM install script</b> next to each person above installs WireGuard and the tunnel service for you.</p>
+      </div></div>` : ""}`;
   const say = (id, m, ok) => { const el = $(id); if (el) { el.textContent = m; el.className = `status ${ok ? "ok" : "err"}`; } };
+  const raCopy = async (srcId, ok) => {
+    try { await navigator.clipboard.writeText($(srcId).textContent); say("raInstallMsg", ok, true); }
+    catch { say("raInstallMsg", "Couldn't copy - select the text and copy it by hand.", false); }
+  };
+  $("raCopyUrl")?.addEventListener("click", () => raCopy("raWgUrl", "Link copied - open it in a browser on the PC."));
+  $("raCopyCmd")?.addEventListener("click", () => raCopy("raSvcCmd", "Command copied - run it in an elevated Command Prompt, with the path to your .conf."));
   $("raSave")?.addEventListener("click", async () => {
     const split = document.querySelector('input[name="raSplit"]:checked')?.value !== "0";
     const routes = [...document.querySelectorAll(".raNet:checked")].map((c) => c.value).concat(($("raExtra")?.value || "").split(",").map((s) => s.trim()).filter(Boolean));
