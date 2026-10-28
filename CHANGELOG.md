@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.1.0 - 2026-10-28
+
+Remote access: clearer Windows setup, and the tab stays put (release of 2.1.0-beta.1). No manual steps.
+
+- **How to run a WireGuard tunnel as an always-on Windows service.** The Remote access tab now spells out the two ways to
+  connect a Windows PC once someone has their `.conf` - the simple GUI import, or installing the tunnel as a Windows
+  service so it connects at startup with no WireGuard window open (best for unattended or headless PCs). A **Copy link**
+  button for the WireGuard for Windows download page and a **Copy command** button for the
+  `wireguard.exe /installtunnelservice` command, placed above the connection log.
+- **The Remote access tab no longer auto-refreshes** every 30 seconds, so it doesn't jump while you read the steps or copy
+  a command; switch tabs and back to pull fresh connection status.
+
 ## 2.1.0-beta.1 - 2026-10-28
 
 - **Remote access: how to run a tunnel as an always-on Windows service.** The Remote access tab now spells out the two
