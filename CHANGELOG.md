@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.1.1-beta.2 - 2026-11-02
+
+Telegram alerts, no manual steps.
+
+- **Telegram as a webhook format.** Alerts can now go to Telegram: pick **Telegram** when adding a webhook (Alerts >
+  Webhooks), paste a bot token from **@BotFather** and the **chat id**, and each alert - when it opens and when it clears
+  - arrives as a Telegram message, with an emoji for opened / resolved, the router and client, and a link back into
+  TikManager. The bot token is stored encrypted like every other webhook secret, and the sendMessage URL is built from
+  it (never shown back to the browser). Works for a direct chat, a group (negative id) or a channel (bot added as admin).
+
 ## 2.1.1-beta.1 - 2026-11-02
 
 Docs only, no manual steps.

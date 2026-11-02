@@ -1,9 +1,10 @@
-"""Webhooks: alerts sent to any HTTPS endpoint - Slack, Discord, ntfy, plain JSON, or your own format.
+"""Webhooks: alerts sent to any HTTPS endpoint - Slack, Discord, Telegram, ntfy, plain JSON, or your own format.
 
 - Each webhook gets an alert when it opens and when it clears (optionally only some kinds), plus tests.
-- Formats: json (TikManager's own payload), slack and discord (their incoming-webhook formats), ntfy (push to a phone:
-  plain-text body with Title / Priority / Tags / Click headers) and custom (your method, headers and body template with
-  {{placeholders}}, escaped for JSON when the body is JSON - so an SMS gateway or ticket system can be driven).
+- Formats: json (TikManager's own payload), slack and discord (their incoming-webhook formats), telegram (the Bot API:
+  a bot token from @BotFather and a chat id; the sendMessage URL is built from the token and kept encrypted), ntfy (push
+  to a phone: plain-text body with Title / Priority / Tags / Click headers) and custom (your method, headers and body
+  template with {{placeholders}}, escaped for JSON when the body is JSON - so an SMS gateway or ticket system can be driven).
 - Optional signing: with a secret, each request carries X-TikManager-Signature: sha256=<HMAC of timestamp.body> and
   X-TikManager-Timestamp, so the receiver can check it came from you.
 - URLs, secrets and header values are stored encrypted (they often contain tokens) and never sent back to the browser.
@@ -25,7 +26,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-FORMATS = {"json": "TikManager JSON", "slack": "Slack", "discord": "Discord", "ntfy": "ntfy (phone push)", "custom": "Custom"}
+FORMATS = {"json": "TikManager JSON", "slack": "Slack", "discord": "Discord", "telegram": "Telegram", "ntfy": "ntfy (phone push)", "custom": "Custom"}
+TG_TOKEN = re.compile(r"\d{5,}:[A-Za-z0-9_-]{20,}")
 PLACEHOLDERS = ("title", "detail", "status", "kind", "router", "client", "link", "time", "summary")
 MAX_HOOKS = 20
 
@@ -74,6 +76,11 @@ def _escape_json(v: str) -> str:
     return json.dumps(str(v))[1:-1]
 
 
+def _tg_escape(v: str) -> str:
+    """Escape text for Telegram's HTML parse mode (so a router name with < > & can't break the message)."""
+    return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 class Webhooks:
     def __init__(self, db, vault):
         self.db, self.vault = db, vault
@@ -108,7 +115,7 @@ class Webhooks:
             s = self._secrets(h)
             out.append({k: h.get(k) for k in ("id", "name", "format", "on", "kinds", "method", "body", "content_type")}
                        | {"host": urllib.parse.urlsplit(s.get("url", "")).hostname or "", "has_secret": bool(s.get("secret")),
-                          "header_names": sorted((s.get("headers") or {}).keys()), "last": status.get(h["id"])})
+                          "chat": s.get("chat", ""), "header_names": sorted((s.get("headers") or {}).keys()), "last": status.get(h["id"])})
         return out
 
     def save(self, b: dict, kinds_known) -> dict:
@@ -124,9 +131,24 @@ class Webhooks:
         if not name or fmt not in FORMATS:
             raise WebhookError("Give it a name and pick a format.")
         old = self._secrets(cur) if cur else {}
-        url = str(b.get("url") or "").strip() or old.get("url", "")
-        if not url:
-            raise WebhookError("Paste the webhook URL.")
+        chat = old.get("chat", "")
+        if fmt == "telegram":
+            token = str(b.get("tg_token") or "").strip()
+            if token:
+                if not TG_TOKEN.fullmatch(token):
+                    raise WebhookError("That doesn't look like a bot token - it's like 123456789:AA... from @BotFather.")
+                url = f"https://api.telegram.org/bot{token}/sendMessage"
+            else:
+                url = old.get("url", "")   # editing without re-entering the token keeps the saved one
+            if not url:
+                raise WebhookError("Paste the bot token from @BotFather.")
+            chat = str(b.get("tg_chat") or "").strip() or chat
+            if not chat:
+                raise WebhookError("Enter the chat id (message the bot, then open its getUpdates to find chat.id).")
+        else:
+            url = str(b.get("url") or "").strip() or old.get("url", "")
+            if not url:
+                raise WebhookError("Paste the webhook URL.")
         check_url(url)
         headers = dict(old.get("headers") or {})
         if "headers" in b:   # "Name: value" lines; a line "Name:" with no value keeps the saved value
@@ -155,7 +177,7 @@ class Webhooks:
             raise WebhookError("Write the body your endpoint expects (placeholders like {{title}} are filled in).")
         h = cur or {"id": pysecrets.token_hex(6)}
         h.update(name=name, format=fmt, on=bool(b.get("on", True)), kinds=kinds, method=method, body=body, content_type=ctype)
-        h["secrets"] = self._seal(h["id"], {"url": url, "secret": secret, "headers": headers})
+        h["secrets"] = self._seal(h["id"], {"url": url, "secret": secret, "headers": headers, "chat": chat})
         if not cur:
             hooks.append(h)
         self._put(hooks)
@@ -178,6 +200,18 @@ class Webhooks:
             body, ctype = json.dumps({"text": text}), "application/json"
         elif fmt == "discord":
             body, ctype = json.dumps({"content": f"**{summary}**\n{ev['detail'][:1500]}\n{ev.get('link') or ''}".strip()[:2000]}), "application/json"
+        elif fmt == "telegram":
+            emoji = "✅" if status == "resolved" else ("\U0001f514" if status == "test" else "⚠️")
+            text = f"{emoji} <b>{_tg_escape(summary)}</b>"
+            if ev.get("detail"):
+                text += "\n\n" + _tg_escape(ev["detail"][:3500])
+            meta = " · ".join(x for x in (ev.get("router"), ev.get("client")) if x)
+            if meta:
+                text += "\n\n<i>" + _tg_escape(meta) + "</i>"
+            if ev.get("link"):
+                text += f'\n\n<a href="{_tg_escape(ev["link"])}">Open in TikManager</a>'
+            body = json.dumps({"chat_id": s.get("chat", ""), "text": text[:4096], "parse_mode": "HTML", "disable_web_page_preview": True})
+            ctype = "application/json"
         elif fmt == "ntfy":
             body, ctype = (ev["detail"] or ev["title"])[:3500], "text/plain; charset=utf-8"
             headers.update({"Title": summary[:200].encode("ascii", "replace").decode(), "Priority": "4" if status == "open" else "3",

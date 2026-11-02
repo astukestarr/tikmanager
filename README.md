@@ -474,8 +474,9 @@ discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on 
   the URL it gives you. It's stored encrypted like the other integration keys.
 - When more than 5 routers drop in the same minute you get one grouped alert, not a ticket each.
 - **Email**: set up email first (Integrations, below), then list the addresses (comma-separated).
-- **Webhooks**: Slack, Discord, ntfy (phone push), TikManager JSON or a custom HTTPS endpoint (method, headers, body
-  template with {{placeholders}}); optional HMAC signing; each can be limited to some kinds of alert.
+- **Webhooks**: Slack, Discord, Telegram (a bot token from @BotFather and a chat id), ntfy (phone push), TikManager JSON
+  or a custom HTTPS endpoint (method, headers, body template with {{placeholders}}); optional HMAC signing; each can be
+  limited to some kinds of alert.
 - **Send a test ticket** / **Send a test to Teams** / **Send a test email** / **Test** (webhooks) check the setup.
 
 ## Security: sign-in attempts everywhere

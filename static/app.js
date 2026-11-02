@@ -1800,7 +1800,7 @@ const INTEGRATIONS = [
   { id: "teams", name: "Microsoft Teams", cat: "Notifications", color: "#4b53bc", link: "alerts",
     about: "Post alerts to a Teams channel (set up on the Alerts page)." },
   { id: "webhooks", name: "Webhooks", cat: "Notifications", color: "#e8611a", link: "alerts",
-    about: "Alerts to Slack, Discord, ntfy or any HTTPS endpoint (Alerts page)." },
+    about: "Alerts to Slack, Discord, Telegram, ntfy or any HTTPS endpoint (Alerts page)." },
   { id: "ubnt", name: "UniFi & UISP", cat: "Network", color: "#006fff",
     about: "UniFi (unifi.ui.com) and UISP sites and devices - your accounts and clients' own - each site assigned to a client." },
   { id: "cloudflare", name: "Cloudflare Radar", cat: "Network", color: "#f38020", link: "isps",
@@ -3898,7 +3898,7 @@ async function webhooksCard() {
   const x = await api("/api/admin/webhooks");
   if (!$("whCard")) return;
   $("whCard").innerHTML = `<div class="row"><h2>Webhooks</h2><span class="spacer"></span><button class="btn" type="button" id="whAdd">Add webhook</button></div>
-    <p class="small muted">Each alert - when it opens and when it clears - to Slack, Discord, ntfy (push to your phone), TikManager JSON or any HTTPS endpoint in your own format
+    <p class="small muted">Each alert - when it opens and when it clears - to Slack, Discord, Telegram, ntfy (push to your phone), TikManager JSON or any HTTPS endpoint in your own format
       (an SMS gateway, a ticket system ...). Only https:// to internet addresses.</p>
     ${x.hooks.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Format</th><th>Sends to</th><th>Alerts</th><th>Last</th><th></th></tr></thead><tbody>
       ${x.hooks.map((h) => `<tr><td>${esc(h.name)}${h.on ? "" : ` <span class="pill">off</span>`}</td><td>${esc(x.formats[h.format] || h.format)}</td><td class="mono small">${esc(h.host)}</td>
@@ -3920,7 +3920,11 @@ function webhookDialog(x, h) {
   dialog(`<h2>${h ? "Edit" : "Add"} webhook</h2>
     <div class="grid2"><label class="field">Name <input id="whName" value="${esc(v.name)}" maxlength="60"></label>
       <label class="field">Format <select id="whFmt">${Object.entries(x.formats).map(([k, l]) => `<option value="${k}" ${v.format === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label></div>
-    <label class="field">URL ${h ? `<span class="small muted">(saved for ${esc(h.host)} - leave blank to keep)</span>` : ""}<input id="whUrl" type="password" autocomplete="off" placeholder="https://..."></label>
+    <label class="field" id="whUrlRow">URL ${h ? `<span class="small muted">(saved for ${esc(h.host)} - leave blank to keep)</span>` : ""}<input id="whUrl" type="password" autocomplete="off" placeholder="https://..."></label>
+    <div id="whTelegram" class="hidden">
+      <label class="field">Bot token ${h && v.format === "telegram" ? `<span class="small muted">(saved - leave blank to keep)</span>` : ""}<input id="whTgToken" type="password" autocomplete="off" placeholder="123456789:AA... from @BotFather"></label>
+      <label class="field">Chat id <input id="whTgChat" value="${esc(v.chat || "")}" placeholder="e.g. 123456789, or -1001234567890 for a group / channel"></label>
+      <p class="small muted">Create a bot with <b>@BotFather</b> for the token. Message the bot once, then open <span class="mono">https://api.telegram.org/bot&lt;token&gt;/getUpdates</span> and copy <span class="mono">chat.id</span>. For a group add the bot (its id is negative); for a channel add it as an admin.</p></div>
     <p class="small muted wh-help" id="whHelp"></p>
     <div id="whCustom"><div class="grid2"><label class="field">Method <select id="whMethod">${["POST", "PUT", "GET"].map((m) => `<option ${v.method === m ? "selected" : ""}>${m}</option>`).join("")}</select></label>
       <label class="field">Content type <input id="whCtype" value="${esc(v.content_type || "application/json")}"></label></div>
@@ -3928,7 +3932,7 @@ function webhookDialog(x, h) {
       <p class="small muted">Placeholders (also in the URL): ${x.placeholders.map((p) => `<span class="mono">{{${p}}}</span>`).join(" ")} - escaped for JSON when the content type is JSON.</p>
       <label class="field">Headers, one "Name: value" per line ${v.header_names.length ? `<span class="small muted">(saved: ${esc(v.header_names.join(", "))} - "Name:" alone keeps a saved value)</span>` : ""}
         <textarea id="whHeaders" rows="2" spellcheck="false">${esc(v.header_names.map((n) => `${n}:`).join("\n"))}</textarea></label></div>
-    <label class="field">Signing secret (optional) ${v.has_secret ? `<span class="small muted">(saved - leave blank to keep, or <label class="chk"><input type="checkbox" id="whSecClear"> remove</label>)</span>` : ""}
+    <label class="field" id="whSecRow">Signing secret (optional) ${v.has_secret ? `<span class="small muted">(saved - leave blank to keep, or <label class="chk"><input type="checkbox" id="whSecClear"> remove</label>)</span>` : ""}
       <input id="whSecret" type="password" autocomplete="off" placeholder="adds X-TikManager-Signature: sha256=HMAC(timestamp.body)"></label>
     <label class="field">Which alerts (none ticked = all)<div class="wh-kinds">${Object.entries(x.kinds).map(([k, l]) => `<label class="chk"><input type="checkbox" data-whk="${k}" ${v.kinds.includes(k) ? "checked" : ""}> ${esc(l.split(" (")[0])}</label>`).join("")}</div></label>
     <label class="chk"><input type="checkbox" id="whOn" ${v.on ? "checked" : ""}> On</label>
@@ -3938,12 +3942,15 @@ function webhookDialog(x, h) {
   const help = { slack: "Slack: an app's Incoming Webhook URL (api.slack.com > Your apps > Incoming Webhooks).", discord: "Discord: channel settings > Integrations > Webhooks > Copy Webhook URL.",
     ntfy: "ntfy: the topic URL, e.g. https://ntfy.sh/your-secret-topic (install the ntfy app and subscribe to the same topic). For a protected topic add an Authorization header.",
     json: "TikManager JSON: {event (alert.opened / alert.resolved / test), status, kind, title, detail, router, router_id, client, link, time, source}.", custom: "Your own method, headers and body." };
-  const mode = () => { const f = $("whFmt").value; $("whHelp").textContent = help[f]; $("whCustom").classList.toggle("hidden", f !== "custom"); };
+  const mode = () => { const f = $("whFmt").value; $("whHelp").textContent = help[f] || "";
+    $("whCustom").classList.toggle("hidden", f !== "custom"); $("whTelegram").classList.toggle("hidden", f !== "telegram");
+    $("whUrlRow").classList.toggle("hidden", f === "telegram"); $("whSecRow").classList.toggle("hidden", f === "telegram"); };
   $("whFmt").addEventListener("change", mode); mode();
   $("whSave").addEventListener("click", async () => {
     const b = { id: h ? h.id : "", name: $("whName").value, format: $("whFmt").value, url: $("whUrl").value, on: $("whOn").checked,
       kinds: [...document.querySelectorAll("[data-whk]:checked")].map((c) => c.dataset.whk), secret: $("whSecret").value, secret_clear: $("whSecClear")?.checked || false };
     if (b.format === "custom") Object.assign(b, { method: $("whMethod").value, content_type: $("whCtype").value, body: $("whBody").value, headers: $("whHeaders").value });
+    else if (b.format === "telegram") Object.assign(b, { tg_token: $("whTgToken").value, tg_chat: $("whTgChat").value });
     else if (h) b.headers = v.header_names.map((n) => `${n}:`).join("\n");
     try { await post("/api/admin/webhooks", b); $("dlg").close(); webhooksCard(); }
     catch (e) { $("whDlgStatus").textContent = e.message; $("whDlgStatus").className = "status err"; }
