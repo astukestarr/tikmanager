@@ -11,6 +11,7 @@ import zipfile
 import ipaddress
 import json
 import mimetypes
+import socket
 import secrets
 import re
 import threading
@@ -1109,6 +1110,42 @@ class Handler(BaseHTTPRequestHandler):
             # what "blocked" means right now, per address: fail2ban on this server (SSH) and/or the routers' block list
             out["blocks"] = {"server": f2b.status(), "routers": autoblock.blocks()}
             return self.json(out)
+        if path == "/api/security/ip":   # geo + activity detail for one address (Security page: click an address)
+            self.require(tech=True)
+            ip = (q.get("ip") or "").strip()[:45]
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                return self.json({"error": "That isn't an IP address."}, 400)
+            ip = str(addr)
+            cc = org = ""
+            asn = 0
+            if addr.version == 4 and addr.is_global:
+                try:
+                    cc, org, asn = geo.lookup3(ip)
+                except Exception:  # noqa: BLE001 - no geo data yet (no IPinfo token): show the rest
+                    cc, org, asn = "", "", 0
+            ptr = ""
+            if addr.is_global:
+                old = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(2)
+                try:
+                    ptr = socket.gethostbyaddr(ip)[0]
+                except OSError:
+                    ptr = ""
+                finally:
+                    socket.setdefaulttimeout(old)
+            country = ""
+            try:
+                country = geo.names().get(cc, "") if cc else ""
+            except Exception:  # noqa: BLE001
+                country = ""
+            banned = f2b.status().get("banned", {})
+            return self.json({"ip": ip, "private": not addr.is_global, "ptr": ptr,
+                              "geo": {"cc": cc, "country": country, "org": org, "asn": asn},
+                              "protected": autoblock.protected(ip, autoblock.settings()),
+                              "blocked_server": bool(banned.get(ip)), "blocked_routers": ip in autoblock.blocks(),
+                              "activity": secev.ip_detail(ip)})
         if path == "/api/discovered":   # MikroTik neighbours of your routers that aren't in TikManager yet
             self.require(tech=True)
             devs = db.q("""SELECT id, name, identity, org_id, state, interfaces, networks, wan_ip, tunnel_ip, public_ip, neighbors, neighbors_at

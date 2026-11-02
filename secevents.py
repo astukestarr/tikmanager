@@ -230,6 +230,24 @@ class SecurityEvents:
                 "events": [{k: r[k] for k in ("ts", "source", "kind", "user", "ip", "device", "device_id", "via", "detail")} for r in reversed(ev[-500:])],
                 "total_events": len(ev)}
 
+    def ip_detail(self, ip, days=90):
+        """Everything this address did (kept 90 days): failed sign-ins, who it tried, where, first / last seen, and the
+        most recent events - for the Security page's click-an-address lookup."""
+        since = time.time() - days * 86400
+        rows = self.db.q("""SELECT e.*, d.name AS device FROM sec_events e LEFT JOIN devices d ON d.id = e.device_id
+                            WHERE e.ip = ? AND e.ts >= ? ORDER BY e.ts DESC""", (ip, since))
+        where = lambda r: r["device"] or {"tikmanager": "TikManager", "server": "Ubuntu server"}.get(r["source"], r["source"])
+        fails = [r for r in rows if r["kind"] in FAIL_KINDS]
+        users, targets = {}, {}
+        for r in fails:
+            users[r["user"] or "?"] = users.get(r["user"] or "?", 0) + 1
+            targets[where(r)] = targets.get(where(r), 0) + 1
+        return {"days": days, "attempts": len(fails), "ok": sum(1 for r in rows if r["kind"] == "login_ok"),
+                "first": min((r["ts"] for r in rows), default=0), "last": max((r["ts"] for r in rows), default=0),
+                "users": sorted(users.items(), key=lambda x: -x[1])[:8], "targets": sorted(targets, key=lambda t: -targets[t]),
+                "recent": [{"ts": r["ts"], "device": where(r), "device_id": r["device_id"], "kind": r["kind"],
+                            "user": r["user"] or "", "via": r["via"] or "", "detail": r["detail"] or ""} for r in rows[:20]]}
+
     def seed_dev(self):
         """Dev mode: sample events so the page has something to show (marked "sample")."""
         if self.db.one("SELECT COUNT(*) AS n FROM sec_events")["n"]:

@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.1.2-beta.1 - 2026-11-02
+
+Sign-ins & events page, no manual steps.
+
+- **Click an address to look it up.** On Sign-ins & events, clicking an address (in Top addresses or the Events list)
+  opens a panel with where it is (country and network / ASN, from the IPinfo Lite data TikManager already holds locally),
+  its reverse DNS, what it's been doing over the last 90 days (failed sign-ins, the usernames and routers it tried,
+  first / last seen), and whether it's blocked right now - with buttons to block it on every router, unblock it, or jump
+  to its events, and links to IPinfo, AbuseIPDB and VirusTotal.
+- **The three summary tiles are now clickable.** TikManager / Ubuntu server / Router filter the Events list to that
+  source and jump to it.
+
 ## 2.1.1 - 2026-11-02
 
 The full release of 2.1.1-beta.1 and beta.2. No manual steps.

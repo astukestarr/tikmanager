@@ -4574,8 +4574,8 @@ async function securityPage() {
   const s = await api(`/api/security?hours=${secView.hours}&source=${encodeURIComponent(secView.source)}&kind=${encodeURIComponent(secView.kind)}&q=${encodeURIComponent(secView.q)}`);
   const tile = (src, icon) => {
     const t = s.totals[src];
-    return `<div class="tile ${t.failed ? "warn" : "good"}"><div class="l">${esc(SEC_SOURCE[src])}</div><div class="v">${t.failed}</div>
-      <div class="small muted">failed attempt${t.failed === 1 ? "" : "s"} · ${t.ok} sign-in${t.ok === 1 ? "" : "s"}${src === "server" ? ` · ${t.banned} blocked` : ""}${src === "router" ? ` · ${t.changes} change${t.changes === 1 ? "" : "s"}` : ""}</div></div>`;
+    return `<button type="button" class="tile tile-btn ${t.failed ? "warn" : "good"}" data-secsrc="${src}" title="Show ${esc(SEC_SOURCE[src])} events below"><div class="l">${esc(SEC_SOURCE[src])}</div><div class="v">${t.failed}</div>
+      <div class="small muted">failed attempt${t.failed === 1 ? "" : "s"} · ${t.ok} sign-in${t.ok === 1 ? "" : "s"}${src === "server" ? ` · ${t.banned} blocked` : ""}${src === "router" ? ` · ${t.changes} change${t.changes === 1 ? "" : "s"}` : ""}</div></button>`;
   };
   $("main").innerHTML = `<h1>Sign-ins &amp; events</h1>
     <p class="muted">Sign-in attempts on TikManager itself, its Ubuntu server (SSH, sudo, fail2ban) and your routers (Winbox, SSH, WebFig, API) -
@@ -4591,7 +4591,7 @@ async function securityPage() {
       `<li class="flag-${esc(f.level)}">${esc(f.text)}${f.ip ? ` <button class="linkish" type="button" data-ip="${esc(f.ip)}">show</button>` : ""}</li>`).join("")}</ul></div>` : ""}
     <div class="grid2">
       <div class="card"><h2>Top addresses trying to get in</h2>${s.top_ips.length ? `<div class="table-wrap"><table><thead><tr><th>Address</th><th>Attempts</th><th>Tried</th><th>Usernames</th><th>Last</th></tr></thead><tbody>
-        ${s.top_ips.map((a) => `<tr><td class="mono"><button class="linkish mono" type="button" data-ip="${esc(a.ip)}">${esc(a.ip)}</button>${secBlocks(s, a)}</td>
+        ${s.top_ips.map((a) => `<tr><td class="mono"><button class="linkish mono" type="button" data-ipinfo="${esc(a.ip)}" title="Look up this address">${esc(a.ip)}</button>${secBlocks(s, a)}</td>
           <td>${a.count}</td><td class="small">${esc(a.targets.join(", "))}</td><td class="small mono">${esc(a.users.join(", "))}</td><td class="small nowrap">${ago(a.last)}</td></tr>`).join("")}
         </tbody></table></div>` : `<p class="muted">No failed attempts in this period.</p>`}</div>
       <div class="card"><h2>Routers with failed sign-ins</h2>${s.routers.length ? `<table><tbody>${s.routers.map((r) =>
@@ -4610,7 +4610,7 @@ async function securityPage() {
         ${s.events.map((e) => `<tr class="${e.kind === "login_ok" || e.kind === "config_change" ? "" : "sec-row-bad"}"><td class="nowrap small">${when(e.ts)}</td>
           <td class="small">${e.device_id ? `<a href="#router/${e.device_id}" data-dev="${e.device_id}">${esc(e.device || "router")}</a>` : esc(SEC_SOURCE[e.source] || e.source)}</td>
           <td><span class="pill sec-k-${esc(e.kind)}">${esc(SEC_KIND[e.kind] || e.kind)}</span></td><td class="mono small">${esc(e.user || "")}</td>
-          <td class="mono small">${esc(e.ip || "")}</td><td class="small">${esc(e.via || "")}</td><td class="small muted">${esc(e.detail || "")}</td></tr>`).join("")}</tbody></table></div>
+          <td class="mono small">${e.ip ? `<button class="linkish mono" type="button" data-ipinfo="${esc(e.ip)}" title="Look up this address">${esc(e.ip)}</button>` : ""}</td><td class="small">${esc(e.via || "")}</td><td class="small muted">${esc(e.detail || "")}</td></tr>`).join("")}</tbody></table></div>
         ${s.total_events > s.events.length ? `<p class="small muted">Newest 500 of ${s.total_events.toLocaleString()} - narrow it down with the filters.</p>` : ""}`
         : `<p class="muted">Nothing in this period.</p>`}</div>`;
   const reload = () => securityPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; });
@@ -4628,12 +4628,60 @@ async function securityPage() {
   // "show" / an address: filter the Events list to it and jump there (it's at the bottom of the page)
   $("main").querySelectorAll("[data-ip]").forEach((b) => b.addEventListener("click", () => {
     secView.q = b.dataset.ip; secView.source = ""; secView.kind = ""; secView.jump = true; reload(); }));
+  // the three summary tiles: filter the Events list to that source and jump to it
+  $("main").querySelectorAll("[data-secsrc]").forEach((b) => b.addEventListener("click", () => {
+    secView.source = b.dataset.secsrc; secView.q = ""; secView.kind = ""; secView.jump = true; reload(); }));
+  // click an address: geo lookup + what it's been doing, with block / show-events actions
+  $("main").querySelectorAll("[data-ipinfo]").forEach((b) => b.addEventListener("click", () => ipDetailDialog(b.dataset.ipinfo)));
   $("secClear")?.addEventListener("click", () => { secView.q = ""; secView.source = ""; secView.kind = ""; reload(); });
   if (secView.jump) { secView.jump = false; $("secEvents").scrollIntoView({ behavior: "smooth", block: "start" }); $("secEvents").classList.add("sec-flash"); }
   $("main").querySelectorAll("[data-dev]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("router", a.dataset.dev); }));
   $("secSrc").addEventListener("change", () => { secView.source = $("secSrc").value; reload(); });
   $("secKind").addEventListener("change", () => { secView.kind = $("secKind").value; reload(); });
   $("secQ").addEventListener("change", () => { secView.q = $("secQ").value.trim(); reload(); });
+}
+
+// Click an address on the Security page: geo lookup (IPinfo Lite data, held locally), reverse DNS, what it's tried, and
+// whether it's blocked - with Show-events / Block / Unblock actions and links to public reputation lookups.
+async function ipDetailDialog(ip) {
+  dialog(`<h2>Address <span class="mono">${esc(ip)}</span></h2><p class="muted" id="ipdBody">Looking it up…</p>`);
+  let d;
+  try { d = await api(`/api/security/ip?ip=${encodeURIComponent(ip)}`); }
+  catch (e) { const el = $("ipdBody"); if (el) { el.innerHTML = `<span class="status err">${esc(e.message)}</span>`; } return; }
+  const g = d.geo || {}, a = d.activity || {}, rows = [];
+  rows.push(["Address", `<span class="mono">${esc(d.ip)}</span>${d.private ? ` <span class="pill">private / internal</span>` : ""}`]);
+  if (g.cc || g.country) rows.push(["Country", `${cc(g.cc)} ${esc(g.country || g.cc)}`]);
+  if (g.org) rows.push(["Network", `${esc(g.org)}${g.asn ? ` <span class="muted">(AS${g.asn})</span>` : ""}`]);
+  if (d.ptr) rows.push(["Reverse DNS", `<span class="mono">${esc(d.ptr)}</span>`]);
+  rows.push(["Failed sign-ins", `${a.attempts} in the last ${a.days} days${a.ok ? ` · <b>${a.ok} successful</b>` : ""}`]);
+  if (a.last) rows.push(["Last seen", ago(a.last)]);
+  if (a.first && a.first !== a.last) rows.push(["First seen", ago(a.first)]);
+  if (a.users?.length) rows.push(["Usernames tried", a.users.map(([u, n]) => `<span class="mono">${esc(u)}</span> <span class="muted">${n}</span>`).join(", ")]);
+  if (a.targets?.length) rows.push(["Systems tried", a.targets.map(esc).join(", ")]);
+  const bstate = [];
+  if (d.blocked_server) bstate.push("server SSH (fail2ban)");
+  if (d.blocked_routers) bstate.push("the routers' block list");
+  rows.push(["Blocked now", bstate.length ? `yes - ${bstate.join(" and ")}` : (d.protected ? `no - never blocked (${esc(d.protected)})` : "no")]);
+  const recent = (a.recent || []).length ? `<h3 class="small" style="margin:14px 0 4px">Recent events</h3><div class="table-wrap"><table><tbody>${a.recent.map((e) =>
+    `<tr><td class="small nowrap">${when(e.ts)}</td><td class="small">${esc(e.device)}</td><td><span class="pill sec-k-${esc(e.kind)}">${esc(SEC_KIND[e.kind] || e.kind)}</span></td><td class="mono small">${esc(e.user)}</td><td class="small muted">${esc(e.via)}</td></tr>`).join("")}</tbody></table></div>` : "";
+  const q = encodeURIComponent(ip);
+  const canBlock = canWrite() && !d.private && !d.protected;
+  const html = `<div id="ipdBody"><table class="ipd"><tbody>${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("")}</tbody></table>${recent}
+    <p class="small muted">Reputation lookups: <a href="https://ipinfo.io/${q}" target="_blank" rel="noopener">IPinfo</a> ·
+      <a href="https://www.abuseipdb.com/check/${q}" target="_blank" rel="noopener">AbuseIPDB</a> ·
+      <a href="https://www.virustotal.com/gui/ip-address/${q}" target="_blank" rel="noopener">VirusTotal</a></p>
+    <div class="actions"><button class="btn" type="button" id="ipdEvents">Show these events</button>
+      ${d.blocked_routers ? `<button class="btn" type="button" id="ipdUnblock">Unblock on routers</button>`
+        : (canBlock ? `<button class="btn danger" type="button" id="ipdBlock">Block on all routers</button>` : "")}
+      <span class="spacer"></span><span class="status" id="ipdStatus"></span><button class="btn primary" type="button" data-close>Close</button></div></div>`;
+  $("ipdBody").outerHTML = html;
+  $("ipdEvents").addEventListener("click", () => { $("dlg").close(); secView.q = ip; secView.source = ""; secView.kind = ""; secView.jump = true;
+    securityPage().catch((e) => { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; }); });
+  const act = async (btn, url, label) => { btn.disabled = true; btn.textContent = `${label}…`;
+    try { await post(url, { ip }); $("dlg").close(); securityPage(); }
+    catch (e) { $("ipdStatus").textContent = e.message; $("ipdStatus").className = "status err"; btn.disabled = false; btn.textContent = label; } };
+  $("ipdBlock")?.addEventListener("click", (e) => act(e.target, "/api/security/autoblock/block", "Block on all routers"));
+  $("ipdUnblock")?.addEventListener("click", (e) => act(e.target, "/api/security/autoblock/release", "Unblock on routers"));
 }
 
 // --- Discovered: MikroTik devices your routers see next to them (IP > Neighbors) that aren't in TikManager yet ----------

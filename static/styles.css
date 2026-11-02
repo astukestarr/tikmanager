@@ -736,6 +736,9 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .tile-btn { font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
 .tile-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
 .tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ipd { border-collapse: collapse; margin: 4px 0 2px; }
+.ipd th { text-align: left; padding: 4px 14px 4px 0; color: var(--muted); font-weight: 600; white-space: nowrap; vertical-align: top; }
+.ipd td { padding: 4px 0; vertical-align: top; }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 0 16px; align-items: start; }
 /* the phone dashboard */
 .m-dash { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
