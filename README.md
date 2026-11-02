@@ -309,6 +309,18 @@ router that's already adopted - for example after a failed attempt. On the route
 `tikmanager` (the private key never leaves the router), a `tikmanager` user that may only log in from TikManager, a
 firewall rule letting TikManager in through the tunnel, web (REST) access for TikManager and log forwarding.
 
+**RouterOS 7.13+ device-mode:** adoption downloads a script with `/tool fetch` and imports it, so the router's
+device-mode must allow `fetch`. Routers in `mode: home` have it off by default, and the command stops with
+`failure: not allowed by device-mode`; `/system device-mode print` then shows `fetch: no`. Turn it on at the router:
+
+    /system device-mode update fetch=yes
+
+RouterOS won't apply that until someone confirms it in person within the time it prints - press the unit's reset/mode
+button once, or cold power-cycle it (a software `/system reboot` does not count). This can't be done over SSH or the
+API by design. Turn on `scheduler` at the same time (`/system device-mode update scheduler=yes fetch=yes`) if you use
+the firewall-rule undo or schedule Tasks to run on the router - both add a temporary scheduler. `mode: enterprise`
+routers usually allow both already.
+
 **Ports** (router page tab, technicians): a UniFi-style port diagram (speed, PoE, uplink, connected devices), VLAN
 grids (native / tagged / blocked per VLAN) or a port table, and VLAN management - native and tagged VLANs per port,
 add / rename / delete VLANs, VLAN filtering - with the commands shown first and an automatic undo unless you press
@@ -905,6 +917,9 @@ the server.
 
 If the adoption command stops right after creating the `tikmanager` interface, the router's terminal (or
 `/log print`) shows why; run the command again once that's fixed - it picks up where it left off.
+
+`failure: not allowed by device-mode` when you paste the command means RouterOS 7.13+ is blocking `/tool fetch`;
+enable device-mode `fetch` first (see **Adding routers** above), then run the command again.
 
 ## Try it locally (dev mode, simulated routers)
 
