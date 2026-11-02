@@ -2403,12 +2403,12 @@ async function upgradesView() {
   const count = (st) => r.jobs.filter((j) => j.status === st).length;
   $("main").innerHTML = `<h1>Upgrades</h1><p class="muted">RouterOS and RouterBOARD firmware - upgrade now, schedule it, or pick many routers at once.</p>
     <div class="tiles">
-      <div class="tile ${r.routers.some(hasUpdate) ? "warn" : "good"}"><div class="v">${r.routers.filter(hasUpdate).length}</div><div class="l">Routers with a RouterOS update</div></div>
-      <div class="tile"><div class="v">${count("scheduled")}</div><div class="l">Scheduled</div></div>
-      <div class="tile"><div class="v">${count("running")}</div><div class="l">Upgrading now</div></div>
-      <div class="tile ${count("failed") ? "bad" : ""}"><div class="v">${count("failed")}</div><div class="l">Failed (30 days)</div></div>
+      <button type="button" class="tile tile-btn ${r.routers.some(hasUpdate) ? "warn" : "good"} ${upView.only ? "sel" : ""}" data-uponly title="Show only routers with an update"><div class="v">${r.routers.filter(hasUpdate).length}</div><div class="l">Routers with a RouterOS update</div></button>
+      <button type="button" class="tile tile-btn" data-upjump="upJobs" title="Go to the upgrade jobs"><div class="v">${count("scheduled")}</div><div class="l">Scheduled</div></button>
+      <button type="button" class="tile tile-btn" data-upjump="upJobs" title="Go to the upgrade jobs"><div class="v">${count("running")}</div><div class="l">Upgrading now</div></button>
+      <button type="button" class="tile tile-btn ${count("failed") ? "bad" : ""}" data-upjump="upJobs" title="Go to the upgrade jobs"><div class="v">${count("failed")}</div><div class="l">Failed (30 days)</div></button>
     </div>
-    <div class="card">
+    <div class="card" id="upList">
       <div class="row"><input id="upQ" type="search" placeholder="Search routers" value="${esc(upView.q)}">
         ${orgs.length > 1 ? `<select id="upOrg"><option value="">All clients</option>${orgs.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select>` : ""}
         <label class="chk"><input type="checkbox" id="upOnly" ${upView.only ? "checked" : ""}> Only routers with an update</label>
@@ -2427,7 +2427,7 @@ async function upgradesView() {
         ${canWrite() ? `<div class="actions"><button class="btn primary" type="button" data-batch="${b}" data-act="resume">Resume them</button>
           <button class="btn" type="button" data-batch="${b}" data-act="cancel">Cancel them</button></div>` : ""}</div>`).join("");
     })()}
-    <div class="card"><h2>Upgrade jobs</h2>${r.jobs.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Change</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>
+    <div class="card" id="upJobs"><h2>Upgrade jobs</h2>${r.jobs.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Change</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>
       ${r.jobs.map((j) => `<tr><td class="nowrap">${when(j.finished_at || j.started_at || j.scheduled_at)}</td><td><a href="#router/${j.device_id}">${esc(j.device)}</a></td><td>${esc(j.org || "")}</td>
         <td class="nowrap">${esc(j.from_version || "")}${j.to_version && j.to_version !== j.from_version ? ` → ${esc(j.to_version)}` : ""}${j.channel ? ` <span class="small muted">(${esc(j.channel)})</span>` : ""}</td>
         <td>${upStatus(j)}${j.detail ? `<div class="small muted">${esc(j.detail)}</div>` : ""}</td><td class="small">${esc(j.created_by || "")}</td>
@@ -2460,7 +2460,10 @@ async function upgradesView() {
   };
   $("upQ").addEventListener("input", (e) => { upView.q = e.target.value; draw(); });
   $("upOrg")?.addEventListener("change", (e) => { upView.org = e.target.value; draw(); });
-  $("upOnly").addEventListener("change", (e) => { upView.only = e.target.checked; draw(); });
+  $("upOnly").addEventListener("change", (e) => { upView.only = e.target.checked; draw(); document.querySelector("[data-uponly]")?.classList.toggle("sel", upView.only); });
+  document.querySelector("[data-uponly]")?.addEventListener("click", () => { upView.only = true; if ($("upOnly")) $("upOnly").checked = true; draw();
+    document.querySelector("[data-uponly]").classList.add("sel"); $("upList")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
+  document.querySelectorAll("[data-upjump]").forEach((b) => b.addEventListener("click", () => $(b.dataset.upjump)?.scrollIntoView({ behavior: "smooth", block: "start" })));
   $("upAll")?.addEventListener("change", (e) => { shown.forEach((d) => (e.target.checked ? upView.sel.add(d.id) : upView.sel.delete(d.id))); draw(); });
   $("upGo")?.addEventListener("click", () => upgradeDialog(r.routers.filter((d) => upView.sel.has(d.id)), () => { upView.sel.clear(); upgradesView(); }));
   $("upCheck")?.addEventListener("click", async () => {
@@ -4876,14 +4879,14 @@ async function healthPage() {
         VPN problems, updates and backups - from what TikManager already reads (VPN and service settings every 15 minutes, read-only).</p></div>
       <span class="spacer"></span><span class="small muted">updates every minute</span></div>
     <div class="tiles">
-      <div class="tile ${count((y) => y.severity === "critical") ? "bad" : "good"}"><div class="l">Critical</div><div class="v">${count((y) => y.severity === "critical")}</div><div class="small muted">fix first</div></div>
-      <div class="tile ${count((y) => y.severity === "high") ? "warn" : "good"}"><div class="l">High</div><div class="v">${count((y) => y.severity === "high")}</div><div class="small muted">this week</div></div>
+      <button type="button" class="tile tile-btn ${count((y) => y.severity === "critical") ? "bad" : "good"} ${hView.sev === "critical" ? "sel" : ""}" data-hsev="critical"><div class="l">Critical</div><div class="v">${count((y) => y.severity === "critical")}</div><div class="small muted">fix first</div></button>
+      <button type="button" class="tile tile-btn ${count((y) => y.severity === "high") ? "warn" : "good"} ${hView.sev === "high" ? "sel" : ""}" data-hsev="high"><div class="l">High</div><div class="v">${count((y) => y.severity === "high")}</div><div class="small muted">high and up</div></button>
       <div class="tile good"><div class="l">Routers with nothing to fix</div><div class="v">${x.clean}</div><div class="small muted">of ${x.routers} (${x.online} online)</div></div></div>
     <div class="tiles h-cats">${tile("Internet", "Internet", "links and lines fine")}${tile("Performance", "Performance", "CPU, memory, storage OK")}
       ${tile("Exposure", "Open ports &amp; services", "nothing exposed")}${tile("Encryption", "Weak encryption / old VPNs", "strong everywhere")}
       ${tile("VPN", "VPN problems", "tunnels up")}${tile("Updates", "Updates &amp; CVEs", "up to date")}${tile("Backups", "Backups", "all recent")}${tile("Hygiene", "Hygiene", "admin user, NTP")}</div>
     ${x.unread ? `<p class="small muted">${x.unread} online router${x.unread === 1 ? " hasn't" : "s haven't"} had their settings read yet - service, firewall and cipher checks fill in within 15 minutes.</p>` : ""}
-    <div class="card"><div class="row">
+    <div class="card" id="hFindings"><div class="row">
       <select id="hSev" aria-label="Severity"><option value="">Any severity</option><option value="critical">Critical</option><option value="high">High and up</option><option value="medium">Medium and up</option></select>
       <select id="hCat" aria-label="Category"><option value="">All categories</option>${x.categories.map((c) => `<option>${c}</option>`).join("")}</select>
       ${orgs.length > 1 ? `<select id="hOrg" aria-label="Client"><option value="">All clients</option>${orgs.map((o) => `<option>${esc(o)}</option>`).join("")}</select>` : ""}
@@ -4966,12 +4969,20 @@ async function healthPage() {
     } catch (e) { hView.busy = false; $("hJob").innerHTML = `<p class="status err">${esc(e.message)}</p>`; draw(); }
   };
   ["hSev", "hCat", "hOrg"].forEach((id) => { const el = $(id); if (!el) return; const k = { hSev: "sev", hCat: "cat", hOrg: "org" }[id]; el.value = hView[k];
-    el.addEventListener("change", (e) => { hView[k] = e.target.value; draw(); document.querySelectorAll("[data-hcat]").forEach((t) => t.classList.toggle("sel", t.dataset.hcat === hView.cat)); }); });
+    el.addEventListener("change", (e) => { hView[k] = e.target.value; draw(); document.querySelectorAll("[data-hcat]").forEach((t) => t.classList.toggle("sel", t.dataset.hcat === hView.cat));
+      document.querySelectorAll("[data-hsev]").forEach((t) => t.classList.toggle("sel", t.dataset.hsev === hView.sev)); }); });
   $("hQ").addEventListener("input", (e) => { hView.q = e.target.value; draw(); });
   $("hAcc")?.addEventListener("change", (e) => { hView.acc = e.target.checked; draw(); });
   document.querySelectorAll("[data-hcat]").forEach((t) => t.addEventListener("click", () => {
     hView.cat = hView.cat === t.dataset.hcat ? "" : t.dataset.hcat; $("hCat").value = hView.cat; draw();
     document.querySelectorAll("[data-hcat]").forEach((b) => b.classList.toggle("sel", b.dataset.hcat === hView.cat)); }));
+  // the Critical / High tiles: filter the findings to that severity and jump to the list
+  document.querySelectorAll("[data-hsev]").forEach((t) => t.addEventListener("click", () => {
+    hView.sev = hView.sev === t.dataset.hsev ? "" : t.dataset.hsev; hView.cat = "";
+    if ($("hSev")) $("hSev").value = hView.sev; if ($("hCat")) $("hCat").value = ""; draw();
+    document.querySelectorAll("[data-hsev]").forEach((b) => b.classList.toggle("sel", b.dataset.hsev === hView.sev));
+    document.querySelectorAll("[data-hcat]").forEach((b) => b.classList.remove("sel"));
+    $("hFindings")?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
   draw();
   setBars($("hJob"));
   $("hJobClose")?.addEventListener("click", closeFixJob);
@@ -5163,9 +5174,9 @@ async function compliancePage() {
     <div class="tiles">
       <div class="tile ${x.score == null ? "" : x.score >= 90 ? "good" : x.score >= 70 ? "warn" : "bad"}"><div class="l">Controls met</div><div class="v">${x.score == null ? "—" : `${x.score}%`}</div><div class="small muted">of the checked controls</div></div>
       <div class="tile good"><div class="l">Met</div><div class="v">${x.met}</div><div class="small muted">${x.accepted ? `${x.accepted} with an accepted exception` : "all routers pass"}</div></div>
-      <div class="tile ${x.not_met ? "bad" : "good"}"><div class="l">Not met</div><div class="v">${x.not_met}</div><div class="small muted">on one router or more</div></div>
+      <button type="button" class="tile tile-btn ${x.not_met ? "bad" : "good"} ${cView.failOnly ? "sel" : ""}" data-cfail title="Show only the controls not met"><div class="l">Not met</div><div class="v">${x.not_met}</div><div class="small muted">on one router or more</div></button>
       <div class="tile ${x.review ? "warn" : "good"}"><div class="l">Needs review</div><div class="v">${x.review}</div><div class="small muted">depends on something outside the router</div></div></div>
-    <div class="card"><div class="table-wrap"><table><thead><tr><th>Control</th><th>Requirement</th><th>Result</th><th>Routers not meeting it</th></tr></thead>
+    <div class="card" id="cControls"><div class="table-wrap"><table><thead><tr><th>Control</th><th>Requirement</th><th>Result</th><th>Routers not meeting it</th></tr></thead>
       <tbody>${x.controls.filter((c) => !cView.failOnly || c.status === "fail").map((c) => `<tr class="c-row" data-ctl="${esc(c.id)}"><td class="nowrap"><b>${esc(c.id)}</b></td>
         <td>${esc(c.title)}<div class="small muted">${c.checks.map((k) => esc(x.check_info[k].title)).join(" · ")}</div></td><td>${pill(c.status)}</td>
         <td class="small">${c.failing.length ? `${c.failing.slice(0, 4).map((i) => esc(names[i])).join(", ")}${c.failing.length > 4 ? ` +${c.failing.length - 4} more` : ""}` : ""}
@@ -5179,12 +5190,14 @@ async function compliancePage() {
   $("cFw").addEventListener("change", (e) => { cView.fw = e.target.value; cView.open = null; compliancePage(); });
   $("cOrg").addEventListener("change", (e) => { cView.org = e.target.value; compliancePage(); });
   $("cFail").addEventListener("change", (e) => { cView.failOnly = e.target.checked; compliancePage(); });
+  document.querySelector("[data-cfail]")?.addEventListener("click", () => { cView.failOnly = !cView.failOnly; cView.jump = true; compliancePage(); });
   document.querySelectorAll("[data-copen]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); cView.open = cView.open === a.dataset.copen ? null : a.dataset.copen; compliancePage(); }));
   document.querySelectorAll("[data-cacc]").forEach((b) => b.addEventListener("click", async () => {
     const reason = prompt(`Accept "${x.check_info[b.dataset.cacc].title}" on ${names[b.dataset.cdev]}?\n\nWhy is it fine here? This goes in the client report as a documented exception.`);
     if (reason == null) return;
     try { await post("/api/exceptions", { device_id: Number(b.dataset.cdev), key: `cc:${b.dataset.cacc}`, reason }); compliancePage(); } catch (e) { alert(e.message); }
   }));
+  if (cView.jump) { cView.jump = false; $("cControls")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
 }
 
 // --- remote access: WireGuard for Windows (etc.) into this router (remoteaccess.py) ------------------------------------

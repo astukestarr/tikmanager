@@ -12,8 +12,11 @@ Sign-ins & events page, no manual steps.
   its reverse DNS, what it's been doing over the last 90 days (failed sign-ins, the usernames and routers it tried,
   first / last seen), and whether it's blocked right now - with buttons to block it on every router, unblock it, or jump
   to its events, and links to IPinfo, AbuseIPDB and VirusTotal.
-- **The three summary tiles are now clickable.** TikManager / Ubuntu server / Router filter the Events list to that
-  source and jump to it.
+- **Summary tiles are clickable across the app.** On **Sign-ins & events** the TikManager / Ubuntu server / Router
+  tiles filter the Events list to that source; on **Router health** the Critical and High tiles filter the findings by
+  severity (the category tiles already did); on **Compliance** the "Not met" tile shows only the controls not met; and
+  on **Upgrades** "Routers with a RouterOS update" filters the list and the job tiles jump to the upgrade jobs. Each
+  scrolls you to the matching list. (The dashboard and Backups tiles were already clickable.)
 
 ## 2.1.1 - 2026-11-02
 
