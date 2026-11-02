@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.1.1-beta.1 - 2026-11-02
+
+Docs only, no manual steps.
+
+- **Adopting a router on RouterOS 7.13+ in `mode: home`** needs device-mode's `fetch` turned on first, or the adoption
+  command stops with `failure: not allowed by device-mode`. The **Adding routers** section now has the
+  `/system device-mode update fetch=yes` step and the in-person confirmation it needs (reset/mode button or a cold
+  power-cycle - a software reboot doesn't count), plus a note to enable `scheduler` too for the firewall-rule undo and
+  on-router Tasks. The adoption troubleshooting now names the error.
+
 ## 2.1.0 - 2026-10-28
 
 Remote access: clearer Windows setup, and the tab stays put (release of 2.1.0-beta.1). No manual steps.
