@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.1.2-beta.2 - 2026-11-02
+
+More clickable tiles, no manual steps.
+
+- **Summary tiles are clickable on more pages.** On **Router health** the Critical and High tiles filter the findings by
+  severity (the category tiles already did); on **Compliance** the "Not met" tile shows only the controls not met; and on
+  **Upgrades** "Routers with a RouterOS update" filters the list and the job tiles jump to the upgrade jobs. Each scrolls
+  you to the matching list. (The dashboard and Backups tiles were already clickable.)
+
 ## 2.1.2-beta.1 - 2026-11-02
 
 Sign-ins & events page, no manual steps.
@@ -12,11 +21,8 @@ Sign-ins & events page, no manual steps.
   its reverse DNS, what it's been doing over the last 90 days (failed sign-ins, the usernames and routers it tried,
   first / last seen), and whether it's blocked right now - with buttons to block it on every router, unblock it, or jump
   to its events, and links to IPinfo, AbuseIPDB and VirusTotal.
-- **Summary tiles are clickable across the app.** On **Sign-ins & events** the TikManager / Ubuntu server / Router
-  tiles filter the Events list to that source; on **Router health** the Critical and High tiles filter the findings by
-  severity (the category tiles already did); on **Compliance** the "Not met" tile shows only the controls not met; and
-  on **Upgrades** "Routers with a RouterOS update" filters the list and the job tiles jump to the upgrade jobs. Each
-  scrolls you to the matching list. (The dashboard and Backups tiles were already clickable.)
+- **The Sign-ins & events summary tiles are clickable.** TikManager / Ubuntu server / Router filter the Events list to
+  that source and jump to it.
 
 ## 2.1.1 - 2026-11-02
 
