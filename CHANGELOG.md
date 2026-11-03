@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.9 - 2026-11-03
+
+- **IPsec wizard: more crypto control and a key you can see.** The Advanced section now also sets the **phase-1 and
+  phase-2 lifetimes** (e.g. 8h / 1d / 30m), and the **PFS group** can be turned off ("none (off)"). The **pre-shared
+  key** is now shown on the Review step with **Generate** and **Copy** buttons - set your own or generate a strong one,
+  and copy it right there to configure the far end. (On the tunnel's page the key still has Reveal, now with a Copy
+  button too.) The far-end settings sheet includes the lifetimes.
+
 ## 3.1.0-beta.8 - 2026-11-03
 
 - **Fix: IPsec tunnels failed to apply** with *"unknown parameter comment"*. The IPsec profile and proposal menus have no

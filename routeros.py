@@ -941,10 +941,14 @@ class RouterOS:
         n = cfg["name"]
         self.ipsec_clear(tag, n)
         # profile and proposal have no comment field in RouterOS - they're identified by their (TikManager-specific) name
-        self._req("PUT", "/ip/ipsec/profile", {"name": n, "dh-group": cfg["p1"]["dh"], "enc-algorithm": cfg["p1"]["enc"],
-                                               "hash-algorithm": cfg["p1"]["hash"], "nat-traversal": "yes"})
-        self._req("PUT", "/ip/ipsec/proposal", {"name": n, "auth-algorithms": cfg["p2"]["auth"], "enc-algorithms": cfg["p2"]["enc"],
-                                                "pfs-group": cfg["p2"]["pfs"]})
+        prof = {"name": n, "dh-group": cfg["p1"]["dh"], "enc-algorithm": cfg["p1"]["enc"], "hash-algorithm": cfg["p1"]["hash"], "nat-traversal": "yes"}
+        if cfg["p1"].get("life"):
+            prof["lifetime"] = cfg["p1"]["life"]
+        self._req("PUT", "/ip/ipsec/profile", prof)
+        prop = {"name": n, "auth-algorithms": cfg["p2"]["auth"], "enc-algorithms": cfg["p2"]["enc"], "pfs-group": cfg["p2"]["pfs"]}
+        if cfg["p2"].get("life"):
+            prop["lifetime"] = cfg["p2"]["life"]
+        self._req("PUT", "/ip/ipsec/proposal", prop)
         self._req("PUT", "/ip/ipsec/peer", {"name": n, "address": cfg["remote_addr"], "profile": n,
                                             "exchange-mode": cfg["exchange"], "comment": tag})
         self._req("PUT", "/ip/ipsec/identity", {"peer": n, "auth-method": "pre-shared-key", "secret": cfg["psk"], "comment": tag})

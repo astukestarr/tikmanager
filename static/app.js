@@ -6068,7 +6068,8 @@ async function wgbStatus(build, cands) {
 }
 
 // ===== Router Wizard > IPsec Tunnel (ipsecbuild.py) - MikroTik local end to an any-brand far end =====================
-const IPSEC_DEF = { ike: "ike2", p1_enc: "aes-256", p1_hash: "sha256", p1_dh: "modp2048", p2_enc: "aes-256-cbc", p2_auth: "sha256", pfs: "modp2048" };
+const IPSEC_DEF = { ike: "ike2", p1_enc: "aes-256", p1_hash: "sha256", p1_dh: "modp2048", p1_life: "1d", p2_enc: "aes-256-cbc", p2_auth: "sha256", pfs: "modp2048", p2_life: "30m" };
+function genPsk() { const a = new Uint8Array(24); crypto.getRandomValues(a); return btoa(String.fromCharCode(...a)).replace(/[^A-Za-z0-9]/g, "").slice(0, 32); }
 const IPSEC_OPTS = {
   p1_enc: ["aes-256", "aes-192", "aes-128", "3des"], p1_hash: ["sha256", "sha512", "sha1", "md5"],
   p1_dh: ["modp2048", "modp3072", "modp4096", "ecp256", "ecp384", "modp1536", "modp1024"],
@@ -6119,8 +6120,8 @@ async function ipsecWizard(isNew, build, cands, orgs) {
     org_id: build ? build.org_id : (orgs[0] ? orgs[0].id : null),
     device_id: build ? build.device_id : null, remote_addr: build ? (build.remote_addr || "") : "",
     local_subnets: new Set(build ? build.local_subnets : []), remote_subnets: new Set(build ? build.remote_subnets : []),
-    ike: build ? (build.ike || "ike2") : "ike2",
-    ...Object.fromEntries(["p1_enc", "p1_hash", "p1_dh", "p2_enc", "p2_auth", "pfs"].map((k) => [k, build && build[k] ? build[k] : IPSEC_DEF[k]])),
+    ike: build ? (build.ike || "ike2") : "ike2", psk: "",
+    ...Object.fromEntries(["p1_enc", "p1_hash", "p1_dh", "p1_life", "p2_enc", "p2_auth", "pfs", "p2_life"].map((k) => [k, build && build[k] ? build[k] : IPSEC_DEF[k]])),
   };
   let allOrgs = orgs.length ? orgs : [];
   const dev = (id) => cands.find((d) => d.id === id);
@@ -6138,7 +6139,8 @@ async function ipsecWizard(isNew, build, cands, orgs) {
       `<label class="chk"><input type="checkbox" data-isub="${kind}" value="${esc(x)}" checked> <span class="mono small">${esc(x)}</span></label>`).join("")}
     <input class="vadd" data-iadd="${kind}" placeholder="add a subnet, e.g. 10.20.0.0/24" aria-label="Add a subnet"></div>`;
   const sel = (k, label) => `<label class="field">${esc(label)} <select data-crypto="${k}">${IPSEC_OPTS[k].map((o) =>
-      `<option value="${o}" ${st[k] === o ? "selected" : ""}>${esc(o)}${k.endsWith("dh") || k === "pfs" ? (DH_GRP[o] ? ` (${DH_GRP[o]})` : "") : ""}</option>`).join("")}</select></label>`;
+      `<option value="${o}" ${st[k] === o ? "selected" : ""}>${o === "none" ? "none (off)" : esc(o)}${k.endsWith("dh") || k === "pfs" ? (DH_GRP[o] ? ` (${DH_GRP[o]})` : "") : ""}</option>`).join("")}</select></label>`;
+  const life = (k, label) => `<label class="field">${esc(label)} <input data-crypto="${k}" maxlength="20" value="${esc(st[k])}" placeholder="${esc(IPSEC_DEF[k])}"></label>`;
 
   const draw = () => {
     let body = "";
@@ -6161,18 +6163,23 @@ async function ipsecWizard(isNew, build, cands, orgs) {
           <label class="chk"><input type="radio" name="ipIke" value="ike" ${st.ike === "ike" ? "checked" : ""}> IKEv1 <span class="small muted">— only for older gear that can't do IKEv2</span></label></div>
         <p class="small muted">Defaults are modern and widely compatible: AES-256 / SHA-256 / DH group 14, with PFS. Open Advanced to change them.</p>
         <button type="button" class="btn" id="ipAdvBtn">${st.adv ? "Hide" : "Advanced"} settings</button>
-        <div id="ipAdv" ${st.adv ? "" : "hidden"}><h3>Phase 1 (IKE)</h3><div class="grid2">${sel("p1_enc", "Encryption")}${sel("p1_hash", "Hash")}${sel("p1_dh", "DH group")}</div>
-          <h3>Phase 2 (ESP)</h3><div class="grid2">${sel("p2_enc", "Encryption")}${sel("p2_auth", "Auth")}${sel("pfs", "PFS group")}</div></div></div>`;
+        <div id="ipAdv" ${st.adv ? "" : "hidden"}><h3>Phase 1 (IKE)</h3><div class="grid2">${sel("p1_enc", "Encryption")}${sel("p1_hash", "Hash")}${sel("p1_dh", "DH group")}${life("p1_life", "Lifetime")}</div>
+          <h3>Phase 2 (ESP)</h3><div class="grid2">${sel("p2_enc", "Encryption")}${sel("p2_auth", "Auth")}${sel("pfs", "PFS group")}${life("p2_life", "Lifetime")}</div>
+          <p class="small muted">Lifetime is a time like 8h, 1d or 30m. PFS group "none (off)" disables perfect forward secrecy.</p></div></div>`;
     } else {
       const d = dev(st.device_id);
+      if (!st.id && !st.psk) st.psk = genPsk();   // a key is ready to copy as soon as you reach Review on a new tunnel
       const sum = (l, v) => `<div class="kv"><span>${esc(l)}</span><span>${v}</span></div>`;
       body = `<div class="card"><h2>Review</h2>
         <label class="field">Name <input id="ipName" maxlength="80" value="${esc(build ? build.name : "IPsec tunnel")}"></label>
         <div class="grid2"><div>${sum("Local router", esc(d ? d.name : ""))}${sum("Local subnets", [...st.local_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}
-            ${sum("IKE", st.ike === "ike2" ? "IKEv2" : "IKEv1")}${sum("Phase 1", `${esc(st.p1_enc)} / ${esc(st.p1_hash)} / ${esc(st.p1_dh)}`)}</div>
+            ${sum("IKE", st.ike === "ike2" ? "IKEv2" : "IKEv1")}${sum("Phase 1", `${esc(st.p1_enc)} / ${esc(st.p1_hash)} / ${esc(st.p1_dh)} / ${esc(st.p1_life)}`)}</div>
           <div>${sum("Remote", esc(st.remote_addr))}${sum("Remote subnets", [...st.remote_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}
-            ${sum("PFS", esc(st.pfs))}${sum("Phase 2", `${esc(st.p2_enc)} / ${esc(st.p2_auth)}`)}</div></div>
-        <p class="small muted">A strong pre-shared key is generated and sealed when you save; reveal it on the tunnel's page to configure the far end. The local router is backed up first, and everything is tagged "TikManager IPsec #${st.id || "new"}".</p>
+            ${sum("PFS", st.pfs === "none" ? "off" : esc(st.pfs))}${sum("Phase 2", `${esc(st.p2_enc)} / ${esc(st.p2_auth)} / ${esc(st.p2_life)}`)}</div></div>
+        <h3>Pre-shared key</h3>
+        <div class="ip-psk"><input id="ipPskIn" class="field" maxlength="128" value="${esc(st.psk)}" ${st.id ? `placeholder="leave blank to keep the current key"` : ""}>
+          <button type="button" class="btn" id="ipGen">Generate</button><button type="button" class="btn" id="ipCopyPsk">Copy</button></div>
+        <p class="small muted">Shared with the far end to bring the tunnel up. Keep it safe; it's sealed on the server and shown again (Reveal) on the tunnel's page. The local router is backed up first, and everything is tagged "TikManager IPsec #${st.id || "new"}".</p>
         <div class="actions"><button class="btn primary" type="button" id="ipApply">Save &amp; apply</button><button class="btn" type="button" id="ipSaveBtn">Save draft</button><span class="status" id="ipSay"></span></div></div>`;
     }
     const nav = `<div class="actions">${st.step > 1 ? `<button class="btn" type="button" id="ipBack">Back</button>` : ""}${st.step < 5 ? `<button class="btn primary" type="button" id="ipNext">Next</button>` : ""}<span class="status" id="ipNav"></span></div>`;
@@ -6191,7 +6198,10 @@ async function ipsecWizard(isNew, build, cands, orgs) {
     $("ipRemote")?.addEventListener("input", (e) => { st.remote_addr = e.target.value.trim(); });
     document.querySelectorAll('[name="ipIke"]').forEach((r) => r.addEventListener("change", () => { st.ike = r.value; }));
     $("ipAdvBtn")?.addEventListener("click", () => { st.adv = !st.adv; draw(); });
-    document.querySelectorAll("[data-crypto]").forEach((s) => s.addEventListener("change", (e) => { st[s.dataset.crypto] = e.target.value; }));
+    document.querySelectorAll("[data-crypto]").forEach((s) => ["change", "input"].forEach((ev) => s.addEventListener(ev, (e) => { st[s.dataset.crypto] = e.target.value.trim(); })));
+    $("ipPskIn")?.addEventListener("input", (e) => { st.psk = e.target.value.trim(); });
+    $("ipGen")?.addEventListener("click", () => { st.psk = genPsk(); $("ipPskIn").value = st.psk; });
+    $("ipCopyPsk")?.addEventListener("click", async () => { try { await navigator.clipboard.writeText($("ipPskIn").value); $("ipNav").textContent = "Key copied."; } catch (e) { $("ipNav").textContent = "Copy failed."; } });
     document.querySelectorAll("[data-isub]").forEach((c) => c.addEventListener("change", () => { const set = c.dataset.isub === "local" ? st.local_subnets : st.remote_subnets; c.checked ? set.add(c.value) : set.delete(c.value); }));
     document.querySelectorAll("[data-iadd]").forEach((i) => i.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" || !i.value.trim()) return;
@@ -6216,8 +6226,9 @@ async function ipsecWizard(isNew, build, cands, orgs) {
     try {
       await post("/api/ipsec-builds", {
         id: st.id, org_id: st.org_id, name: $("ipName") ? $("ipName").value : (build ? build.name : "IPsec tunnel"),
-        device_id: st.device_id, remote_addr: st.remote_addr, ike: st.ike,
-        p1_enc: st.p1_enc, p1_hash: st.p1_hash, p1_dh: st.p1_dh, p2_enc: st.p2_enc, p2_auth: st.p2_auth, pfs: st.pfs,
+        device_id: st.device_id, remote_addr: st.remote_addr, ike: st.ike, psk: st.psk,
+        p1_enc: st.p1_enc, p1_hash: st.p1_hash, p1_dh: st.p1_dh, p1_life: st.p1_life,
+        p2_enc: st.p2_enc, p2_auth: st.p2_auth, pfs: st.pfs, p2_life: st.p2_life,
         local_subnets: [...st.local_subnets], remote_subnets: [...st.remote_subnets], apply });
       ipsecEdit = false;
       go("ipsec");   // back to the tunnel list
@@ -6231,8 +6242,8 @@ function ipsecSheet(b) {   // the parameter sheet for the far-end firewall (writ
   return [
     ["Peer / remote gateway", b.device_wan || "the MikroTik's public IP"],
     ["IKE version", b.ike === "ike2" ? "IKEv2" : "IKEv1"],
-    ["Phase 1 (IKE)", `${b.p1_enc} · ${b.p1_hash} · DH ${dh(b.p1_dh)}`],
-    ["Phase 2 (ESP)", `${b.p2_enc} · ${b.p2_auth} · PFS ${dh(b.pfs)}`],
+    ["Phase 1 (IKE)", `${b.p1_enc} · ${b.p1_hash} · DH ${dh(b.p1_dh)} · lifetime ${b.p1_life || "1d"}`],
+    ["Phase 2 (ESP)", `${b.p2_enc} · ${b.p2_auth} · PFS ${b.pfs === "none" ? "off" : dh(b.pfs)} · lifetime ${b.p2_life || "30m"}`],
     ["Their local subnets", (b.remote_subnets || []).join(", ") || "—"],
     ["Their remote subnets (behind the MikroTik)", (b.local_subnets || []).join(", ") || "—"],
   ];
@@ -6256,7 +6267,7 @@ async function ipsecStatus(build, cands) {
     <div class="card"><h2>Far-end settings</h2>
       <p class="small muted">Enter these on the other firewall (${esc(build.remote_addr || "the far end")}) to bring the tunnel up. Perspective is the far end's.</p>
       <div class="table-wrap"><table><tbody>${ipsecSheet(build).map(([k, v]) => `<tr><td class="small muted">${esc(k)}</td><td class="mono small">${esc(v)}</td></tr>`).join("")}
-        <tr><td class="small muted">Pre-shared key</td><td><span class="mono small" id="ipPsk">••••••••••••</span> ${ro ? "" : `<button type="button" class="btn" id="ipReveal">Reveal</button>`}</td></tr></tbody></table></div>
+        <tr><td class="small muted">Pre-shared key</td><td><span class="mono small" id="ipPsk">••••••••••••</span> ${ro ? "" : `<button type="button" class="btn" id="ipReveal">Reveal</button> <button type="button" class="btn" id="ipCopyKey">Copy</button>`}</td></tr></tbody></table></div>
       <div class="actions"><button type="button" class="btn" id="ipCopy">Copy settings</button><span class="status" id="ipCopySay"></span></div>
       <p class="small muted">Vendor notes — <b>Fortinet:</b> Phase 1 = IKEv${build.ike === "ike2" ? "2" : "1"}, set the proposal to match; add firewall policies both ways plus static routes to the remote subnets. <b>pfSense:</b> Phase 1 + a Phase 2 per subnet pair; remember the firewall rules on the IPsec tab. <b>Cisco ASA:</b> matching IKEv2 proposal, crypto map with the ACL for the subnet pairs, and <span class="mono">no-nat</span> exemption.</p></div>`;
   const say = (m, ok) => { $("ipSay").textContent = m; $("ipSay").className = `status ${ok ? "ok" : "err"}`; };
@@ -6268,14 +6279,17 @@ async function ipsecStatus(build, cands) {
     try { await post(`/api/ipsec-builds/${build.id}/delete`); go("ipsec"); } catch (err) { say(err.message); }
   });
   let psk = null;
+  const getPsk = async () => { if (psk == null) psk = (await post(`/api/ipsec-builds/${build.id}/psk`)).psk || ""; return psk; };
   $("ipReveal")?.addEventListener("click", async () => {
-    try { psk = (await post(`/api/ipsec-builds/${build.id}/psk`)).psk; $("ipPsk").textContent = psk || "(none)"; }
-    catch (e) { $("ipPsk").textContent = e.message; }
+    try { $("ipPsk").textContent = (await getPsk()) || "(none)"; } catch (e) { $("ipPsk").textContent = e.message; }
+  });
+  $("ipCopyKey")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(await getPsk()); $("ipCopySay").textContent = "Key copied."; $("ipCopySay").className = "status ok"; }
+    catch (e) { $("ipCopySay").textContent = "Copy failed."; $("ipCopySay").className = "status err"; }
   });
   $("ipCopy")?.addEventListener("click", async () => {
     const lines = ipsecSheet(build).map(([k, v]) => `${k}: ${v}`);
-    lines.push(`Pre-shared key: ${psk || "(click Reveal first)"}`);
-    try { await navigator.clipboard.writeText(lines.join("\n")); $("ipCopySay").textContent = "Copied."; $("ipCopySay").className = "status ok"; }
+    try { lines.push(`Pre-shared key: ${await getPsk()}`); await navigator.clipboard.writeText(lines.join("\n")); $("ipCopySay").textContent = "Copied."; $("ipCopySay").className = "status ok"; }
     catch (e) { $("ipCopySay").textContent = "Copy failed - select the table manually."; $("ipCopySay").className = "status err"; }
   });
   clearInterval(window._ipsecTimer);

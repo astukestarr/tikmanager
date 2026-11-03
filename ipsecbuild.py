@@ -11,6 +11,7 @@ on an explicit reveal - never stored or returned in plain text otherwise.
 """
 import ipaddress
 import json
+import re
 import secrets
 import threading
 import time
@@ -19,8 +20,9 @@ import traceback
 from routeros import IPSEC_TAG, RouterError
 
 # Modern, broadly-compatible defaults (editable in the wizard's Advanced section). RouterOS value names.
-DEFAULTS = {"ike": "ike2", "p1_enc": "aes-256", "p1_hash": "sha256", "p1_dh": "modp2048",
-            "p2_enc": "aes-256-cbc", "p2_auth": "sha256", "pfs": "modp2048"}
+DEFAULTS = {"ike": "ike2", "p1_enc": "aes-256", "p1_hash": "sha256", "p1_dh": "modp2048", "p1_life": "1d",
+            "p2_enc": "aes-256-cbc", "p2_auth": "sha256", "pfs": "modp2048", "p2_life": "30m"}
+CRYPTO_KEYS = ("p1_enc", "p1_hash", "p1_dh", "p1_life", "p2_enc", "p2_auth", "pfs", "p2_life")
 
 
 class IpsecError(ValueError):
@@ -74,10 +76,13 @@ class IpsecBuilds:
         ike = (b.get("ike") or "ike2").strip()
         if ike not in ("ike2", "ike"):
             raise IpsecError("IKE version must be IKEv2 or IKEv1.")
-        crypto = {k: (b.get(k) or DEFAULTS[k]).strip() for k in ("p1_enc", "p1_hash", "p1_dh", "p2_enc", "p2_auth", "pfs")}
+        crypto = {k: (b.get(k) or DEFAULTS[k]).strip() for k in CRYPTO_KEYS}
         for k, val in crypto.items():
             if not val or not all(ch.isalnum() or ch in "-_," for ch in val):
                 raise IpsecError(f"{k} has an invalid value.")
+        for k in ("p1_life", "p2_life"):   # a RouterOS time string, e.g. 8h, 1d, 30m, 1h30m
+            if not re.fullmatch(r"(\d+[smhdw])+|\d+", crypto[k]):
+                raise IpsecError(f"Lifetime {crypto[k]!r} isn't valid - use a time like 8h, 1d or 30m.")
         return {"device": d, "remote": remote, "ike": ike,
                 "local": [str(n) for n in local], "far": [str(n) for n in far], **crypto}
 
@@ -90,11 +95,16 @@ class IpsecBuilds:
             out.append(n)
         return out
 
+    def _seal_psk(self, build_id, psk):
+        blob, alg = self.vault.seal(psk.encode(), f"ipsec:{build_id}")
+        self.db.run("UPDATE ipsec_builds SET psk_blob=?, psk_alg=? WHERE id=?", (blob, alg, build_id))
+
     def save(self, build_id, b, user):
         v = self.validate(b)
         now = time.time()
+        psk = (b.get("psk") or "").strip()   # the tech can set the key in the wizard; blank keeps the existing one (edit) or auto-generates (new)
         fields = (b["org_id"], b.get("name") or "IPsec tunnel", v["device"]["id"], v["remote"], v["ike"],
-                  v["p1_enc"], v["p1_hash"], v["p1_dh"], v["p2_enc"], v["p2_auth"], v["pfs"],
+                  v["p1_enc"], v["p1_hash"], v["p1_dh"], v["p1_life"], v["p2_enc"], v["p2_auth"], v["pfs"], v["p2_life"],
                   json.dumps(v["local"]), json.dumps(v["far"]))
         if build_id:
             row = self.db.one("SELECT * FROM ipsec_builds WHERE id=?", (build_id,))
@@ -103,15 +113,15 @@ class IpsecBuilds:
             if row["id"] in self.busy:
                 raise IpsecError("This tunnel is being applied right now - try again in a minute.")
             self.db.run("""UPDATE ipsec_builds SET org_id=?, name=?, device_id=?, remote_addr=?, ike=?, p1_enc=?, p1_hash=?,
-                           p1_dh=?, p2_enc=?, p2_auth=?, pfs=?, local_subnets=?, remote_subnets=?, updated_at=? WHERE id=?""",
+                           p1_dh=?, p1_life=?, p2_enc=?, p2_auth=?, pfs=?, p2_life=?, local_subnets=?, remote_subnets=?, updated_at=? WHERE id=?""",
                         (*fields, now, build_id))
+            if psk:
+                self._seal_psk(build_id, psk)
             return build_id
-        bid = self.db.run("""INSERT INTO ipsec_builds (org_id, name, device_id, remote_addr, ike, p1_enc, p1_hash, p1_dh,
-                             p2_enc, p2_auth, pfs, local_subnets, remote_subnets, created_by, created_at, updated_at)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (*fields, user, now, now))
-        psk = secrets.token_urlsafe(24)   # a strong pre-shared key, generated once and sealed
-        blob, alg = self.vault.seal(psk.encode(), f"ipsec:{bid}")
-        self.db.run("UPDATE ipsec_builds SET psk_blob=?, psk_alg=? WHERE id=?", (blob, alg, bid))
+        bid = self.db.run("""INSERT INTO ipsec_builds (org_id, name, device_id, remote_addr, ike, p1_enc, p1_hash, p1_dh, p1_life,
+                             p2_enc, p2_auth, pfs, p2_life, local_subnets, remote_subnets, created_by, created_at, updated_at)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (*fields, user, now, now))
+        self._seal_psk(bid, psk or secrets.token_urlsafe(24))   # the wizard supplies a key; fall back to a strong random one
         return bid
 
     def reveal_psk(self, build_id):
@@ -144,8 +154,8 @@ class IpsecBuilds:
                 raise IpsecError(f"Stopped before changing anything: backup of {d['name']} failed ({r.get('detail')}).")
             cfg = {"name": f"tm-ipsec-{build_id}", "remote_addr": row["remote_addr"], "remote_ip": as_ip(row["remote_addr"]),
                    "exchange": "ike2" if row["ike"] == "ike2" else "main",
-                   "p1": {"enc": row["p1_enc"], "hash": row["p1_hash"], "dh": row["p1_dh"]},
-                   "p2": {"enc": row["p2_enc"], "auth": row["p2_auth"], "pfs": row["pfs"]},
+                   "p1": {"enc": row["p1_enc"], "hash": row["p1_hash"], "dh": row["p1_dh"], "life": row["p1_life"]},
+                   "p2": {"enc": row["p2_enc"], "auth": row["p2_auth"], "pfs": row["pfs"], "life": row["p2_life"]},
                    "local_subnets": json.loads(row["local_subnets"]), "remote_subnets": json.loads(row["remote_subnets"]),
                    "psk": self.reveal_psk(build_id) or ""}
             self.client_for(d).ipsec_apply(cfg, tag)
