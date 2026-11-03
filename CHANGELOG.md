@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.0.0 - 2026-11-03
+
+**Automated Firmware updates fixed.** Scheduled and one-click RouterOS / RouterBOARD upgrades now run reliably across the
+whole fleet - including the low-flash 16 MB boards (hEX, hAP ac² / ac) that used to reboot and come back on the old
+version. (Despite the major version number, this is a normal one-click / in-app upgrade - **no manual steps**.)
+
+- **Upgrades now use the router's native "Download & Install"** (`/system package update install`) - the same atomic
+  operation Winbox does - instead of staging the package with `download` and then issuing a separate reboot. The old
+  two-step path could leave a router on the old version, which is what made whole batches of 16 MB boards report *"didn't
+  come back on 7.x after 15 minutes"* and trip the batch safety stop. RouterOS stages the packages in a reserved area, so
+  **free flash space is irrelevant** - a 16 MB board with 3 MB free upgrades fine. TikManager now waits once (up to 30
+  minutes) for the router to return on the new version, and the matching RouterBOARD firmware applies on the following
+  reboot as before. Verified live on a 16 MB hEX: RouterOS 7.24.5 → 7.25.1 and firmware 7.24.5 → 7.25.1.
+
 ## 2.1.3-beta.1 - 2026-11-03
 
 Upgrades now use the router's native Download & Install - fixes upgrades on low-flash boards. No manual steps.
