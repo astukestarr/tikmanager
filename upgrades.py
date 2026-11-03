@@ -27,6 +27,7 @@ MAX_PARALLEL = 4
 CHECK_EVERY = 12 * 3600
 ONLINE_WAIT = 30 * 60
 BACK_WAIT = 15 * 60
+INSTALL_WAIT = 30 * 60   # native install downloads, reboots and comes back - this one window covers the whole thing
 CHANNELS = ("stable", "long-term")
 
 
@@ -125,10 +126,11 @@ class Upgrades:
     def _device(self, j):
         return self.db.one("SELECT * FROM devices WHERE id=?", (j["device_id"],))
 
-    def _wait_back(self, d, check=None):
-        """After a reboot: wait for the router to answer again (and, if given, for check(status) to pass)."""
+    def _wait_back(self, d, check=None, timeout=BACK_WAIT):
+        """After a reboot (or a native install, which reboots itself): wait for the router to answer again and, if given,
+        for check(status) to pass. `timeout` is longer for a native install, whose window also covers the download."""
         time.sleep(30)
-        deadline = time.time() + BACK_WAIT
+        deadline = time.time() + timeout
         while time.time() < deadline:
             try:
                 st = self.client_for(d).status()
@@ -168,14 +170,15 @@ class Upgrades:
                                                   f"Read its release notes and schedule it again if it's fine.")
             notes = []
             if latest and vkey(latest) > vkey(installed):
-                self._step(jid, f"downloading RouterOS {latest}")
-                cl.download_update()
-                self._step(jid, f"rebooting into RouterOS {latest}")
-                self.db.event(d["id"], d["org_id"], "upgrading", f"RouterOS {installed} -> {latest}, rebooting")
-                cl.reboot()
-                st = self._wait_back(d, lambda s: vkey(s.get("version")) >= vkey(latest))
+                # Native 'download & install' (like Winbox): the router fetches the packages and reboots itself. This is
+                # the only reliable path on low-flash boards (16 MB hEX / hAP ac²) - the packages stage in a reserved
+                # area, so free space doesn't matter. The single wait below covers the download, reboot and reconnect.
+                self._step(jid, f"installing RouterOS {latest}")
+                self.db.event(d["id"], d["org_id"], "upgrading", f"RouterOS {installed} -> {latest} (download & install)")
+                cl.install_update()
+                st = self._wait_back(d, lambda s: vkey(s.get("version")) >= vkey(latest), timeout=INSTALL_WAIT)
                 if not st:
-                    return self._finish(j, "failed", f"The router hasn't come back on RouterOS {latest} after {BACK_WAIT // 60} minutes - check it "
+                    return self._finish(j, "failed", f"The router hasn't come back on RouterOS {latest} after {INSTALL_WAIT // 60} minutes - check it "
                                                      f"(the pre-upgrade backup is saved).", latest)
                 notes.append(f"RouterOS {installed} → {latest}")
             else:

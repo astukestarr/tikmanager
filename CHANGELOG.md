@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 2.1.3-beta.1 - 2026-11-03
+
+Upgrades now use the router's native Download & Install - fixes upgrades on low-flash boards. No manual steps.
+
+- **RouterOS upgrades now use `/system package update install`** (the router's own "Download & Install", the same thing
+  Winbox does) instead of staging the package with `download` and then issuing a separate reboot. The old two-step path
+  could leave a router back on the old version - most visibly on **16 MB boards** (hEX, hAP ac²), which is why a batch of
+  those would each report *"didn't come back on 7.x after 15 minutes."* The native install downloads, stages (in a
+  reserved area - **free flash space doesn't matter**, a 16 MB board with 3 MB free installs fine) and reboots in one
+  atomic operation, and TikManager waits once (up to 30 min) for the router to come back on the new version. This is
+  what was holding up the big Alliance Ag batch.
+
 ## 2.1.2-beta.2 - 2026-11-02
 
 More clickable tiles, no manual steps.

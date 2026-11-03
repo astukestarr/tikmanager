@@ -1106,6 +1106,22 @@ class RouterOS:
         raise RouterError(f"The download didn't finish in {wait // 60} minutes (last status: {status or 'none'}) - the router "
                           "keeps what it has; try again, or check its internet connection")
 
+    def install_update(self):
+        """Upgrade the native way, exactly like Winbox's 'Download & Install': /system package update install makes the
+        router fetch the new RouterOS from MikroTik and reboot itself to apply it - one atomic operation.
+
+        This is the reliable path on low-flash boards (hEX, hAP ac²: 16 MB). RouterOS stages the packages in a reserved
+        area, not the visible file system, so free-hdd-space is irrelevant (a 16 MB board with 3 MB free downloads and
+        installs fine). We deliberately do NOT stage with 'download' and then issue our own reboot - that two-step dance
+        could reboot before the stage was complete, or act on a stale 'Downloaded' status, leaving the router back on the
+        old version. 'install' does the download, stage and reboot itself; the call ends in a reboot, so the request
+        usually gets no reply - that's expected, and the caller waits for the router to come back on the new version.
+        The newest version must already be known (call check_updates first), which the upgrade flow does."""
+        try:
+            self._req("POST", "/execute", {"script": "/system package update install"}, timeout=30)
+        except RouterError:
+            pass   # the install reboots the router; a dropped reply is expected
+
     def routerboard_upgrade(self):
         """Stage the RouterBOARD firmware that matches the installed RouterOS (applied on the next reboot)."""
         self._req("POST", "/system/routerboard/upgrade", {}, timeout=60)
@@ -1477,6 +1493,12 @@ class SimRouter:
     def download_update(self):
         time.sleep(3)
         self._sim()["staged"] = self.LATEST[self._sim()["channel"]]
+        return "Downloaded, please reboot router to upgrade it"
+
+    def install_update(self):
+        # native download & install: stage the new version and reboot to apply it, in one step
+        self._sim()["staged"] = self.LATEST[self._sim()["channel"]]
+        self.reboot()
         return "Downloaded, please reboot router to upgrade it"
 
     def routerboard_upgrade(self):
