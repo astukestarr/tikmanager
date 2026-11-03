@@ -138,6 +138,18 @@ CREATE TABLE IF NOT EXISTS wg_builds (               -- WireGuard Builder wizard
   last_error TEXT, hub_hs INTEGER, client_hs INTEGER, ping_ms REAL, checked_at REAL,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL, last_applied REAL
 );
+CREATE TABLE IF NOT EXISTS ipsec_builds (            -- IPsec Tunnel wizard: a MikroTik local end to an any-brand remote end (one-sided)
+  id INTEGER PRIMARY KEY, org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE, name TEXT NOT NULL,
+  device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,   -- the local MikroTik (the only side TikManager configures)
+  remote_addr TEXT,                                 -- the far end's public IP or DNS name (not a managed device)
+  ike TEXT NOT NULL DEFAULT 'ike2',                 -- ike2 / ike (IKEv1 for old gear)
+  p1_enc TEXT, p1_hash TEXT, p1_dh TEXT, p2_enc TEXT, p2_auth TEXT, pfs TEXT,   -- phase-1 / phase-2 crypto
+  local_subnets TEXT NOT NULL DEFAULT '[]', remote_subnets TEXT NOT NULL DEFAULT '[]',
+  psk_blob BLOB, psk_alg TEXT,                      -- the pre-shared key, sealed by vault.py; never stored or listed in plain text
+  status TEXT NOT NULL DEFAULT 'draft',             -- draft / applying / active / failed / disabled
+  last_error TEXT, peer_state TEXT, checked_at REAL,
+  created_by TEXT, created_at REAL NOT NULL, updated_at REAL, last_applied REAL
+);
 CREATE TABLE IF NOT EXISTS ra_servers (               -- remote access (WireGuard for Windows ...) into one router
   device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE, port INTEGER NOT NULL, pool TEXT NOT NULL,
   endpoint TEXT NOT NULL, split INTEGER NOT NULL DEFAULT 1, routes TEXT NOT NULL DEFAULT '[]', dns TEXT NOT NULL DEFAULT '',

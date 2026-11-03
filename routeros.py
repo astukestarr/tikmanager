@@ -23,6 +23,7 @@ VPN_IFACE = "tikmanager-vpn"
 RA_IFACE = "tikmanager-ra"   # remote access (remoteaccess.py): people connecting in with WireGuard for Windows etc.
 RA_TAG = "TikManager remote access"   # comment on everything remote access adds (peers: "TikManager remote access: <name>")
 WGB_TAG = "TikManager WG"   # WireGuard Builder wizard; each build's objects carry "TikManager WG #<id>" so they remove exactly
+IPSEC_TAG = "TikManager IPsec"   # IPsec Tunnel wizard; each build's objects carry "TikManager IPsec #<id>"
 
 
 class RouterError(Exception):
@@ -924,6 +925,54 @@ class RouterOS:
                     return r["as"]
         return None
 
+    # --- IPsec Tunnel wizard (ipsecbuild.py) - policy-based site-to-site to any-brand far end; everything carries the per-build tag --
+    def ipsec_apply(self, cfg, tag):
+        """Configure the local MikroTik side of a policy-based IPsec tunnel. cfg: {name, remote_addr, remote_ip, exchange,
+        p1:{enc,hash,dh}, p2:{enc,auth,pfs}, local_subnets:[...], remote_subnets:[...], psk}. The far end (any brand) is
+        configured by hand from the wizard's parameter sheet. Everything added carries comment=tag."""
+        self.ipsec_clear(tag)
+        n = cfg["name"]
+        self._req("PUT", "/ip/ipsec/profile", {"name": n, "dh-group": cfg["p1"]["dh"], "enc-algorithm": cfg["p1"]["enc"],
+                                               "hash-algorithm": cfg["p1"]["hash"], "nat-traversal": "yes", "comment": tag})
+        self._req("PUT", "/ip/ipsec/proposal", {"name": n, "auth-algorithms": cfg["p2"]["auth"], "enc-algorithms": cfg["p2"]["enc"],
+                                                "pfs-group": cfg["p2"]["pfs"], "comment": tag})
+        self._req("PUT", "/ip/ipsec/peer", {"name": n, "address": cfg["remote_addr"], "profile": n,
+                                            "exchange-mode": cfg["exchange"], "comment": tag})
+        self._req("PUT", "/ip/ipsec/identity", {"peer": n, "auth-method": "pre-shared-key", "secret": cfg["psk"], "comment": tag})
+        for src in cfg["local_subnets"]:
+            for dst in cfg["remote_subnets"]:
+                self._req("PUT", "/ip/ipsec/policy", {"peer": n, "tunnel": "yes", "src-address": src, "dst-address": dst,
+                                                      "proposal": n, "action": "encrypt", "level": "unique", "comment": tag})
+        # NAT bypass: don't masquerade traffic between the two sites (accept, before the masquerade rule)
+        first_nat = next((r.get(".id") for r in self.optional(lambda: self.get("/ip/firewall/nat"), []) or [] if r.get("dynamic") != "true"), None)
+        for src in cfg["local_subnets"]:
+            for dst in cfg["remote_subnets"]:
+                self._req("PUT", "/ip/firewall/nat", {"chain": "srcnat", "action": "accept", "src-address": src, "dst-address": dst,
+                                                      "comment": tag, **({"place-before": first_nat} if first_nat else {})})
+        # firewall: let the far end reach IKE (UDP 500/4500) and ESP, at the top before any drop
+        first = next((r.get(".id") for r in self.get("/ip/firewall/filter") or [] if r.get("dynamic") != "true"), None)
+        src = {"src-address": cfg["remote_ip"]} if cfg.get("remote_ip") else {}   # only when the far end is an IP, not a DNS name
+        for r in ({"protocol": "udp", "dst-port": "500,4500"}, {"protocol": "ipsec-esp"}):
+            self._req("PUT", "/ip/firewall/filter", {"chain": "input", "action": "accept", **r, **src, "comment": tag,
+                                                     **({"place-before": first} if first else {})})
+
+    def ipsec_clear(self, tag):
+        """Remove every object this IPsec build added, matched by its exact comment tag (policy/identity first, then the
+        peer, proposal and profile they reference, plus the firewall and NAT rules)."""
+        q = urllib.parse.quote(tag)
+        for menu in ("/ip/ipsec/policy", "/ip/ipsec/identity", "/ip/ipsec/peer", "/ip/ipsec/proposal", "/ip/ipsec/profile",
+                     "/ip/firewall/nat", "/ip/firewall/filter"):
+            for r in self.optional(lambda menu=menu: self.get(f"{menu}?comment={q}"), []) or []:
+                if r.get("comment") == tag:
+                    self._req("DELETE", f"{menu}/{r['.id']}")
+
+    def ipsec_status(self, remote_ip):
+        """The live state of the IPsec tunnel to remote_ip (from /ip/ipsec/active-peers): 'established' etc., or None."""
+        for p in self.optional(lambda: self.get("/ip/ipsec/active-peers"), []) or []:
+            if remote_ip and str(p.get("remote-address") or "").split("/")[0] == remote_ip:
+                return p.get("state") or ("established" if p.get("uptime") else None)
+        return None
+
     # --- remote access (remoteaccess.py) - everything carries RA_TAG, so it can be removed exactly -----------------------
     def ra_setup(self, name, cfg):
         """cfg: {port, address (gateway/prefix), dns_to_router}. Interface, gateway address and firewall rules - peers (the
@@ -1734,6 +1783,19 @@ class SimRouter:
 
     def bgp_instance(self):
         return None
+
+    def ipsec_apply(self, cfg, tag):
+        time.sleep(0.3)
+        self._sim().setdefault("ipsec", {})[tag] = cfg
+
+    def ipsec_clear(self, tag):
+        (self._sim().get("ipsec") or {}).pop(tag, None)
+
+    def ipsec_status(self, remote_ip):
+        for c in (self._sim().get("ipsec") or {}).values():
+            if c.get("remote_ip") == remote_ip or c.get("remote_addr") == remote_ip:
+                return "established"
+        return "established" if (self._sim().get("ipsec") and remote_ip) else None
 
     def ra_setup(self, name, cfg):
         time.sleep(0.3)

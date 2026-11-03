@@ -132,6 +132,10 @@ SLIDES_3_1 = [
     {"id": "wg-builder-bgp", "title": "Static routes or BGP", "img": None, "view": "wgbuild", "who": "tech",
      "text": "Choose how the tunnel routes: static routes, or BGP (eBGP or iBGP) where the two routers peer and exchange routes "
              "dynamically. BGP reuses a router's existing AS when it has one, so a new tunnel slots into an existing fabric."},
+    {"id": "ipsec-wizard", "title": "IPsec Tunnel wizard", "img": None, "view": "ipsec", "who": "tech",
+     "text": "A second Router Wizard: a policy-based IPsec tunnel from a MikroTik to an any-brand firewall (Fortinet, Cisco, "
+             "pfSense...). TikManager sets up the MikroTik end and gives you a copyable settings sheet - with the pre-shared key - "
+             "to configure the other box."},
 ]
 SLIDES = SLIDES_3_1
 IDS = {s["id"] for s in SLIDES}

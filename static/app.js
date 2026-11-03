@@ -5693,6 +5693,8 @@ async function vpnView(id) {
 const WIZARDS = [
   { view: "wgbuild", title: "WireGuard Builder", icon: "vpns",
     desc: "Connect two routers with a point-to-point WireGuard tunnel - static routes or BGP, step by step." },
+  { view: "ipsec", title: "IPsec Tunnel", icon: "security",
+    desc: "Connect a MikroTik to an any-brand firewall (Fortinet, Cisco, pfSense...) with a policy-based IPsec tunnel." },
 ];
 function wizardsLanding() {
   $("main").innerHTML = `<div class="row"><h1>Router Wizard</h1></div>
@@ -6064,6 +6066,225 @@ async function wgbStatus(build, cands) {
   }, 15000);
 }
 
+// ===== Router Wizard > IPsec Tunnel (ipsecbuild.py) - MikroTik local end to an any-brand far end =====================
+const IPSEC_DEF = { ike: "ike2", p1_enc: "aes-256", p1_hash: "sha256", p1_dh: "modp2048", p2_enc: "aes-256-cbc", p2_auth: "sha256", pfs: "modp2048" };
+const IPSEC_OPTS = {
+  p1_enc: ["aes-256", "aes-192", "aes-128", "3des"], p1_hash: ["sha256", "sha512", "sha1", "md5"],
+  p1_dh: ["modp2048", "modp3072", "modp4096", "ecp256", "ecp384", "modp1536", "modp1024"],
+  p2_enc: ["aes-256-cbc", "aes-256-gcm", "aes-192-cbc", "aes-128-cbc", "3des"], p2_auth: ["sha256", "sha512", "sha1", "md5"],
+  pfs: ["modp2048", "ecp256", "modp3072", "modp1536", "modp1024", "none"],
+};
+const DH_GRP = { modp1024: "group 2", modp1536: "group 5", modp2048: "group 14", modp3072: "group 15", modp4096: "group 16", ecp256: "group 19", ecp384: "group 20" };
+const IPSEC_STEPS = ["Local router", "Local subnets", "Remote end", "Encryption", "Review"];
+const ipsecSubnet = (s) => /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test((s || "").trim());
+
+async function ipsecView(arg) {
+  if (!arg) return ipsecList();
+  const isNew = arg === "new";
+  let build = null, cands = [];
+  const orgs = isNew ? await api("/api/orgs") : [];
+  if (!isNew) {
+    try { ({ build, candidates: cands } = await api(`/api/ipsec-builds/${arg}`)); }
+    catch { return go("ipsec"); }
+    if (build.status !== "draft" && !ipsecEdit) return ipsecStatus(build, cands);
+  }
+  return ipsecWizard(isNew, build, cands, orgs);
+}
+let ipsecEdit = false;
+
+async function ipsecList() {
+  const rows = await api("/api/ipsec-builds");
+  $("main").innerHTML = `<p><a href="#wizards">← Router Wizard</a></p>
+    <div class="row"><h1>IPsec Tunnel</h1><span class="spacer"></span>
+      ${isTech() ? `<button class="btn primary" type="button" id="ipNew">New tunnel</button>` : ""}</div>
+    <p class="muted">A policy-based IPsec site-to-site tunnel from one of a client's MikroTik routers to an <b>any-brand</b> firewall
+      (Fortinet, Cisco, SonicWall, pfSense...). TikManager sets up the MikroTik end and gives you the matching settings to enter on the
+      other box. For MikroTik-to-MikroTik, use the WireGuard Builder instead.</p>
+    <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Tunnel</th><th>Client</th><th>Local router → Remote</th><th>Status</th><th>Last applied</th></tr></thead><tbody>
+      ${rows.map((b) => `<tr class="click" data-ip="${b.id}"><td><b>${esc(b.name)}</b></td><td>${esc(b.org)}</td>
+        <td>${esc(b.device || "—")} → <span class="mono small">${esc(b.remote_addr || "")}</span></td>
+        <td>${vpnPill(b.status)}${b.up ? ` <span class="pill up-done">up</span>` : ""}${b.last_error ? `<div class="small status err">${esc(b.last_error)}</div>` : ""}</td>
+        <td class="small">${b.last_applied ? ago(b.last_applied) : "never"}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">No IPsec tunnels yet.${isTech() ? " Click New tunnel to create one." : ""}</p>`}</div>`;
+  $("ipNew")?.addEventListener("click", () => go("ipsec", "new"));
+  document.querySelectorAll("[data-ip]").forEach((r) => r.addEventListener("click", () => go("ipsec", r.dataset.ip)));
+}
+
+async function ipsecWizard(isNew, build, cands, orgs) {
+  const st = {
+    id: build ? build.id : null, step: 1, adv: false,
+    org_id: build ? build.org_id : (orgs[0] ? orgs[0].id : null),
+    device_id: build ? build.device_id : null, remote_addr: build ? (build.remote_addr || "") : "",
+    local_subnets: new Set(build ? build.local_subnets : []), remote_subnets: new Set(build ? build.remote_subnets : []),
+    ike: build ? (build.ike || "ike2") : "ike2",
+    ...Object.fromEntries(["p1_enc", "p1_hash", "p1_dh", "p2_enc", "p2_auth", "pfs"].map((k) => [k, build && build[k] ? build[k] : IPSEC_DEF[k]])),
+  };
+  let allOrgs = orgs.length ? orgs : [];
+  const dev = (id) => cands.find((d) => d.id === id);
+  const loadCands = async () => { cands = (await api(`/api/ipsec-candidates?org_id=${st.org_id}`)).candidates; };
+  if (!allOrgs.length) { try { allOrgs = await api("/api/orgs"); } catch (e) { allOrgs = []; } }
+  if (isNew && !allOrgs.length) { $("main").innerHTML = `<p><a href="#ipsec">← IPsec Tunnel</a></p><div class="card"><p class="muted">Add a client first.</p></div>`; return; }
+  if (isNew) await loadCands();
+  const say = (m, ok) => { const s = $("ipSay"); if (s) { s.textContent = m; s.className = `status ${ok ? "ok" : "err"}`; } };
+  const header = () => `<p><a href="#ipsec">← IPsec Tunnel</a></p><div class="row"><h1>${isNew ? "New IPsec tunnel" : esc(build.name || "IPsec tunnel")}</h1></div>
+    <ol class="wgb-steps">${IPSEC_STEPS.map((s, i) => `<li class="${i + 1 === st.step ? "on" : i + 1 < st.step ? "done" : ""}">${esc(s)}</li>`).join("")}</ol>`;
+  // subnet picker: a checklist of the router's connected subnets (when given) + free-form chips + an add box
+  const subPick = (router, chosen, kind) => `<div class="vsubs">${((router && router.networks) || []).map((n) =>
+      `<label class="chk"><input type="checkbox" data-isub="${kind}" value="${esc(n.network)}" ${chosen.has(n.network) ? "checked" : ""}> ${esc(n.name)} <span class="mono small">${esc(n.network)}</span></label>`).join("")}
+    ${[...chosen].filter((x) => !((router && router.networks) || []).some((n) => n.network === x)).map((x) =>
+      `<label class="chk"><input type="checkbox" data-isub="${kind}" value="${esc(x)}" checked> <span class="mono small">${esc(x)}</span></label>`).join("")}
+    <input class="vadd" data-iadd="${kind}" placeholder="add a subnet, e.g. 10.20.0.0/24" aria-label="Add a subnet"></div>`;
+  const sel = (k, label) => `<label class="field">${esc(label)} <select data-crypto="${k}">${IPSEC_OPTS[k].map((o) =>
+      `<option value="${o}" ${st[k] === o ? "selected" : ""}>${esc(o)}${k.endsWith("dh") || k === "pfs" ? (DH_GRP[o] ? ` (${DH_GRP[o]})` : "") : ""}</option>`).join("")}</select></label>`;
+
+  const draw = () => {
+    let body = "";
+    if (st.step === 1) {
+      body = `<div class="card"><h2>Which MikroTik is the local end?</h2>
+        <p class="small muted">TikManager configures this router; the far end is any other firewall you set up by hand.</p>
+        ${isNew ? `<label class="field">Client <select id="ipOrg">${allOrgs.map((o) => `<option value="${o.id}" ${o.id === st.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>` : `<div class="kv"><span>Client</span><span>${esc(build.org || "")}</span></div>`}
+        <div class="table-wrap"><table><thead><tr><th>Use</th><th>Router</th></tr></thead><tbody id="ipRows"></tbody></table></div></div>`;
+    } else if (st.step === 2) {
+      const d = dev(st.device_id);
+      body = `<div class="card"><h2>Local subnets on ${esc(d ? d.name : "")}</h2>
+        <p class="small muted">The networks on this side that should reach the far end (ticked are included).</p>${subPick(d, st.local_subnets, "local")}</div>`;
+    } else if (st.step === 3) {
+      body = `<div class="card"><h2>The far end</h2>
+        <label class="field">Remote public IP or DNS name <input id="ipRemote" maxlength="120" value="${esc(st.remote_addr)}" placeholder="203.0.113.10 or vpn.example.com"></label>
+        <h3>Remote subnets</h3><p class="small muted">The networks behind the far-end firewall that this side should reach.</p>${subPick(null, st.remote_subnets, "remote")}</div>`;
+    } else if (st.step === 4) {
+      body = `<div class="card"><h2>Encryption</h2>
+        <div class="wgb-choice"><label class="chk"><input type="radio" name="ipIke" value="ike2" ${st.ike === "ike2" ? "checked" : ""}> IKEv2 <span class="small muted">— recommended</span></label>
+          <label class="chk"><input type="radio" name="ipIke" value="ike" ${st.ike === "ike" ? "checked" : ""}> IKEv1 <span class="small muted">— only for older gear that can't do IKEv2</span></label></div>
+        <p class="small muted">Defaults are modern and widely compatible: AES-256 / SHA-256 / DH group 14, with PFS. Open Advanced to change them.</p>
+        <button type="button" class="btn" id="ipAdvBtn">${st.adv ? "Hide" : "Advanced"} settings</button>
+        <div id="ipAdv" ${st.adv ? "" : "hidden"}><h3>Phase 1 (IKE)</h3><div class="grid2">${sel("p1_enc", "Encryption")}${sel("p1_hash", "Hash")}${sel("p1_dh", "DH group")}</div>
+          <h3>Phase 2 (ESP)</h3><div class="grid2">${sel("p2_enc", "Encryption")}${sel("p2_auth", "Auth")}${sel("pfs", "PFS group")}</div></div></div>`;
+    } else {
+      const d = dev(st.device_id);
+      const sum = (l, v) => `<div class="kv"><span>${esc(l)}</span><span>${v}</span></div>`;
+      body = `<div class="card"><h2>Review</h2>
+        <label class="field">Name <input id="ipName" maxlength="80" value="${esc(build ? build.name : "IPsec tunnel")}"></label>
+        <div class="grid2"><div>${sum("Local router", esc(d ? d.name : ""))}${sum("Local subnets", [...st.local_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}
+            ${sum("IKE", st.ike === "ike2" ? "IKEv2" : "IKEv1")}${sum("Phase 1", `${esc(st.p1_enc)} / ${esc(st.p1_hash)} / ${esc(st.p1_dh)}`)}</div>
+          <div>${sum("Remote", esc(st.remote_addr))}${sum("Remote subnets", [...st.remote_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}
+            ${sum("PFS", esc(st.pfs))}${sum("Phase 2", `${esc(st.p2_enc)} / ${esc(st.p2_auth)}`)}</div></div>
+        <p class="small muted">A strong pre-shared key is generated and sealed when you save; reveal it on the tunnel's page to configure the far end. The local router is backed up first, and everything is tagged "TikManager IPsec #${st.id || "new"}".</p>
+        <div class="actions"><button class="btn primary" type="button" id="ipApply">Save &amp; apply</button><button class="btn" type="button" id="ipSaveBtn">Save draft</button><span class="status" id="ipSay"></span></div></div>`;
+    }
+    const nav = `<div class="actions">${st.step > 1 ? `<button class="btn" type="button" id="ipBack">Back</button>` : ""}${st.step < 5 ? `<button class="btn primary" type="button" id="ipNext">Next</button>` : ""}<span class="status" id="ipNav"></span></div>`;
+    $("main").innerHTML = header() + body + nav;
+    wire();
+  };
+
+  const wire = () => {
+    $("ipBack")?.addEventListener("click", () => { st.step--; draw(); });
+    $("ipNext")?.addEventListener("click", () => next());
+    $("ipOrg")?.addEventListener("change", async (e) => { st.org_id = +e.target.value; st.device_id = null; await loadCands(); draw(); });
+    const rows = $("ipRows");
+    if (rows) rows.innerHTML = cands.length ? cands.map((d) => `<tr><td><input type="radio" name="ipDev" value="${d.id}" ${st.device_id === d.id ? "checked" : ""} aria-label="${esc(d.name)}"></td>
+      <td><b>${esc(d.name)}</b> <span class="dot ${d.online ? "on" : "off"}"></span><div class="small muted">${esc(d.model || "")} · WAN <span class="mono">${esc(d.wan_ip || "—")}</span> · ${(d.networks || []).length} subnets</div></td></tr>`).join("") : `<tr><td colspan="2" class="muted">This client has no approved routers.</td></tr>`;
+    document.querySelectorAll('[name="ipDev"]').forEach((r) => r.addEventListener("change", () => { st.device_id = +r.value; }));
+    $("ipRemote")?.addEventListener("input", (e) => { st.remote_addr = e.target.value.trim(); });
+    document.querySelectorAll('[name="ipIke"]').forEach((r) => r.addEventListener("change", () => { st.ike = r.value; }));
+    $("ipAdvBtn")?.addEventListener("click", () => { st.adv = !st.adv; draw(); });
+    document.querySelectorAll("[data-crypto]").forEach((s) => s.addEventListener("change", (e) => { st[s.dataset.crypto] = e.target.value; }));
+    document.querySelectorAll("[data-isub]").forEach((c) => c.addEventListener("change", () => { const set = c.dataset.isub === "local" ? st.local_subnets : st.remote_subnets; c.checked ? set.add(c.value) : set.delete(c.value); }));
+    document.querySelectorAll("[data-iadd]").forEach((i) => i.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !i.value.trim()) return;
+      if (!ipsecSubnet(i.value)) { $("ipNav").textContent = "Enter a subnet like 10.20.0.0/24."; return; }
+      (i.dataset.iadd === "local" ? st.local_subnets : st.remote_subnets).add(i.value.trim()); draw();
+    }));
+    $("ipName")?.addEventListener("input", (e) => { if (build) build.name = e.target.value; });
+    $("ipSaveBtn")?.addEventListener("click", () => save(false));
+    $("ipApply")?.addEventListener("click", () => save(true));
+  };
+
+  const next = () => {
+    const nav = (m) => { $("ipNav").textContent = m; };
+    if (st.step === 1 && !st.device_id) return nav("Pick the local router.");
+    if (st.step === 2 && !st.local_subnets.size) return nav("Add at least one local subnet.");
+    if (st.step === 3 && !st.remote_addr) return nav("Enter the far end's public IP or DNS name.");
+    if (st.step === 3 && !st.remote_subnets.size) return nav("Add at least one remote subnet.");
+    st.step++; draw();
+  };
+
+  const save = async (apply) => {
+    try {
+      const r = await post("/api/ipsec-builds", {
+        id: st.id, org_id: st.org_id, name: $("ipName") ? $("ipName").value : (build ? build.name : "IPsec tunnel"),
+        device_id: st.device_id, remote_addr: st.remote_addr, ike: st.ike,
+        p1_enc: st.p1_enc, p1_hash: st.p1_hash, p1_dh: st.p1_dh, p2_enc: st.p2_enc, p2_auth: st.p2_auth, pfs: st.pfs,
+        local_subnets: [...st.local_subnets], remote_subnets: [...st.remote_subnets], apply });
+      ipsecEdit = false;
+      if (st.id) { say(apply ? "Saved — applying to the router…" : "Saved.", true); if (apply) setTimeout(() => go("ipsec", st.id), 400); }
+      else go("ipsec", r.id);
+    } catch (e) { say(e.message); }
+  };
+  draw();
+}
+
+function ipsecSheet(b) {   // the parameter sheet for the far-end firewall (written from its point of view)
+  const dh = (v) => `${v}${DH_GRP[v] ? ` (${DH_GRP[v]})` : ""}`;
+  return [
+    ["Peer / remote gateway", b.device_wan || "the MikroTik's public IP"],
+    ["IKE version", b.ike === "ike2" ? "IKEv2" : "IKEv1"],
+    ["Phase 1 (IKE)", `${b.p1_enc} · ${b.p1_hash} · DH ${dh(b.p1_dh)}`],
+    ["Phase 2 (ESP)", `${b.p2_enc} · ${b.p2_auth} · PFS ${dh(b.pfs)}`],
+    ["Their local subnets", (b.remote_subnets || []).join(", ") || "—"],
+    ["Their remote subnets (behind the MikroTik)", (b.local_subnets || []).join(", ") || "—"],
+  ];
+}
+
+async function ipsecStatus(build, cands) {
+  const ro = !isTech();
+  const stText = build.peer_state ? (build.peer_state === "established" ? `<span class="status ok">established</span>` : `<span class="status err">${esc(build.peer_state)}</span>`) : "<span class='muted'>not connected</span>";
+  $("main").innerHTML = `<p><a href="#ipsec">← IPsec Tunnel</a></p>
+    <div class="row"><h1>${esc(build.name)}</h1><span>${vpnPill(build.status)}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
+    ${build.last_error ? `<div class="card"><p class="status err">${esc(build.last_error)}</p></div>` : ""}
+    <div class="card"><h2>Tunnel</h2>
+      <div class="grid2"><div><div class="kv"><span>Local router</span><span>${esc(build.device || "")}</span></div>
+        <div class="kv"><span>Local subnets</span><span>${(build.local_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
+        <div class="kv"><span>IPsec state</span><span id="ipState">${stText}</span></div></div>
+      <div><div class="kv"><span>Remote</span><span class="mono">${esc(build.remote_addr || "")}</span></div>
+        <div class="kv"><span>Remote subnets</span><span>${(build.remote_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
+        <div class="kv"><span>Encryption</span><span>${esc(build.ike === "ike2" ? "IKEv2" : "IKEv1")} · ${esc(build.p1_enc)}/${esc(build.p1_hash)}</span></div></div></div>
+      ${ro ? "" : `<div class="actions"><button class="btn primary" type="button" id="ipEditBtn">Edit settings</button><button class="btn" type="button" id="ipReapply">Re-apply</button>
+        ${build.status !== "disabled" ? `<button class="btn" type="button" id="ipDisable">Disable</button>` : ""}<button class="btn danger" type="button" id="ipDelete">Delete</button><span class="status" id="ipSay"></span></div>`}</div>
+    <div class="card"><h2>Far-end settings</h2>
+      <p class="small muted">Enter these on the other firewall (${esc(build.remote_addr || "the far end")}) to bring the tunnel up. Perspective is the far end's.</p>
+      <div class="table-wrap"><table><tbody>${ipsecSheet(build).map(([k, v]) => `<tr><td class="small muted">${esc(k)}</td><td class="mono small">${esc(v)}</td></tr>`).join("")}
+        <tr><td class="small muted">Pre-shared key</td><td><span class="mono small" id="ipPsk">••••••••••••</span> ${ro ? "" : `<button type="button" class="btn" id="ipReveal">Reveal</button>`}</td></tr></tbody></table></div>
+      <div class="actions"><button type="button" class="btn" id="ipCopy">Copy settings</button><span class="status" id="ipCopySay"></span></div>
+      <p class="small muted">Vendor notes — <b>Fortinet:</b> Phase 1 = IKEv${build.ike === "ike2" ? "2" : "1"}, set the proposal to match; add firewall policies both ways plus static routes to the remote subnets. <b>pfSense:</b> Phase 1 + a Phase 2 per subnet pair; remember the firewall rules on the IPsec tab. <b>Cisco ASA:</b> matching IKEv2 proposal, crypto map with the ACL for the subnet pairs, and <span class="mono">no-nat</span> exemption.</p></div>`;
+  const say = (m, ok) => { $("ipSay").textContent = m; $("ipSay").className = `status ${ok ? "ok" : "err"}`; };
+  $("ipEditBtn")?.addEventListener("click", () => { ipsecEdit = true; ipsecWizard(false, build, cands, []); });
+  $("ipReapply")?.addEventListener("click", async () => { try { await post(`/api/ipsec-builds/${build.id}/apply`); say("Applying to the router…", true); } catch (e) { say(e.message); } });
+  $("ipDisable")?.addEventListener("click", async () => { try { await post(`/api/ipsec-builds/${build.id}/disable`); say("Removing from the router…", true); } catch (e) { say(e.message); } });
+  $("ipDelete")?.addEventListener("click", async (e) => {
+    if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
+    try { const r = await post(`/api/ipsec-builds/${build.id}/delete`); if (r.deleted) go("ipsec"); else say("Removing from the router, then deleting…", true); } catch (err) { say(err.message); }
+  });
+  let psk = null;
+  $("ipReveal")?.addEventListener("click", async () => {
+    try { psk = (await post(`/api/ipsec-builds/${build.id}/psk`)).psk; $("ipPsk").textContent = psk || "(none)"; }
+    catch (e) { $("ipPsk").textContent = e.message; }
+  });
+  $("ipCopy")?.addEventListener("click", async () => {
+    const lines = ipsecSheet(build).map(([k, v]) => `${k}: ${v}`);
+    lines.push(`Pre-shared key: ${psk || "(click Reveal first)"}`);
+    try { await navigator.clipboard.writeText(lines.join("\n")); $("ipCopySay").textContent = "Copied."; $("ipCopySay").className = "status ok"; }
+    catch (e) { $("ipCopySay").textContent = "Copy failed - select the table manually."; $("ipCopySay").className = "status err"; }
+  });
+  clearInterval(window._ipsecTimer);
+  window._ipsecTimer = setInterval(async () => {
+    if (view !== "ipsec") { clearInterval(window._ipsecTimer); return; }
+    let b; try { b = (await api(`/api/ipsec-builds/${build.id}`)).build; } catch { clearInterval(window._ipsecTimer); return; }
+    if (b.status !== build.status) return ipsecStatus(b, cands);
+    const el = $("ipState"); if (el) el.innerHTML = b.peer_state ? (b.peer_state === "established" ? `<span class="status ok">established</span>` : `<span class="status err">${esc(b.peer_state)}</span>`) : "<span class='muted'>not connected</span>";
+  }, 15000);
+}
+
 const NAV_ICONS = {
 "dashboard": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"5\" rx=\"1.5\"/><rect x=\"14\" y=\"12\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"3\" y=\"16\" width=\"7\" height=\"5\" rx=\"1.5\"/></svg>",
 "routers": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"13\" width=\"19\" height=\"7\" rx=\"2\"/><path d=\"M6.5 16.5h.01M10 16.5h.01M8 13l-2-6M16 13l2-6M5 7.5a1.5 1.5 0 1 0 0-.01M19 7.5a1.5 1.5 0 1 0 0-.01\"/></svg>",
@@ -6136,7 +6357,7 @@ function renderNav() {
 }
 function navActive() {
   const [h, arg] = location.hash.slice(1).split("/");
-  const v = h === "router" ? "routers" : h === "vpn" ? "vpns" : h === "wgbuild" ? "wizards" : h || "dashboard";
+  const v = h === "router" ? "routers" : h === "vpn" ? "vpns" : (h === "wgbuild" || h === "ipsec") ? "wizards" : h || "dashboard";
   const a = h === "routers" ? arg || "" : "";
   document.querySelectorAll("#navItems [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === v && (v !== "routers" || (b.dataset.arg || "") === a)));
   document.querySelectorAll("#navItems .nav-group").forEach((g) => {   // the open page's group stays open
@@ -6248,7 +6469,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, ipsec: ipsecView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
@@ -6342,7 +6563,7 @@ async function init() {
   });
   const route = () => {
     const [h, arg] = location.hash.slice(1).split("/");
-    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if (h === "wgbuild" && arg) go("wgbuild", arg); else if ((h === "admin" || h === "routers" || h === "dashboard") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
+    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if ((h === "wgbuild" || h === "ipsec") && arg) go(h, arg); else if ((h === "admin" || h === "routers" || h === "dashboard") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
   };
   window.addEventListener("hashchange", route);   // links, typed URLs and Back (go() uses replaceState, which doesn't fire this)
   route();

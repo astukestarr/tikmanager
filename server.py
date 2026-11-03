@@ -34,6 +34,7 @@ from routeros import RouterError
 from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from wgbuild import WgBuilds, WgError
+from ipsecbuild import IpsecBuilds, IpsecError
 from firewall import Firewall, FirewallError
 from ports import Ports, PortsError
 from secevents import SecurityEvents
@@ -123,7 +124,8 @@ upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
-wgbuilds = WgBuilds(db, poller.client, backups)   # Wizards > WireGuard Builder: point-to-point tunnel between two routers
+wgbuilds = WgBuilds(db, poller.client, backups)   # Router Wizard > WireGuard Builder: point-to-point tunnel between two routers
+ipsecbuilds = IpsecBuilds(db, poller.client, backups, backups.vault)   # Router Wizard > IPsec Tunnel: MikroTik to any-brand far end
 remote = RemoteAccess(db, poller.client, backups)   # Router page > Remote access (WireGuard for Windows into a router)
 remote.start()   # automatic revoke at each person's expiry date
 vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
@@ -402,6 +404,17 @@ class Handler(BaseHTTPRequestHandler):
             r["role"] = "hub" if r["device_id"] == v["hub_device_id"] else "spoke"
             r.pop("pubkey", None)
         return rows
+
+    def ipsec_row(self, b):
+        """Decode an ipsec_builds row for the API: JSON subnets out, the PSK never leaves (only via the reveal route)."""
+        b = dict(b)
+        b["local_subnets"] = json.loads(b.get("local_subnets") or "[]")
+        b["remote_subnets"] = json.loads(b.get("remote_subnets") or "[]")
+        b["up"] = b["status"] == "active" and b.get("peer_state") == "established"
+        b["busy"] = b["id"] in ipsecbuilds.busy
+        b.pop("psk_blob", None)
+        b.pop("psk_alg", None)
+        return b
 
     def wgb_row(self, b):
         """Decode a wg_builds row for the API: JSON subnets out, pubkeys hidden, busy flag, is-it-up."""
@@ -926,6 +939,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"as": poller.client(d).bgp_existing_as()})
             except RouterError:
                 return self.json({"as": None})
+        # --- Router Wizard > IPsec Tunnel (technicians) ---
+        if path == "/api/ipsec-builds":
+            self.require(tech=True)
+            rows = db.q("""SELECT b.*, o.name AS org, d.name AS device FROM ipsec_builds b JOIN orgs o ON o.id = b.org_id
+                           LEFT JOIN devices d ON d.id = b.device_id ORDER BY o.name, b.name""")
+            return self.json([self.ipsec_row(b) for b in rows])
+        if m := re.fullmatch(r"/api/ipsec-builds/(\d+)", path):
+            self.require(tech=True)
+            b = db.one("""SELECT b.*, o.name AS org, d.name AS device, d.wan_ip AS device_wan FROM ipsec_builds b JOIN orgs o ON o.id = b.org_id
+                          LEFT JOIN devices d ON d.id = b.device_id WHERE b.id=?""", (m.group(1),))
+            if not b:
+                raise HttpError(404, "Tunnel not found.")
+            return self.json({"build": self.ipsec_row(b), "candidates": self.vpn_candidates(b["org_id"], None)})
+        if path == "/api/ipsec-candidates":
+            self.require(tech=True)
+            return self.json({"candidates": self.vpn_candidates(int(q.get("org_id") or 0), None)})
         # --- scripts, groups, tasks (technicians) ---
         if path == "/api/scripts":
             self.require(tech=True)
@@ -2262,6 +2291,51 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(409, "This build is busy - wait for the current change to finish.")
             db.audit(s["email"], f"wg build {act} started", b["name"], self.client_ip(), org_id=b["org_id"])
             return self.json({"ok": True})
+        # --- Router Wizard > IPsec Tunnel (technicians) ---
+        if path == "/api/ipsec-builds":   # create / update; {apply: true} applies right away
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            if b.get("id") and not db.one("SELECT 1 FROM ipsec_builds WHERE id=?", (int(b["id"]),)):
+                raise HttpError(404, "Tunnel not found.")
+            build = {"org_id": int(b.get("org_id") or 0), "name": str(b.get("name") or "").strip()[:80] or "IPsec tunnel",
+                     "device_id": int(b.get("device_id") or 0), "remote_addr": str(b.get("remote_addr") or "").strip()[:120],
+                     "ike": str(b.get("ike") or "ike2").strip(),
+                     "local_subnets": [str(n) for n in (b.get("local_subnets") or [])][:50],
+                     "remote_subnets": [str(n) for n in (b.get("remote_subnets") or [])][:50],
+                     **{k: str(b.get(k) or "").strip()[:40] or None for k in ("p1_enc", "p1_hash", "p1_dh", "p2_enc", "p2_auth", "pfs")}}
+            try:
+                bid = ipsecbuilds.save(int(b["id"]) if b.get("id") else None, build, s["email"])
+            except (IpsecError, KeyError, TypeError, ValueError) as e:
+                raise HttpError(400, str(e) or "Invalid tunnel settings.") from None
+            db.audit(s["email"], "ipsec tunnel saved", build["name"], self.client_ip(), org_id=build["org_id"])
+            if b.get("apply"):
+                ipsecbuilds.apply(bid, s["email"])
+            return self.json({"ok": True, "id": bid})
+        if m := re.fullmatch(r"/api/ipsec-builds/(\d+)/(apply|disable|delete)", path):
+            s = self.require(tech=True, write=True)
+            b = db.one("SELECT * FROM ipsec_builds WHERE id=?", (m.group(1),))
+            if not b:
+                raise HttpError(404, "Tunnel not found.")
+            act = m.group(2)
+            if act == "delete" and b["status"] in ("draft", "disabled"):   # nothing on the router (never applied, or already removed)
+                db.run("DELETE FROM ipsec_builds WHERE id=?", (b["id"],))
+                db.audit(s["email"], "ipsec tunnel deleted", b["name"], self.client_ip(), org_id=b["org_id"])
+                return self.json({"ok": True, "deleted": True})
+            started = ipsecbuilds.apply(b["id"], s["email"]) if act == "apply" else ipsecbuilds.disable(b["id"], s["email"], delete=act == "delete")
+            if not started:
+                raise HttpError(409, "This tunnel is busy - wait for the current change to finish.")
+            db.audit(s["email"], f"ipsec tunnel {act} started", b["name"], self.client_ip(), org_id=b["org_id"])
+            return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/ipsec-builds/(\d+)/psk", path):   # reveal the pre-shared key to a technician (audited)
+            s = self.require(tech=True)
+            b = db.one("SELECT * FROM ipsec_builds WHERE id=?", (m.group(1),))
+            if not b:
+                raise HttpError(404, "Tunnel not found.")
+            db.audit(s["email"], "ipsec psk revealed", b["name"], self.client_ip(), org_id=b["org_id"])
+            try:
+                return self.json({"psk": ipsecbuilds.reveal_psk(b["id"])})
+            except Exception as e:  # noqa: BLE001
+                raise HttpError(500, f"Couldn't read the key: {e}") from None
         # --- scripts, groups, tasks ---
         if path == "/api/scripts":   # create / update {id?, name, description, body}
             s = self.require(tech=True, write=True)
@@ -3223,6 +3297,7 @@ def main():
     if settings.managed_vpn:   # off: no background checks of managed VPNs either (nothing touches those routers)
         vpns.start()
     wgbuilds.start()   # WireGuard Builder tunnels are tech-built regardless of the managed-VPN switch
+    ipsecbuilds.start()   # IPsec Tunnel wizard
     secev.start()
     routerlogs.start()
     observatory.start()

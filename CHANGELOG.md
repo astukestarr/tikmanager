@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.5 - 2026-11-03
+
+- **New wizard: IPsec Tunnel** (Router Wizard > IPsec Tunnel). Connect one of a client's MikroTik routers to an
+  **any-brand** firewall - Fortinet, Cisco, SonicWall, pfSense, anything that speaks IPsec. (MikroTik-to-MikroTik should
+  still use the WireGuard Builder.) It's a guided, policy-based site-to-site tunnel: pick the local router and its
+  subnets, enter the far end's address and subnets, and choose the encryption (modern IKEv2 / AES-256 / SHA-256 / DH
+  group 14 + PFS by default, with an Advanced section for every phase-1/phase-2 value and an IKEv1 fallback).
+- **One-sided, with a far-end settings sheet.** TikManager configures only the MikroTik (profile, proposal, peer,
+  identity, a policy per subnet pair, NAT bypass and the IKE/ESP firewall rules), then the tunnel's page shows a
+  **copyable parameter sheet** - all the values plus the generated **pre-shared key** (revealed on a button) and
+  per-vendor notes - so you can set up the other box. Live IPsec state is shown, everything is tagged for clean
+  Disable/Delete, and the router is backed up first. The pre-shared key is sealed at rest and never shown except on that
+  explicit reveal.
+
 ## 3.1.0-beta.4 - 2026-11-03
 
 - **Fix: BGP tunnels failed to apply** with *"unknown parameter address-families"* on RouterOS 7.24/7.25. The BGP
