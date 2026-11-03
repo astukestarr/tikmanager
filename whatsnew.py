@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "2.0.0"    # the release these slides describe (its betas included)
-SINCE = "1.46.1"     # the full release before it
+RELEASE = "3.1.0"    # the release these slides describe (its betas included)
+SINCE = "3.0.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -118,12 +118,25 @@ SLIDES_1_46 = [
              "events. Router pages no longer scroll sideways on narrow screens. RouterOS 7.20's renamed \"available-from\" "
              "is understood everywhere."},
 ]
-SLIDES = SLIDES_2_0
+SLIDES_3_1 = [
+    {"id": "wizards", "title": "A Wizards section", "img": "wgbuild", "view": "wgbuild", "who": "tech",
+     "text": "A new Wizards group in the sidebar for guided, step-by-step jobs. The first wizard is the WireGuard Builder - more "
+             "will follow."},
+    {"id": "wg-builder", "title": "WireGuard Builder", "img": None, "view": "wgbuild", "who": "tech",
+     "text": "Wizards > WireGuard Builder connects two of a client's routers with a point-to-point tunnel, step by step: pick a hub "
+             "(a brand-new interface or one that's already on the router), a client router, the tunnel addresses, and the subnets "
+             "each end should reach - including downstream subnets behind another router. Both routers are backed up first."},
+    {"id": "wg-builder-managed", "title": "Tracked and removable", "img": None, "view": "wgbuild", "who": "tech",
+     "text": "Each tunnel you build is listed with its live handshake status, and everything the wizard writes on a router is tagged, "
+             "so one click removes exactly what it added and nothing made by hand. Static routing for now; BGP is coming."},
+]
+SLIDES = SLIDES_3_1
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
+TOURS = {"3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1}, "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0},
+         "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")
 

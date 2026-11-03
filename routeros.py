@@ -22,6 +22,7 @@ VPN_TAG = "TikManager VPN"   # comment on every object the site-to-site VPN adds
 VPN_IFACE = "tikmanager-vpn"
 RA_IFACE = "tikmanager-ra"   # remote access (remoteaccess.py): people connecting in with WireGuard for Windows etc.
 RA_TAG = "TikManager remote access"   # comment on everything remote access adds (peers: "TikManager remote access: <name>")
+WGB_TAG = "TikManager WG"   # WireGuard Builder wizard; each build's objects carry "TikManager WG #<id>" so they remove exactly
 
 
 class RouterError(Exception):
@@ -816,6 +817,63 @@ class RouterOS:
         for r in rules:
             self._req("PUT", "/ip/firewall/filter", {**r, "action": "accept", "comment": VPN_TAG, **({"place-before": first} if first else {})})
 
+    # --- WireGuard Builder wizard (wgbuild.py) - each build's objects carry "TikManager WG #<id>" -------------------------
+    def wg_list(self):
+        """Existing WireGuard interfaces (for the builder's "use existing" hub and for conflict detection):
+        [{name, listen_port, public_key, running, disabled, comment, addresses: [cidr], peer_allowed: [cidr...]}].
+        Reads only non-secret fields (never a private key)."""
+        out = []
+        addrs = self.optional(lambda: self.get("/ip/address"), []) or []
+        peers = self.optional(lambda: self.get("/interface/wireguard/peers"), []) or []
+        for w in self.optional(lambda: self.get("/interface/wireguard"), []) or []:
+            name = w.get("name")
+            mine = [a.get("address") for a in addrs if a.get("interface") == name and a.get("address")]
+            allowed = []
+            for p in peers:
+                if p.get("interface") == name:
+                    allowed += [x.strip() for x in str(p.get("allowed-address") or "").split(",") if x.strip()]
+            out.append({"name": name, "listen_port": w.get("listen-port"), "public_key": w.get("public-key"),
+                        "running": str(w.get("running")) == "true", "disabled": str(w.get("disabled")) == "true",
+                        "comment": w.get("comment") or "", "addresses": mine, "peer_allowed": allowed})
+        return out
+
+    def wgb_apply(self, name, cfg, tag, create_iface):
+        """One side of a build. cfg: {address?, port, peer: {public-key, allowed: [...], endpoint?, port?}, routes: [...],
+        open_port: bool}. create_iface makes/keeps the interface (hub-new / client); when False (existing hub interface)
+        the interface, its address and listen-port are left exactly as they are. Everything added carries `tag`."""
+        self.wgb_clear(tag, name, remove_interface=False)
+        if create_iface:
+            self.wg_ensure(name, cfg["port"], tag=tag)
+        if cfg.get("address"):
+            self._req("PUT", "/ip/address", {"address": cfg["address"], "interface": name, "comment": tag})
+        p = cfg["peer"]
+        body = {"interface": name, "public-key": p["public-key"], "allowed-address": ",".join(p["allowed"]), "comment": tag}
+        if p.get("endpoint"):
+            body.update({"endpoint-address": p["endpoint"], "endpoint-port": str(p["port"]), "persistent-keepalive": "25s"})
+        self._req("PUT", "/interface/wireguard/peers", body)
+        for dst in cfg["routes"]:
+            self._req("PUT", "/ip/route", {"dst-address": dst, "gateway": name, "comment": tag})
+        # firewall: accept rules at the top, before whatever drop rules the router already has
+        first = next((r.get(".id") for r in self.get("/ip/firewall/filter") or [] if r.get("dynamic") != "true"), None)
+        rules = ([{"chain": "input", "protocol": "udp", "dst-port": str(cfg["port"])}] if cfg.get("open_port") else []) + [
+            {"chain": "input", "in-interface": name, "protocol": "icmp"},
+            {"chain": "forward", "in-interface": name}, {"chain": "forward", "out-interface": name}]
+        for r in rules:
+            self._req("PUT", "/ip/firewall/filter", {**r, "action": "accept", "comment": tag, **({"place-before": first} if first else {})})
+
+    def wgb_clear(self, tag, name, remove_interface=False):
+        """Remove every peer, route, address and firewall rule this build added (matched by its exact `tag` comment);
+        optionally the interface too, but only if the builder created it (its comment is the build's tag)."""
+        q = urllib.parse.quote(tag)
+        for menu in ("/ip/firewall/filter", "/ip/route", "/interface/wireguard/peers", "/ip/address"):
+            for r in self.optional(lambda menu=menu: self.get(f"{menu}?comment={q}"), []) or []:
+                if r.get("comment") == tag:
+                    self._req("DELETE", f"{menu}/{r['.id']}")
+        if remove_interface and name:
+            for r in self.get(f"/interface/wireguard?name={urllib.parse.quote(name)}") or []:
+                if r.get("comment") == tag:   # never delete an interface someone made by hand (or the hub's existing one)
+                    self._req("DELETE", f"/interface/wireguard/{r['.id']}")
+
     # --- remote access (remoteaccess.py) - everything carries RA_TAG, so it can be removed exactly -----------------------
     def ra_setup(self, name, cfg):
         """cfg: {port, address (gateway/prefix), dns_to_router}. Interface, gateway address and firewall rules - peers (the
@@ -1577,7 +1635,7 @@ class SimRouter:
         return inv
 
     # simulated site-to-site VPN: a tunnel is "up" when both ends have each other as peers
-    def wg_ensure(self, name, port):
+    def wg_ensure(self, name, port, tag=VPN_TAG):
         st = self._sim()
         st.setdefault("vpn", {})
         return base64.b64encode(hashlib.sha256(f"sim-wg-{self.id}".encode()).digest()).decode()
@@ -1596,6 +1654,25 @@ class SimRouter:
     def vpn_apply(self, name, cfg):
         time.sleep(0.5)
         self._sim()["vpn_cfg"] = cfg
+
+    def wg_list(self):
+        # one hand-made interface so the builder's "use existing" path has something to pick, plus any the builder made
+        st = self._sim()
+        out = [{"name": "wg-existing", "listen_port": "13231", "public_key": st["pub"], "running": True,
+                "disabled": False, "comment": "", "addresses": [f"10.60.{self.id % 250}.1/24"], "peer_allowed": []}]
+        for tag, b in (st.get("wgb") or {}).items():
+            out.append({"name": b["iface"], "listen_port": str(b.get("port") or 13232), "public_key": st["pub"],
+                        "running": True, "disabled": False, "comment": tag,
+                        "addresses": [b["address"]] if b.get("address") else [], "peer_allowed": list(b["cfg"]["peer"]["allowed"])})
+        return out
+
+    def wgb_apply(self, name, cfg, tag, create_iface):
+        time.sleep(0.3)
+        self._sim().setdefault("wgb", {})[tag] = {"iface": name, "address": cfg.get("address"), "port": cfg.get("port"),
+                                                  "created": bool(create_iface), "peer_pub": cfg["peer"]["public-key"], "cfg": cfg}
+
+    def wgb_clear(self, tag, name, remove_interface=False):
+        (self._sim().get("wgb") or {}).pop(tag, None)
 
     def ra_setup(self, name, cfg):
         time.sleep(0.3)
@@ -1642,6 +1719,13 @@ class SimRouter:
             other = next((s for s in SimRouter.SIM.values() if s.get("vpn_cfg") and any(q["public-key"] == mine for q in s["vpn_cfg"]["peers"])
                           and s.get("pub") == p["public-key"]), None)
             out.append({"public_key": p["public-key"], "handshake_age": random.randint(5, 110) if other else None,
+                        "rx": random.randint(10 ** 6, 10 ** 9) if other else 0, "tx": random.randint(10 ** 6, 10 ** 9) if other else 0})
+        for tag, b in (self._sim().get("wgb") or {}).items():   # WireGuard Builder tunnels on this interface
+            if b["iface"] != name:
+                continue
+            other = next((s for s in SimRouter.SIM.values() if any(bb.get("peer_pub") == mine for bb in (s.get("wgb") or {}).values())
+                          and s.get("pub") == b["peer_pub"]), None)
+            out.append({"public_key": b["peer_pub"], "handshake_age": random.randint(5, 110) if other else None,
                         "rx": random.randint(10 ** 6, 10 ** 9) if other else 0, "tx": random.randint(10 ** 6, 10 ** 9) if other else 0})
         return out
 

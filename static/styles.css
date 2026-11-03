@@ -261,6 +261,16 @@ fieldset.up-when { border: 1px solid var(--border); border-radius: 10px; padding
 .vsubs { display: grid; gap: 4px; }
 .vadd { max-width: 260px; font-size: 12px; padding: 4px 8px; }
 .vpn-tag { color: var(--info); }
+/* WireGuard Builder wizard */
+.wgb-steps { display: flex; flex-wrap: wrap; gap: 6px 10px; list-style: none; padding: 0; margin: 10px 0 14px; counter-reset: wgbstep; }
+.wgb-steps li { counter-increment: wgbstep; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.wgb-steps li::before { content: counter(wgbstep); display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border); font-size: 11px; font-weight: 600; }
+.wgb-steps li.on { color: var(--accent); font-weight: 600; }
+.wgb-steps li.on::before { background: var(--accent); color: #fff; border-color: var(--accent); }
+.wgb-steps li.done { color: var(--fg); }
+.wgb-steps li.done::before { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.wgb-choice { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 12px; }
+.wgb-soon { opacity: .6; }
 .tabs + #vpnBody { margin-top: 12px; }
 .cw-types { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0; }
 

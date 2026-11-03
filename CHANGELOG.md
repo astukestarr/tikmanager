@@ -3,6 +3,22 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.1 - 2026-11-03
+
+**New: a Wizards section, starting with a WireGuard Builder.** A new **Wizards** group in the sidebar for guided,
+step-by-step jobs. The first wizard connects two of a client's routers with a point-to-point WireGuard tunnel.
+
+- **Wizards > WireGuard Builder** walks you through a hub-and-client tunnel: pick the hub (create a brand-new WireGuard
+  interface, or attach to one that's **already on the router**), pick the client router, set the tunnel addresses and the
+  subnets each end should reach - including **downstream** subnets behind another router (with a reminder that the
+  downstream router may need its own route back). Both routers are backed up first.
+- **Tracked and removable.** Each tunnel you build is listed with its live handshake status, and everything the wizard
+  writes on a router is tagged `TikManager WG #<id>`, so Disable/Delete removes exactly what it added and never touches
+  anything configured by hand. It sits alongside the existing managed Site-to-site VPN - it doesn't change it.
+- **Static routing** for now; BGP is shown as a "coming soon" option and will arrive in a later release.
+- **Fixed: the "What's new" walkthrough stopped appearing after an upgrade.** Its release pointer had fallen behind the
+  shipping versions, so no tour matched the running version. It now tracks the current release again (and shows this one).
+
 ## 3.0.0 - 2026-11-03
 
 **Automated Firmware updates fixed.** Scheduled and one-click RouterOS / RouterBOARD upgrades now run reliably across the

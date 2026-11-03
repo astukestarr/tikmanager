@@ -33,6 +33,7 @@ from poller import Poller
 from routeros import RouterError
 from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
+from wgbuild import WgBuilds, WgError
 from firewall import Firewall, FirewallError
 from ports import Ports, PortsError
 from secevents import SecurityEvents
@@ -122,6 +123,7 @@ upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
+wgbuilds = WgBuilds(db, poller.client, backups)   # Wizards > WireGuard Builder: point-to-point tunnel between two routers
 remote = RemoteAccess(db, poller.client, backups)   # Router page > Remote access (WireGuard for Windows into a router)
 remote.start()   # automatic revoke at each person's expiry date
 vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
@@ -400,6 +402,17 @@ class Handler(BaseHTTPRequestHandler):
             r["role"] = "hub" if r["device_id"] == v["hub_device_id"] else "spoke"
             r.pop("pubkey", None)
         return rows
+
+    def wgb_row(self, b):
+        """Decode a wg_builds row for the API: JSON subnets out, pubkeys hidden, busy flag, is-it-up."""
+        b = dict(b)
+        b["hub_subnets"] = json.loads(b.get("hub_subnets") or "[]")
+        b["client_subnets"] = json.loads(b.get("client_subnets") or "[]")
+        b["up"] = b["status"] == "active" and b.get("hub_hs") is not None and b["hub_hs"] < 180 and b.get("client_hs") is not None and b["client_hs"] < 180
+        b["busy"] = b["id"] in wgbuilds.busy
+        b.pop("hub_pubkey", None)
+        b.pop("client_pubkey", None)
+        return b
 
     def vpn_candidates(self, org_id, vpn_id):
         rows = db.q("""SELECT d.id, d.name, d.online, d.wan_ip, d.model, d.networks, d.thumb_slug, v.name AS other_vpn FROM devices d
@@ -877,6 +890,31 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require_vpn()
             org_id = s["org_id"] if s["kind"] == "client" else int(q.get("org_id") or 0)
             return self.json({"candidates": self.vpn_candidates(org_id, None)})
+        # --- Wizards > WireGuard Builder (technicians) ---
+        if path == "/api/wg-builds":   # every build with its live-ish status
+            self.require(tech=True)
+            rows = db.q("""SELECT b.*, o.name AS org, h.name AS hub, c.name AS client FROM wg_builds b JOIN orgs o ON o.id = b.org_id
+                           LEFT JOIN devices h ON h.id = b.hub_device_id LEFT JOIN devices c ON c.id = b.client_device_id ORDER BY o.name, b.name""")
+            return self.json([self.wgb_row(b) for b in rows])
+        if m := re.fullmatch(r"/api/wg-builds/(\d+)", path):
+            self.require(tech=True)
+            b = db.one("""SELECT b.*, o.name AS org, h.name AS hub, c.name AS client FROM wg_builds b JOIN orgs o ON o.id = b.org_id
+                          LEFT JOIN devices h ON h.id = b.hub_device_id LEFT JOIN devices c ON c.id = b.client_device_id WHERE b.id=?""", (m.group(1),))
+            if not b:
+                raise HttpError(404, "Build not found.")
+            return self.json({"build": self.wgb_row(b), "candidates": self.vpn_candidates(b["org_id"], None)})
+        if path == "/api/wg-build-candidates":   # a client's routers with their subnets, for a new build
+            self.require(tech=True)
+            return self.json({"candidates": self.vpn_candidates(int(q.get("org_id") or 0), None)})
+        if m := re.fullmatch(r"/api/devices/(\d+)/wg-interfaces", path):   # the hub's existing WireGuard interfaces (live)
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline - can't read its WireGuard interfaces right now.")
+            try:
+                return self.json({"interfaces": poller.client(d).wg_list()})
+            except RouterError as e:
+                raise HttpError(502, f"Couldn't read {d['name']}: {e}")
         # --- scripts, groups, tasks (technicians) ---
         if path == "/api/scripts":
             self.require(tech=True)
@@ -2174,6 +2212,43 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(409, "This VPN is busy - wait for the current change to finish.")
             db.audit(s["email"], f"vpn {act} started", v["name"], self.client_ip(), org_id=v["org_id"])
             return self.json({"ok": True})
+        # --- Wizards > WireGuard Builder (technicians) ---
+        if path == "/api/wg-builds":   # create / update; {apply: true} applies right away
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            if b.get("id") and not db.one("SELECT 1 FROM wg_builds WHERE id=?", (int(b["id"]),)):
+                raise HttpError(404, "Build not found.")
+            build = {"org_id": int(b.get("org_id") or 0), "name": str(b.get("name") or "").strip()[:80] or "WireGuard tunnel",
+                     "hub_device_id": int(b.get("hub_device_id") or 0), "hub_iface": str(b.get("hub_iface") or "").strip()[:60],
+                     "hub_iface_existing": bool(b.get("hub_iface_existing")), "hub_tunnel_ip": str(b.get("hub_tunnel_ip") or "").strip(),
+                     "hub_pubkey": str(b.get("hub_pubkey") or "").strip() or None, "client_device_id": int(b.get("client_device_id") or 0),
+                     "client_iface": str(b.get("client_iface") or "").strip()[:60], "client_tunnel_ip": str(b.get("client_tunnel_ip") or "").strip(),
+                     "port": int(b.get("port") or 13232), "endpoint": str(b.get("endpoint") or "").strip()[:120],
+                     "hub_subnets": [str(n) for n in (b.get("hub_subnets") or [])][:50], "client_subnets": [str(n) for n in (b.get("client_subnets") or [])][:50],
+                     "routing": str(b.get("routing") or "static").strip()}
+            try:
+                bid = wgbuilds.save(int(b["id"]) if b.get("id") else None, build, s["email"])
+            except (WgError, KeyError, TypeError, ValueError) as e:
+                raise HttpError(400, str(e) or "Invalid build settings.") from None
+            db.audit(s["email"], "wg build saved", build["name"], self.client_ip(), org_id=build["org_id"])
+            if b.get("apply"):
+                wgbuilds.apply(bid, s["email"])
+            return self.json({"ok": True, "id": bid})
+        if m := re.fullmatch(r"/api/wg-builds/(\d+)/(apply|disable|delete)", path):
+            s = self.require(tech=True, write=True)
+            b = db.one("SELECT * FROM wg_builds WHERE id=?", (m.group(1),))
+            if not b:
+                raise HttpError(404, "Build not found.")
+            act = m.group(2)
+            if act == "delete" and b["status"] in ("draft", "disabled"):   # nothing on the routers (never applied, or already removed)
+                db.run("DELETE FROM wg_builds WHERE id=?", (b["id"],))
+                db.audit(s["email"], "wg build deleted", b["name"], self.client_ip(), org_id=b["org_id"])
+                return self.json({"ok": True, "deleted": True})
+            started = wgbuilds.apply(b["id"], s["email"]) if act == "apply" else wgbuilds.disable(b["id"], s["email"], delete=act == "delete")
+            if not started:
+                raise HttpError(409, "This build is busy - wait for the current change to finish.")
+            db.audit(s["email"], f"wg build {act} started", b["name"], self.client_ip(), org_id=b["org_id"])
+            return self.json({"ok": True})
         # --- scripts, groups, tasks ---
         if path == "/api/scripts":   # create / update {id?, name, description, body}
             s = self.require(tech=True, write=True)
@@ -3134,6 +3209,7 @@ def main():
     integ.start(settings.public_url)
     if settings.managed_vpn:   # off: no background checks of managed VPNs either (nothing touches those routers)
         vpns.start()
+    wgbuilds.start()   # WireGuard Builder tunnels are tech-built regardless of the managed-VPN switch
     secev.start()
     routerlogs.start()
     observatory.start()

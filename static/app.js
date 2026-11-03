@@ -5688,6 +5688,281 @@ async function vpnView(id) {
   };
   if (v) { await refresh(); clearInterval(timer); timer = setInterval(() => { if (view === "vpn" && !vpnHold) refresh(); }, 5000); }
 }
+
+// ===== Wizards > WireGuard Builder (wgbuild.py) =====================================================================
+let wgbEdit = false;   // "Edit settings" on an applied build re-opens the stepper prefilled
+const wgbNextIp = (cidr) => { const m = /^(\d+\.\d+\.\d+\.)(\d+)(\/\d+)$/.exec((cidr || "").trim()); return m ? `${m[1]}${(+m[2] + 1) & 255}${m[3]}` : ""; };
+
+async function wgbuildView(arg) {
+  if (!arg) return wgbList();
+  const isNew = arg === "new";
+  let build = null, cands = [];
+  const orgs = isNew ? await api("/api/orgs") : [];
+  if (!isNew) {
+    try { ({ build, candidates: cands } = await api(`/api/wg-builds/${arg}`)); }
+    catch { return go("wgbuild"); }
+    if (build.status !== "draft" && !wgbEdit) return wgbStatus(build, cands);
+  }
+  return wgbWizard(isNew, build, cands, orgs);
+}
+
+async function wgbList() {
+  const rows = await api("/api/wg-builds");
+  $("main").innerHTML = `<div class="row"><h1>WireGuard Builder</h1><span class="spacer"></span>
+      ${isTech() ? `<button class="btn primary" type="button" id="wgbNew">New build</button>` : ""}</div>
+    <p class="muted">Build a point-to-point WireGuard tunnel between two of a client's routers, step by step: pick a hub (a new interface or one that's already
+      there), a client router, the tunnel addresses, and the subnets each end should reach. Both routers are backed up first, and everything the wizard adds is
+      tagged so it can be removed cleanly.</p>
+    <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Tunnel</th><th>Client</th><th>Hub → Client router</th><th>Routing</th><th>Status</th><th>Last applied</th></tr></thead><tbody>
+      ${rows.map((b) => `<tr class="click" data-wgb="${b.id}"><td><b>${esc(b.name)}</b><div class="small muted mono">${esc(b.tunnel_net || "")}</div></td>
+        <td>${esc(b.org)}</td><td>${esc(b.hub || "—")} <span class="mono small">${esc(b.hub_iface || "")}</span> → ${esc(b.client || "—")} <span class="mono small">${esc(b.client_iface || "")}</span></td>
+        <td>${b.routing === "bgp" ? "BGP" : "Static"}</td><td>${vpnPill(b.status)}${b.up ? ` <span class="pill up-done">up</span>` : ""}${b.last_error ? `<div class="small status err">${esc(b.last_error)}</div>` : ""}</td>
+        <td class="small">${b.last_applied ? ago(b.last_applied) : "never"}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">No tunnels yet.${isTech() ? " Click New build to create one." : ""}</p>`}</div>`;
+  $("wgbNew")?.addEventListener("click", () => go("wgbuild", "new"));
+  document.querySelectorAll("[data-wgb]").forEach((r) => r.addEventListener("click", () => go("wgbuild", r.dataset.wgb)));
+}
+
+const WGB_STEPS = ["Hub router", "Hub interface", "Client router", "Client interface", "Routing", "Review"];
+
+async function wgbWizard(isNew, build, cands, orgs) {
+  const st = {
+    id: build ? build.id : null, step: 1,
+    org_id: build ? build.org_id : (orgs[0] ? orgs[0].id : null),
+    hub_id: build ? build.hub_device_id : null, hub_existing: build ? !!build.hub_iface_existing : false,
+    hub_iface: build ? build.hub_iface : "", hub_ip: build ? `${build.hub_tunnel_ip}/${(build.tunnel_net || "").split("/")[1] || "24"}` : "10.80.0.1/24",
+    hub_port: build ? build.port : 13232, hub_pubkey: build ? build.hub_pubkey : null, hub_subnets: new Set(build ? build.hub_subnets : []),
+    client_id: build ? build.client_device_id : null, client_iface: build ? build.client_iface : "",
+    client_ip: build ? `${build.client_tunnel_ip}/${(build.tunnel_net || "").split("/")[1] || "24"}` : "", client_port: build ? build.port : 13232,
+    client_subnets: new Set(build ? build.client_subnets : []), endpoint: build ? (build.endpoint || "") : "", routing: "static",
+  };
+  let hubIfaces = null, ifacesError = "";   // loaded on demand when "use existing" is chosen
+  const dev = (id) => cands.find((d) => d.id === id);
+  const loadCands = async () => { cands = (await api(`/api/wg-build-candidates?org_id=${st.org_id}`)).candidates; };
+  if (isNew && !orgs.length) { $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p><div class="card"><p class="muted">Add a client first.</p></div>`; return; }
+  if (isNew) await loadCands();
+
+  const say = (m, ok) => { const s = $("wgbSay"); if (s) { s.textContent = m; s.className = `status ${ok ? "ok" : "err"}`; } };
+  const header = () => `<p><a href="#wgbuild">← WireGuard Builder</a></p>
+    <div class="row"><h1>${isNew ? "New WireGuard tunnel" : esc(build.name || "WireGuard tunnel")}</h1></div>
+    <ol class="wgb-steps">${WGB_STEPS.map((s, i) => `<li class="${i + 1 === st.step ? "on" : i + 1 < st.step ? "done" : ""}">${esc(s)}</li>`).join("")}</ol>`;
+
+  // live subnet-overlap warning (server checks again)
+  const overlapWarn = () => {
+    const h = [...st.hub_subnets].map((n) => ({ n, r: cidrRange(n) })).filter((x) => x.r);
+    const c = [...st.client_subnets].map((n) => ({ n, r: cidrRange(n) })).filter((x) => x.r);
+    const clash = [];
+    h.forEach((a) => c.forEach((b) => { if (a.r[0] <= b.r[1] && b.r[0] <= a.r[1]) clash.push(`${a.n} (hub) overlaps ${b.n} (client)`); }));
+    return clash.length ? `<p class="status err small">The two ends can't advertise the same range: ${clash.map(esc).join("; ")}</p>` : "";
+  };
+  const subList = (router, chosen, kind) => `<div class="vsubs">${((router && router.networks) || []).map((n) =>
+      `<label class="chk"><input type="checkbox" data-wsub="${kind}" value="${esc(n.network)}" ${chosen.has(n.network) ? "checked" : ""}> ${esc(n.name)} <span class="mono small">${esc(n.network)}</span></label>`).join("")}
+    ${[...chosen].filter((x) => !((router && router.networks) || []).some((n) => n.network === x)).map((x) =>
+      `<label class="chk"><input type="checkbox" data-wsub="${kind}" value="${esc(x)}" checked> <span class="mono small">${esc(x)}</span></label>`).join("")}
+    <input class="vadd" data-wadd="${kind}" placeholder="add a downstream subnet, e.g. 10.20.0.0/24" aria-label="Add a subnet"></div>
+    <p class="small muted">Ticked subnets are advertised over the tunnel. For a <b>downstream</b> subnet (behind another router), the downstream router may also need a route back to the other site.</p>`;
+
+  const draw = async () => {
+    let body = "";
+    if (st.step === 1) {
+      body = `<div class="card"><h2>Which router is the hub?</h2>
+        <p class="small muted">The hub has a public address and listens for the tunnel; the client router dials in to it.</p>
+        ${isNew ? `<label class="field">Client <select id="wgbOrg">${orgs.map((o) => `<option value="${o.id}" ${o.id === st.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>` : `<div class="kv"><span>Client</span><span>${esc(build.org || "")}</span></div>`}
+        <div class="table-wrap"><table><thead><tr><th>Hub</th><th>Router</th></tr></thead><tbody id="wgbHubRows"></tbody></table></div></div>`;
+    } else if (st.step === 2) {
+      const hub = dev(st.hub_id);
+      const pub = hub && hub.wan_ip && !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(hub.wan_ip);
+      body = `<div class="card"><h2>Hub interface on ${esc(hub ? hub.name : "")}</h2>
+        <div class="wgb-choice"><label class="chk"><input type="radio" name="wgbHE" value="new" ${!st.hub_existing ? "checked" : ""}> Create a new WireGuard interface</label>
+          <label class="chk"><input type="radio" name="wgbHE" value="existing" ${st.hub_existing ? "checked" : ""}> Use an interface that's already on this router</label></div>
+        <div id="wgbHubIf"></div>
+        <h3>Subnets the client should reach (at the hub)</h3>${subList(hub, st.hub_subnets, "hub")}
+        <h3>Hub's public address</h3><div class="grid2">
+          <label class="field">Public address of the hub <input id="wgbEp" maxlength="120" value="${esc(st.endpoint)}" placeholder="${hub ? (pub ? `${esc(hub.wan_ip)} (hub's WAN IP)` : "required — the hub is behind NAT") : ""}"></label></div>
+        <p class="small muted">Leave blank to use the hub's public WAN IP. Behind NAT, enter its public IP or DDNS name and forward the UDP port to it.</p></div>`;
+    } else if (st.step === 3) {
+      body = `<div class="card"><h2>Which router is the client end?</h2>
+        <p class="small muted">It keeps a tunnel open to the hub (persistent keepalive), so it works behind NAT.</p>
+        <div class="table-wrap"><table><thead><tr><th>Client</th><th>Router</th></tr></thead><tbody id="wgbCliRows"></tbody></table></div></div>`;
+    } else if (st.step === 4) {
+      const cl = dev(st.client_id);
+      body = `<div class="card"><h2>Client interface on ${esc(cl ? cl.name : "")}</h2>
+        <div class="grid2">
+          <label class="field">Interface name <input id="wgbCName" maxlength="60" value="${esc(st.client_iface)}"></label>
+          <label class="field">Tunnel address (in ${esc((st.hub_ip || "").split("/")[0] ? st.hub_ip.replace(/\.\d+(\/\d+)$/, ".0$1") : "the hub's subnet")}) <input id="wgbCip" maxlength="40" value="${esc(st.client_ip)}" placeholder="10.80.0.2/24"></label>
+          <label class="field">Listen port <input id="wgbCport" type="number" min="1" max="65535" value="${st.client_port}"></label>
+        </div>
+        <h3>Subnets the hub should reach (at the client)</h3>${subList(cl, st.client_subnets, "client")}</div>`;
+    } else if (st.step === 5) {
+      body = `<div class="card"><h2>Routing</h2>
+        <div class="wgb-choice"><label class="chk"><input type="radio" name="wgbRt" value="static" checked> Static routes <span class="small muted">— the wizard adds a route to each advertised subnet</span></label>
+          <label class="chk wgb-soon"><input type="radio" name="wgbRt" value="bgp" disabled> BGP <span class="pill">coming soon</span></label></div>
+        <p class="small muted">Static routing suits a hub and a single client. BGP (dynamic routing, for larger or changing networks) is coming in a later release.</p></div>`;
+    } else {
+      const hub = dev(st.hub_id), cl = dev(st.client_id);
+      const sum = (label, v) => `<div class="kv"><span>${esc(label)}</span><span>${v}</span></div>`;
+      body = `<div class="card"><h2>Review</h2>
+        <label class="field">Name <input id="wgbName" maxlength="80" value="${esc(build ? build.name : "WireGuard tunnel")}"></label>
+        <div class="grid2">
+          <div>${sum("Hub", `${esc(hub ? hub.name : "")} <span class="mono small">${esc(st.hub_iface)}</span>${st.hub_existing ? " (existing)" : " (new)"}`)}
+            ${sum("Hub tunnel IP", `<span class="mono">${esc(st.hub_ip)}</span>`)}${sum("Public address", esc(st.endpoint || (hub && hub.wan_ip) || "—"))}
+            ${sum("UDP port", st.hub_port)}${sum("Hub advertises", [...st.hub_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}</div>
+          <div>${sum("Client", `${esc(cl ? cl.name : "")} <span class="mono small">${esc(st.client_iface)}</span>`)}
+            ${sum("Client tunnel IP", `<span class="mono">${esc(st.client_ip)}</span>`)}${sum("Routing", "Static routes")}
+            ${sum("Client advertises", [...st.client_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}</div>
+        </div>${overlapWarn()}
+        <div class="actions"><button class="btn primary" type="button" id="wgbApply">Save &amp; apply</button><button class="btn" type="button" id="wgbSave">Save draft</button>
+          <span class="status" id="wgbSay"></span></div>
+        <p class="small muted">Both routers are backed up first. Everything the wizard adds is tagged "TikManager WG #${st.id || "new"}" so it can be removed cleanly from the build list.</p></div>`;
+    }
+    const nav = `<div class="actions">${st.step > 1 ? `<button class="btn" type="button" id="wgbBack">Back</button>` : ""}
+      ${st.step < 6 ? `<button class="btn primary" type="button" id="wgbNext">Next</button>` : ""}<span class="status" id="wgbNav"></span></div>`;
+    $("main").innerHTML = header() + body + nav;
+    wire();
+  };
+
+  const wire = () => {
+    $("wgbBack")?.addEventListener("click", () => { st.step--; draw(); });
+    $("wgbNext")?.addEventListener("click", () => next());
+    // step 1
+    $("wgbOrg")?.addEventListener("change", async (e) => { st.org_id = +e.target.value; st.hub_id = st.client_id = null; await loadCands(); draw(); });
+    const hubRows = $("wgbHubRows");
+    if (hubRows) hubRows.innerHTML = cands.length ? cands.map((d) => wgbRouterRow(d, "H", st.hub_id)).join("") : `<tr><td colspan="2" class="muted">This client has no approved routers.</td></tr>`;
+    document.querySelectorAll('[name="wgbH"]').forEach((r) => r.addEventListener("change", () => { st.hub_id = +r.value; }));
+    // step 2
+    document.querySelectorAll('[name="wgbHE"]').forEach((r) => r.addEventListener("change", async () => { st.hub_existing = r.value === "existing"; if (st.hub_existing && hubIfaces === null) { drawHubIf(); await loadIfaces(); } drawHubIf(); }));
+    if (st.step === 2) { drawHubIf(); if (st.hub_existing && hubIfaces === null) loadIfaces().then(drawHubIf); }
+    $("wgbEp")?.addEventListener("input", (e) => { st.endpoint = e.target.value.trim(); });
+    // step 3
+    const cliRows = $("wgbCliRows");
+    if (cliRows) cliRows.innerHTML = cands.filter((d) => d.id !== st.hub_id).map((d) => wgbRouterRow(d, "C", st.client_id)).join("") || `<tr><td colspan="2" class="muted">No other routers for this client.</td></tr>`;
+    document.querySelectorAll('[name="wgbC"]').forEach((r) => r.addEventListener("change", () => { st.client_id = +r.value; }));
+    // step 4
+    $("wgbCName")?.addEventListener("input", (e) => { st.client_iface = e.target.value.trim(); });
+    $("wgbCip")?.addEventListener("input", (e) => { st.client_ip = e.target.value.trim(); });
+    $("wgbCport")?.addEventListener("input", (e) => { st.client_port = +e.target.value || 13232; });
+    // subnet checklists (steps 2 and 4)
+    document.querySelectorAll("[data-wsub]").forEach((c) => c.addEventListener("change", () => { const set = c.dataset.wsub === "hub" ? st.hub_subnets : st.client_subnets; c.checked ? set.add(c.value) : set.delete(c.value); }));
+    document.querySelectorAll("[data-wadd]").forEach((i) => i.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !i.value.trim()) return;
+      if (!/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(i.value.trim())) { $("wgbNav").textContent = "Enter a subnet like 10.20.0.0/24."; return; }
+      (i.dataset.wadd === "hub" ? st.hub_subnets : st.client_subnets).add(i.value.trim()); draw();
+    }));
+    // step 6
+    $("wgbName")?.addEventListener("input", (e) => { if (build) build.name = e.target.value; });
+    $("wgbSave")?.addEventListener("click", () => save(false));
+    $("wgbApply")?.addEventListener("click", () => save(true));
+  };
+
+  const loadIfaces = async () => {
+    try { hubIfaces = (await api(`/api/devices/${st.hub_id}/wg-interfaces`)).interfaces; ifacesError = ""; }
+    catch (e) { hubIfaces = []; ifacesError = e.message; }
+  };
+  const drawHubIf = () => {
+    const box = $("wgbHubIf"); if (!box) return;
+    if (!st.hub_existing) {
+      box.innerHTML = `<div class="grid2">
+        <label class="field">Interface name <input id="wgbHName" maxlength="60" value="${esc(st.hub_iface || "wg-tunnel")}"></label>
+        <label class="field">Listen port <input id="wgbHport" type="number" min="1" max="65535" value="${st.hub_port}"></label>
+        <label class="field">Interface address <input id="wgbHip" maxlength="40" value="${esc(st.hub_ip)}" placeholder="10.80.0.1/24"></label></div>`;
+      $("wgbHName").addEventListener("input", (e) => { st.hub_iface = e.target.value.trim(); });
+      $("wgbHport").addEventListener("input", (e) => { st.hub_port = +e.target.value || 13232; });
+      $("wgbHip").addEventListener("input", (e) => { st.hub_ip = e.target.value.trim(); if (!st.client_ip) st.client_ip = wgbNextIp(st.hub_ip); });
+      if (!st.hub_iface) st.hub_iface = "wg-tunnel";
+    } else if (ifacesError) {
+      box.innerHTML = `<p class="status err small">${esc(ifacesError)}</p>`;
+    } else if (hubIfaces && !hubIfaces.length) {
+      box.innerHTML = `<p class="muted small">This router has no WireGuard interfaces yet — choose "Create a new interface" above.</p>`;
+    } else if (hubIfaces) {
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th></th><th>Interface</th><th>Address</th><th>Port</th></tr></thead><tbody>${hubIfaces.map((w) =>
+        `<tr><td><input type="radio" name="wgbHIf" value="${esc(w.name)}" ${st.hub_iface === w.name ? "checked" : ""}></td>
+          <td><b>${esc(w.name)}</b>${w.disabled ? ` <span class="pill">disabled</span>` : ""}</td><td class="mono small">${esc((w.addresses || []).join(", ") || "—")}</td><td class="small">${esc(w.listen_port || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+      document.querySelectorAll('[name="wgbHIf"]').forEach((r) => r.addEventListener("change", () => {
+        const w = hubIfaces.find((x) => x.name === r.value); st.hub_iface = w.name; st.hub_pubkey = w.public_key;
+        st.hub_port = +w.listen_port || st.hub_port; if (w.addresses && w.addresses[0]) { st.hub_ip = w.addresses[0]; if (!st.client_ip) st.client_ip = wgbNextIp(st.hub_ip); }
+      }));
+    } else {
+      box.innerHTML = `<p class="muted small">Loading…</p>`;
+    }
+  };
+
+  const next = () => {
+    const nav = (m) => { $("wgbNav").textContent = m; };
+    if (st.step === 1 && !st.hub_id) return nav("Pick the hub router.");
+    if (st.step === 2) {
+      if (!st.hub_iface) return nav("Name the hub interface (or pick an existing one).");
+      if (!st.hub_existing && !/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(st.hub_ip)) return nav("Enter the hub interface address like 10.80.0.1/24.");
+      if (!st.client_ip) st.client_ip = wgbNextIp(st.hub_ip);
+    }
+    if (st.step === 3 && (!st.client_id || st.client_id === st.hub_id)) return nav("Pick a client router (not the hub).");
+    if (st.step === 3 && !st.client_iface) st.client_iface = "wg-to-hub";
+    if (st.step === 4) {
+      if (!st.client_iface) return nav("Name the client interface.");
+      if (!/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(st.client_ip)) return nav("Enter the client tunnel address like 10.80.0.2/24.");
+    }
+    st.step++; draw();
+  };
+
+  const save = async (apply) => {
+    try {
+      const r = await post("/api/wg-builds", {
+        id: st.id, org_id: st.org_id, name: $("wgbName") ? $("wgbName").value : (build ? build.name : "WireGuard tunnel"),
+        hub_device_id: st.hub_id, hub_iface: st.hub_iface, hub_iface_existing: st.hub_existing, hub_tunnel_ip: st.hub_ip, hub_pubkey: st.hub_pubkey,
+        client_device_id: st.client_id, client_iface: st.client_iface, client_tunnel_ip: st.client_ip, port: st.hub_port,
+        endpoint: st.endpoint, hub_subnets: [...st.hub_subnets], client_subnets: [...st.client_subnets], routing: "static", apply });
+      wgbEdit = false;
+      if (st.id) { say(apply ? "Saved — applying to the routers…" : "Saved.", true); if (apply) setTimeout(() => go("wgbuild", st.id), 400); }
+      else go("wgbuild", r.id);
+    } catch (e) { say(e.message); }
+  };
+
+  draw();
+}
+
+const wgbRouterRow = (d, grp, chosen) => {
+  const pub = d.wan_ip && !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(d.wan_ip);
+  return `<tr><td><input type="radio" name="wgb${grp}" value="${d.id}" ${chosen === d.id ? "checked" : ""} aria-label="${esc(d.name)}"></td>
+    <td><b>${esc(d.name)}</b> <span class="dot ${d.online ? "on" : "off"}"></span><div class="small muted">${esc(d.model || "")} · WAN <span class="mono">${esc(d.wan_ip || "—")}</span>
+      ${d.wan_ip ? (pub ? ` <span class="pill">public</span>` : ` <span class="pill">behind NAT</span>`) : ""} · ${(d.networks || []).length} subnets</div></td></tr>`;
+};
+
+async function wgbStatus(build, cands) {
+  const ro = !isTech();
+  const hs = (v) => v == null ? "<span class='muted'>no handshake</span>" : v < 180 ? `<span class="status ok">handshake ${v}s ago</span>` : `<span class="status err">last handshake ${Math.round(v / 60)}m ago</span>`;
+  $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p>
+    <div class="row"><h1>${esc(build.name)}</h1><span>${vpnPill(build.status)}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
+    ${build.last_error ? `<div class="card"><p class="status err">${esc(build.last_error)}</p></div>` : ""}
+    <div class="card"><h2>Tunnel</h2>
+      <div class="grid2"><div><div class="kv"><span>Hub</span><span>${esc(build.hub || "")} <span class="mono small">${esc(build.hub_iface)}</span>${build.hub_iface_existing ? " (existing)" : ""}</span></div>
+        <div class="kv"><span>Hub tunnel IP</span><span class="mono">${esc(build.hub_tunnel_ip || "")}</span></div>
+        <div class="kv"><span>Public address</span><span>${esc(build.endpoint || "WAN IP")}</span></div>
+        <div class="kv"><span>Hub status</span><span>${hs(build.hub_hs)}</span></div></div>
+      <div><div class="kv"><span>Client</span><span>${esc(build.client || "")} <span class="mono small">${esc(build.client_iface)}</span></span></div>
+        <div class="kv"><span>Client tunnel IP</span><span class="mono">${esc(build.client_tunnel_ip || "")}</span></div>
+        <div class="kv"><span>Routing</span><span>${build.routing === "bgp" ? "BGP" : "Static routes"}</span></div>
+        <div class="kv"><span>Client status</span><span>${hs(build.client_hs)}${build.ping_ms != null ? ` · ping ${Math.round(build.ping_ms)}ms` : ""}</span></div></div></div>
+      <div class="kv"><span>Hub advertises</span><span>${(build.hub_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
+      <div class="kv"><span>Client advertises</span><span>${(build.client_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
+      ${ro ? "" : `<div class="actions"><button class="btn primary" type="button" id="wgbEditBtn">Edit settings</button><button class="btn" type="button" id="wgbReapply">Re-apply</button>
+        ${build.status !== "disabled" ? `<button class="btn" type="button" id="wgbDisable">Disable</button>` : ""}<button class="btn danger" type="button" id="wgbDelete">Delete</button>
+        <span class="status" id="wgbSay"></span></div>`}</div>`;
+  const say = (m, ok) => { $("wgbSay").textContent = m; $("wgbSay").className = `status ${ok ? "ok" : "err"}`; };
+  $("wgbEditBtn")?.addEventListener("click", () => { wgbEdit = true; wgbWizard(false, build, cands, []); });
+  $("wgbReapply")?.addEventListener("click", async () => { try { await post(`/api/wg-builds/${build.id}/apply`); say("Applying to the routers…", true); } catch (e) { say(e.message); } });
+  $("wgbDisable")?.addEventListener("click", async () => { try { await post(`/api/wg-builds/${build.id}/disable`); say("Removing from the routers…", true); } catch (e) { say(e.message); } });
+  $("wgbDelete")?.addEventListener("click", async (e) => {
+    if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
+    try { const r = await post(`/api/wg-builds/${build.id}/delete`); if (r.deleted) go("wgbuild"); else say("Removing from the routers, then deleting…", true); } catch (err) { say(err.message); }
+  });
+  // live refresh while applied
+  clearInterval(window._wgbTimer);
+  window._wgbTimer = setInterval(async () => {
+    if (view !== "wgbuild") { clearInterval(window._wgbTimer); return; }
+    try { const b = (await api(`/api/wg-builds/${build.id}`)).build; if (b.status !== build.status || b.hub_hs !== build.hub_hs || b.client_hs !== build.client_hs) wgbStatus(b, cands); }
+    catch { clearInterval(window._wgbTimer); }
+  }, 8000);
+}
+
 const NAV_ICONS = {
 "dashboard": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"5\" rx=\"1.5\"/><rect x=\"14\" y=\"12\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"3\" y=\"16\" width=\"7\" height=\"5\" rx=\"1.5\"/></svg>",
 "routers": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"13\" width=\"19\" height=\"7\" rx=\"2\"/><path d=\"M6.5 16.5h.01M10 16.5h.01M8 13l-2-6M16 13l2-6M5 7.5a1.5 1.5 0 1 0 0-.01M19 7.5a1.5 1.5 0 1 0 0-.01\"/></svg>",
@@ -5710,6 +5985,7 @@ const NAV_ICONS_EXTRA = {
   network: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
   monitor: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>',
   maint: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>',
+  wizards: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 20 10-10M14 6l1.5 1.5"/><path d="M18 3v3M21 6h-3M5 4v2M6 5H4M18 15v2M19 16h-2"/></svg>',
 };
 const CHEV = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
 // who sees what: "tech" = technicians, "admin" = technicians or client admins, "techadmin" = administrators
@@ -5731,6 +6007,8 @@ const NAV = [
     { view: "vulns", label: "Vulnerabilities", who: "tech" }, { view: "compliance", label: "Compliance", who: "tech" }] },
   { group: "Maintenance", icon: "maint", items: [
     { view: "backups", label: "Backups", who: "tech" }, { view: "upgrades", label: "Upgrades", who: "tech", count: "updates" }, { view: "tasks", label: "Tasks", who: "tech" }] },
+  { group: "Wizards", icon: "wizards", items: [
+    { view: "wgbuild", label: "WireGuard Builder", who: "tech" }] },
   { group: "Clients & users", icon: "clients", items: [{ view: "clients", label: "Clients", who: "tech" }, { view: "users", label: "Users", who: "admin" }] },
   { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
 ];
@@ -5870,7 +6148,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wgbuild: wgbuildView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
@@ -5964,7 +6242,7 @@ async function init() {
   });
   const route = () => {
     const [h, arg] = location.hash.slice(1).split("/");
-    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if ((h === "admin" || h === "routers" || h === "dashboard") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
+    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if (h === "wgbuild" && arg) go("wgbuild", arg); else if ((h === "admin" || h === "routers" || h === "dashboard") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
   };
   window.addEventListener("hashchange", route);   // links, typed URLs and Back (go() uses replaceState, which doesn't fire this)
   route();

@@ -124,6 +124,19 @@ CREATE TABLE IF NOT EXISTS vpn_sites (
   state TEXT NOT NULL DEFAULT 'pending',            -- pending / applied / failed / removing
   last_error TEXT, applied_at REAL, handshake_age INTEGER, ping_ms REAL, rx INTEGER, tx INTEGER, checked_at REAL
 );
+CREATE TABLE IF NOT EXISTS wg_builds (               -- WireGuard Builder wizard: one point-to-point tunnel (hub <-> client)
+  id INTEGER PRIMARY KEY, org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE, name TEXT NOT NULL,
+  hub_device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+  hub_iface TEXT, hub_iface_existing INTEGER NOT NULL DEFAULT 0, hub_tunnel_ip TEXT, hub_pubkey TEXT,
+  client_device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+  client_iface TEXT, client_tunnel_ip TEXT, client_pubkey TEXT,
+  tunnel_net TEXT, endpoint TEXT, port INTEGER NOT NULL DEFAULT 13232,
+  hub_subnets TEXT NOT NULL DEFAULT '[]', client_subnets TEXT NOT NULL DEFAULT '[]',
+  routing TEXT NOT NULL DEFAULT 'static',
+  status TEXT NOT NULL DEFAULT 'draft',              -- draft / applying / active / failed / disabled
+  last_error TEXT, hub_hs INTEGER, client_hs INTEGER, ping_ms REAL, checked_at REAL,
+  created_by TEXT, created_at REAL NOT NULL, updated_at REAL, last_applied REAL
+);
 CREATE TABLE IF NOT EXISTS ra_servers (               -- remote access (WireGuard for Windows ...) into one router
   device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE, port INTEGER NOT NULL, pool TEXT NOT NULL,
   endpoint TEXT NOT NULL, split INTEGER NOT NULL DEFAULT 1, routes TEXT NOT NULL DEFAULT '[]', dns TEXT NOT NULL DEFAULT '',
