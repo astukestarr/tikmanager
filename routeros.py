@@ -916,6 +916,14 @@ class RouterOS:
                 return {"name": r["name"], "as": r.get("as")}
         return None
 
+    def bgp_gc(self):
+        """Remove a TikManager-created shared BGP instance (comment WGB_TAG) once no connection references it any more.
+        The user's own instances are never touched. Called when a build is disabled/deleted."""
+        conns = self.optional(lambda: self.get("/routing/bgp/connection"), []) or []
+        for inst in self.optional(lambda: self.get(f"/routing/bgp/instance?comment={urllib.parse.quote(WGB_TAG)}"), []) or []:
+            if inst.get("comment") == WGB_TAG and not any(c.get("instance") == inst.get("name") for c in conns):
+                self._req("DELETE", f"/routing/bgp/instance/{inst['.id']}")
+
     def bgp_existing_as(self):
         """The first BGP AS already configured on this router (instance or connection), or None - for the wizard's prefill
         so it reuses an existing AS instead of configuring a conflicting one."""
@@ -1783,6 +1791,9 @@ class SimRouter:
 
     def bgp_instance(self):
         return None
+
+    def bgp_gc(self):
+        pass
 
     def ipsec_apply(self, cfg, tag):
         time.sleep(0.3)

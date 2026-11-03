@@ -5993,15 +5993,14 @@ async function wgbWizard(isNew, build, cands, orgs) {
 
   const save = async (apply) => {
     try {
-      const r = await post("/api/wg-builds", {
+      await post("/api/wg-builds", {
         id: st.id, org_id: st.org_id, name: $("wgbName") ? $("wgbName").value : (build ? build.name : "WireGuard tunnel"),
         hub_device_id: st.hub_id, hub_iface: st.hub_iface, hub_iface_existing: st.hub_existing, hub_tunnel_ip: st.hub_ip, hub_pubkey: st.hub_pubkey,
         client_device_id: st.client_id, client_iface: st.client_iface, client_tunnel_ip: st.client_ip, port: st.hub_port,
         endpoint: st.endpoint, hub_subnets: [...st.hub_subnets], client_subnets: [...st.client_subnets],
         routing: st.routing, bgp_type: st.bgp_type, hub_as: st.hub_as, client_as: st.client_as, apply });
       wgbEdit = false;
-      if (st.id) { say(apply ? "Saved — applying to the routers…" : "Saved.", true); if (apply) setTimeout(() => go("wgbuild", st.id), 400); }
-      else go("wgbuild", r.id);
+      go("wgbuild");   // back to the tunnel list (it shows the new/updated tunnel and its status)
     } catch (e) { say(e.message); }
   };
 
@@ -6048,7 +6047,7 @@ async function wgbStatus(build, cands) {
   $("wgbDisable")?.addEventListener("click", async () => { try { await post(`/api/wg-builds/${build.id}/disable`); say("Removing from the routers…", true); } catch (e) { say(e.message); } });
   $("wgbDelete")?.addEventListener("click", async (e) => {
     if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
-    try { const r = await post(`/api/wg-builds/${build.id}/delete`); if (r.deleted) go("wgbuild"); else say("Removing from the routers, then deleting…", true); } catch (err) { say(err.message); }
+    try { await post(`/api/wg-builds/${build.id}/delete`); go("wgbuild"); } catch (err) { say(err.message); }
   });
   // live refresh while applied - update the status values in place so the page doesn't flicker, reset buttons or lose scroll
   let cur = build;
@@ -6211,14 +6210,13 @@ async function ipsecWizard(isNew, build, cands, orgs) {
 
   const save = async (apply) => {
     try {
-      const r = await post("/api/ipsec-builds", {
+      await post("/api/ipsec-builds", {
         id: st.id, org_id: st.org_id, name: $("ipName") ? $("ipName").value : (build ? build.name : "IPsec tunnel"),
         device_id: st.device_id, remote_addr: st.remote_addr, ike: st.ike,
         p1_enc: st.p1_enc, p1_hash: st.p1_hash, p1_dh: st.p1_dh, p2_enc: st.p2_enc, p2_auth: st.p2_auth, pfs: st.pfs,
         local_subnets: [...st.local_subnets], remote_subnets: [...st.remote_subnets], apply });
       ipsecEdit = false;
-      if (st.id) { say(apply ? "Saved — applying to the router…" : "Saved.", true); if (apply) setTimeout(() => go("ipsec", st.id), 400); }
-      else go("ipsec", r.id);
+      go("ipsec");   // back to the tunnel list
     } catch (e) { say(e.message); }
   };
   draw();
@@ -6263,7 +6261,7 @@ async function ipsecStatus(build, cands) {
   $("ipDisable")?.addEventListener("click", async () => { try { await post(`/api/ipsec-builds/${build.id}/disable`); say("Removing from the router…", true); } catch (e) { say(e.message); } });
   $("ipDelete")?.addEventListener("click", async (e) => {
     if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
-    try { const r = await post(`/api/ipsec-builds/${build.id}/delete`); if (r.deleted) go("ipsec"); else say("Removing from the router, then deleting…", true); } catch (err) { say(err.message); }
+    try { await post(`/api/ipsec-builds/${build.id}/delete`); go("ipsec"); } catch (err) { say(err.message); }
   });
   let psk = null;
   $("ipReveal")?.addEventListener("click", async () => {
@@ -6313,6 +6311,7 @@ const CHEV = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="
 // who sees what: "tech" = technicians, "admin" = technicians or client admins, "techadmin" = administrators
 const NAV = [
   { view: "dashboard", label: "Dashboard", icon: "dashboard" },
+  { view: "wizards", label: "Router Wizard", icon: "wizards", who: "tech" },
   { group: "Devices", icon: "routers", count: "devices", items: [
     { view: "routers", label: "All devices", count: "devices" }, { view: "routers", arg: "ap", label: "Access points", count: "ap" },
     { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" },
@@ -6329,7 +6328,6 @@ const NAV = [
     { view: "vulns", label: "Vulnerabilities", who: "tech" }, { view: "compliance", label: "Compliance", who: "tech" }] },
   { group: "Maintenance", icon: "maint", items: [
     { view: "backups", label: "Backups", who: "tech" }, { view: "upgrades", label: "Upgrades", who: "tech", count: "updates" }, { view: "tasks", label: "Tasks", who: "tech" }] },
-  { view: "wizards", label: "Router Wizard", icon: "wizards", who: "tech" },
   { group: "Clients & users", icon: "clients", items: [{ view: "clients", label: "Clients", who: "tech" }, { view: "users", label: "Users", who: "admin" }] },
   { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
 ];

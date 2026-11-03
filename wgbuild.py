@@ -243,6 +243,10 @@ class WgBuilds:
                 hub_as, cli_as = as_of(hub_inst, bg["hub_as"]), as_of(cli_inst, bg["client_as"])
                 if bg["type"] == "ibgp":   # one shared AS: prefer an existing instance's AS (a router has a single AS)
                     hub_as = cli_as = (as_of(hub_inst, None) or as_of(cli_inst, None) or bg["hub_as"])
+                if bg["type"] == "ebgp" and hub_as == cli_as:   # a router has one AS; if both resolve equal, eBGP can't peer
+                    pinned = " - a BGP instance already on a router fixes its AS" if (hub_inst or cli_inst) else ""
+                    raise WgError(f"eBGP needs a different AS on each side, but both routers resolve to AS {hub_as}{pinned}. "
+                                  "Use iBGP (one shared AS), or give one router a different AS first.")
                 hub_role = "ebgp" if bg["type"] == "ebgp" else "ibgp-rr"   # hub reflects routes between spokes
                 cli_role = "ebgp" if bg["type"] == "ebgp" else "ibgp"
                 hub_bgp = {**common, "local_as": hub_as, "remote_as": cli_as, "role": hub_role,
@@ -298,7 +302,9 @@ class WgBuilds:
                     if not d:
                         continue
                     try:
-                        self.client_for(d).wgb_clear(tag, iface, remove_interface=created)
+                        cl = self.client_for(d)
+                        cl.wgb_clear(tag, iface, remove_interface=created)
+                        cl.bgp_gc()   # drop the shared tikmanager-bgp instance if this was the last tunnel using it
                     except RouterError as e:
                         failures.append(f"{d['name']}: {e}")
                 if delete and not failures:

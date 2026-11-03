@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.6 - 2026-11-03
+
+- **Wizards return to the tunnel list after Apply and Delete** instead of sitting on the review/status screen (both the
+  WireGuard Builder and the IPsec Tunnel). The list shows the new or changed tunnel with its live status.
+- **Router Wizard moved up the sidebar** to just below Dashboard.
+- **BGP: a clear error instead of an invalid eBGP connection.** eBGP needs a different AS on each side; if both routers
+  resolve to the same AS (for example both already run one shared BGP instance), the wizard now says so and stops,
+  rather than pushing a connection RouterOS rejects with *"invalid 'remote-as' and 'local-role' combination"*. Use iBGP
+  for a single shared AS. Deleting a BGP tunnel now also removes the shared `tikmanager-bgp` instance once no tunnel uses
+  it, so a leftover AS can't trip up a later build.
+
 ## 3.1.0-beta.5 - 2026-11-03
 
 - **New wizard: IPsec Tunnel** (Router Wizard > IPsec Tunnel). Connect one of a client's MikroTik routers to an
