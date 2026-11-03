@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.2 - 2026-11-03
+
+- **WireGuard Builder: peers are now named after the router on the other end.** Each tunnel's peer shows the remote
+  router's name (the hub's peer is named for the client router, and vice versa) instead of a generic tag, so the Peers
+  list on the router reads clearly. The TikManager tag stays in the peer's comment, so Disable/Delete still removes
+  exactly what the build added. Re-apply an existing tunnel to rename its peers. (Peer names need RouterOS 7.15+; on older
+  routers the peer is still created, just without a name.)
+- **WireGuard Builder: the client end can now be a router from a different client.** The Client router step has an
+  organization picker, so you can connect a hub at one client to a router at another (for example a shared service or a
+  site you host). It defaults to the hub's client.
+- **WireGuard Builder: the tunnel status page no longer flickers.** It was redrawing the whole page every few seconds as
+  the handshake age ticked, which reset buttons and scrolling; it now updates the status values in place.
+
 ## 3.1.0-beta.1 - 2026-11-03
 
 **New: a Wizards section, starting with a WireGuard Builder.** A new **Wizards** group in the sidebar for guided,

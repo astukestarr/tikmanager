@@ -850,7 +850,13 @@ class RouterOS:
         body = {"interface": name, "public-key": p["public-key"], "allowed-address": ",".join(p["allowed"]), "comment": tag}
         if p.get("endpoint"):
             body.update({"endpoint-address": p["endpoint"], "endpoint-port": str(p["port"]), "persistent-keepalive": "25s"})
-        self._req("PUT", "/interface/wireguard/peers", body)
+        if p.get("name"):   # name the peer after the router on the other end (comment stays the tag, for clean removal)
+            try:
+                self._req("PUT", "/interface/wireguard/peers", {**body, "name": p["name"][:40]})
+            except RouterError:   # the peer "name" field is RouterOS 7.15+ - older routers still get the peer, just unnamed
+                self._req("PUT", "/interface/wireguard/peers", body)
+        else:
+            self._req("PUT", "/interface/wireguard/peers", body)
         for dst in cfg["routes"]:
             self._req("PUT", "/ip/route", {"dst-address": dst, "gateway": name, "comment": tag})
         # firewall: accept rules at the top, before whatever drop rules the router already has

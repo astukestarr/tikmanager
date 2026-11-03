@@ -57,9 +57,10 @@ class WgBuilds:
 
     # --- validation / saving ----------------------------------------------------------------------------------
     def _dev(self, device_id, org_id, label):
+        """org_id None = any client's router (the client end may be a different client from the hub)."""
         d = self.db.one("SELECT * FROM devices WHERE id=?", (device_id,))
-        if not d or d["org_id"] != org_id or d["state"] != "adopted":
-            raise WgError(f"The {label} must be an approved router of this client.")
+        if not d or d["state"] != "adopted" or (org_id is not None and d["org_id"] != org_id):
+            raise WgError(f"The {label} must be an approved router" + (" of this client." if org_id is not None else "."))
         major = (d["version"] or "7").split(".")[0]
         if major.isdigit() and int(major) < 7:
             raise WgError(f"{d['name']} runs RouterOS {d['version']} - WireGuard needs RouterOS 7 (upgrade it first on the Upgrades page).")
@@ -71,7 +72,7 @@ class WgBuilds:
         if b["hub_device_id"] == b["client_device_id"]:
             raise WgError("The hub and the client must be two different routers.")
         hub = self._dev(b["hub_device_id"], org_id, "hub")
-        client = self._dev(b["client_device_id"], org_id, "client router")
+        client = self._dev(b["client_device_id"], None, "client router")   # the client end may belong to a different client
         hub_name = (b.get("hub_iface") or "").strip()
         client_name = (b.get("client_iface") or "").strip()
         if not hub_name or not client_name:
@@ -213,12 +214,12 @@ class WgBuilds:
             # hub: peer = the client (its tunnel /32 + its subnets), routes to the client's subnets, the UDP port open
             hub_cl.wgb_apply(v["hub_name"], {
                 "address": None if row["hub_iface_existing"] else f"{v['hub_ip']}/{prefix}", "port": v["port"],
-                "peer": {"public-key": client_pub, "allowed": [f"{v['client_ip']}/32"] + v["client_subs"]},
+                "peer": {"public-key": client_pub, "name": client["name"], "allowed": [f"{v['client_ip']}/32"] + v["client_subs"]},
                 "routes": v["client_subs"], "open_port": True}, tag, create_iface=not row["hub_iface_existing"])
             # client: peer = the hub (the tunnel network + the hub's subnets, with the hub's public endpoint), routes to them
             client_cl.wgb_apply(v["client_name"], {
                 "address": f"{v['client_ip']}/{prefix}", "port": v["port"],
-                "peer": {"public-key": hub_pub, "allowed": [v["tunnel_net"]] + v["hub_subs"], "endpoint": v["endpoint"], "port": v["port"]},
+                "peer": {"public-key": hub_pub, "name": hub["name"], "allowed": [v["tunnel_net"]] + v["hub_subs"], "endpoint": v["endpoint"], "port": v["port"]},
                 "routes": v["hub_subs"], "open_port": False}, tag, create_iface=True)
 
             self.db.run("UPDATE wg_builds SET status='active', last_error=NULL, hub_pubkey=?, client_pubkey=?, last_applied=? WHERE id=?",

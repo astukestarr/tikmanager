@@ -5715,7 +5715,7 @@ async function wgbList() {
       tagged so it can be removed cleanly.</p>
     <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Tunnel</th><th>Client</th><th>Hub → Client router</th><th>Routing</th><th>Status</th><th>Last applied</th></tr></thead><tbody>
       ${rows.map((b) => `<tr class="click" data-wgb="${b.id}"><td><b>${esc(b.name)}</b><div class="small muted mono">${esc(b.tunnel_net || "")}</div></td>
-        <td>${esc(b.org)}</td><td>${esc(b.hub || "—")} <span class="mono small">${esc(b.hub_iface || "")}</span> → ${esc(b.client || "—")} <span class="mono small">${esc(b.client_iface || "")}</span></td>
+        <td>${esc(b.org)}</td><td>${esc(b.hub || "—")} <span class="mono small">${esc(b.hub_iface || "")}</span> → ${esc(b.client || "—")} <span class="mono small">${esc(b.client_iface || "")}</span>${b.client_org && b.client_org !== b.org ? ` <span class="pill">${esc(b.client_org)}</span>` : ""}</td>
         <td>${b.routing === "bgp" ? "BGP" : "Static"}</td><td>${vpnPill(b.status)}${b.up ? ` <span class="pill up-done">up</span>` : ""}${b.last_error ? `<div class="small status err">${esc(b.last_error)}</div>` : ""}</td>
         <td class="small">${b.last_applied ? ago(b.last_applied) : "never"}</td></tr>`).join("")}
       </tbody></table></div>` : `<p class="muted">No tunnels yet.${isTech() ? " Click New build to create one." : ""}</p>`}</div>`;
@@ -5729,6 +5729,7 @@ async function wgbWizard(isNew, build, cands, orgs) {
   const st = {
     id: build ? build.id : null, step: 1,
     org_id: build ? build.org_id : (orgs[0] ? orgs[0].id : null),
+    client_org_id: build ? (build.client_org_id || build.org_id) : (orgs[0] ? orgs[0].id : null),
     hub_id: build ? build.hub_device_id : null, hub_existing: build ? !!build.hub_iface_existing : false,
     hub_iface: build ? build.hub_iface : "", hub_ip: build ? `${build.hub_tunnel_ip}/${(build.tunnel_net || "").split("/")[1] || "24"}` : "10.80.0.1/24",
     hub_port: build ? build.port : 13232, hub_pubkey: build ? build.hub_pubkey : null, hub_subnets: new Set(build ? build.hub_subnets : []),
@@ -5737,10 +5738,16 @@ async function wgbWizard(isNew, build, cands, orgs) {
     client_subnets: new Set(build ? build.client_subnets : []), endpoint: build ? (build.endpoint || "") : "", routing: "static",
   };
   let hubIfaces = null, ifacesError = "";   // loaded on demand when "use existing" is chosen
+  let allOrgs = orgs.length ? orgs : [];
+  let ccands = cands;   // client-end candidates - the client router may belong to a different client from the hub
   const dev = (id) => cands.find((d) => d.id === id);
+  const cdev = (id) => ccands.find((d) => d.id === id);
   const loadCands = async () => { cands = (await api(`/api/wg-build-candidates?org_id=${st.org_id}`)).candidates; };
-  if (isNew && !orgs.length) { $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p><div class="card"><p class="muted">Add a client first.</p></div>`; return; }
+  const loadClientCands = async () => { ccands = st.client_org_id === st.org_id ? cands : (await api(`/api/wg-build-candidates?org_id=${st.client_org_id}`)).candidates; };
+  if (!allOrgs.length) { try { allOrgs = await api("/api/orgs"); } catch (e) { allOrgs = []; } }
+  if (isNew && !allOrgs.length) { $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p><div class="card"><p class="muted">Add a client first.</p></div>`; return; }
   if (isNew) await loadCands();
+  if (!isNew && st.client_org_id !== st.org_id) await loadClientCands();
 
   const say = (m, ok) => { const s = $("wgbSay"); if (s) { s.textContent = m; s.className = `status ${ok ? "ok" : "err"}`; } };
   const header = () => `<p><a href="#wgbuild">← WireGuard Builder</a></p>
@@ -5783,9 +5790,11 @@ async function wgbWizard(isNew, build, cands, orgs) {
     } else if (st.step === 3) {
       body = `<div class="card"><h2>Which router is the client end?</h2>
         <p class="small muted">It keeps a tunnel open to the hub (persistent keepalive), so it works behind NAT.</p>
+        <label class="field">Client router's organization <select id="wgbClientOrg">${allOrgs.map((o) => `<option value="${o.id}" ${o.id === st.client_org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>
+        <p class="small muted">Usually the same client as the hub, but you can connect a router from a different client here.</p>
         <div class="table-wrap"><table><thead><tr><th>Client</th><th>Router</th></tr></thead><tbody id="wgbCliRows"></tbody></table></div></div>`;
     } else if (st.step === 4) {
-      const cl = dev(st.client_id);
+      const cl = cdev(st.client_id);
       body = `<div class="card"><h2>Client interface on ${esc(cl ? cl.name : "")}</h2>
         <div class="grid2">
           <label class="field">Interface name <input id="wgbCName" maxlength="60" value="${esc(st.client_iface)}"></label>
@@ -5799,7 +5808,8 @@ async function wgbWizard(isNew, build, cands, orgs) {
           <label class="chk wgb-soon"><input type="radio" name="wgbRt" value="bgp" disabled> BGP <span class="pill">coming soon</span></label></div>
         <p class="small muted">Static routing suits a hub and a single client. BGP (dynamic routing, for larger or changing networks) is coming in a later release.</p></div>`;
     } else {
-      const hub = dev(st.hub_id), cl = dev(st.client_id);
+      const hub = dev(st.hub_id), cl = cdev(st.client_id);
+      const cOrg = st.client_org_id !== st.org_id ? (allOrgs.find((o) => o.id === st.client_org_id) || {}).name : "";
       const sum = (label, v) => `<div class="kv"><span>${esc(label)}</span><span>${v}</span></div>`;
       body = `<div class="card"><h2>Review</h2>
         <label class="field">Name <input id="wgbName" maxlength="80" value="${esc(build ? build.name : "WireGuard tunnel")}"></label>
@@ -5807,7 +5817,7 @@ async function wgbWizard(isNew, build, cands, orgs) {
           <div>${sum("Hub", `${esc(hub ? hub.name : "")} <span class="mono small">${esc(st.hub_iface)}</span>${st.hub_existing ? " (existing)" : " (new)"}`)}
             ${sum("Hub tunnel IP", `<span class="mono">${esc(st.hub_ip)}</span>`)}${sum("Public address", esc(st.endpoint || (hub && hub.wan_ip) || "—"))}
             ${sum("UDP port", st.hub_port)}${sum("Hub advertises", [...st.hub_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}</div>
-          <div>${sum("Client", `${esc(cl ? cl.name : "")} <span class="mono small">${esc(st.client_iface)}</span>`)}
+          <div>${sum("Client", `${esc(cl ? cl.name : "")} <span class="mono small">${esc(st.client_iface)}</span>${cOrg ? ` <span class="pill">${esc(cOrg)}</span>` : ""}`)}
             ${sum("Client tunnel IP", `<span class="mono">${esc(st.client_ip)}</span>`)}${sum("Routing", "Static routes")}
             ${sum("Client advertises", [...st.client_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}</div>
         </div>${overlapWarn()}
@@ -5825,7 +5835,7 @@ async function wgbWizard(isNew, build, cands, orgs) {
     $("wgbBack")?.addEventListener("click", () => { st.step--; draw(); });
     $("wgbNext")?.addEventListener("click", () => next());
     // step 1
-    $("wgbOrg")?.addEventListener("change", async (e) => { st.org_id = +e.target.value; st.hub_id = st.client_id = null; await loadCands(); draw(); });
+    $("wgbOrg")?.addEventListener("change", async (e) => { st.org_id = +e.target.value; st.client_org_id = st.org_id; st.hub_id = st.client_id = null; await loadCands(); ccands = cands; draw(); });
     const hubRows = $("wgbHubRows");
     if (hubRows) hubRows.innerHTML = cands.length ? cands.map((d) => wgbRouterRow(d, "H", st.hub_id)).join("") : `<tr><td colspan="2" class="muted">This client has no approved routers.</td></tr>`;
     document.querySelectorAll('[name="wgbH"]').forEach((r) => r.addEventListener("change", () => { st.hub_id = +r.value; }));
@@ -5834,8 +5844,9 @@ async function wgbWizard(isNew, build, cands, orgs) {
     if (st.step === 2) { drawHubIf(); if (st.hub_existing && hubIfaces === null) loadIfaces().then(drawHubIf); }
     $("wgbEp")?.addEventListener("input", (e) => { st.endpoint = e.target.value.trim(); });
     // step 3
+    $("wgbClientOrg")?.addEventListener("change", async (e) => { st.client_org_id = +e.target.value; st.client_id = null; await loadClientCands(); draw(); });
     const cliRows = $("wgbCliRows");
-    if (cliRows) cliRows.innerHTML = cands.filter((d) => d.id !== st.hub_id).map((d) => wgbRouterRow(d, "C", st.client_id)).join("") || `<tr><td colspan="2" class="muted">No other routers for this client.</td></tr>`;
+    if (cliRows) cliRows.innerHTML = ccands.filter((d) => !(st.client_org_id === st.org_id && d.id === st.hub_id)).map((d) => wgbRouterRow(d, "C", st.client_id)).join("") || `<tr><td colspan="2" class="muted">This client has no approved routers.</td></tr>`;
     document.querySelectorAll('[name="wgbC"]').forEach((r) => r.addEventListener("change", () => { st.client_id = +r.value; }));
     // step 4
     $("wgbCName")?.addEventListener("input", (e) => { st.client_iface = e.target.value.trim(); });
@@ -5930,17 +5941,17 @@ async function wgbStatus(build, cands) {
   const ro = !isTech();
   const hs = (v) => v == null ? "<span class='muted'>no handshake</span>" : v < 180 ? `<span class="status ok">handshake ${v}s ago</span>` : `<span class="status err">last handshake ${Math.round(v / 60)}m ago</span>`;
   $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p>
-    <div class="row"><h1>${esc(build.name)}</h1><span>${vpnPill(build.status)}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
+    <div class="row"><h1>${esc(build.name)}</h1><span id="wgbPill">${vpnPill(build.status)}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
     ${build.last_error ? `<div class="card"><p class="status err">${esc(build.last_error)}</p></div>` : ""}
     <div class="card"><h2>Tunnel</h2>
       <div class="grid2"><div><div class="kv"><span>Hub</span><span>${esc(build.hub || "")} <span class="mono small">${esc(build.hub_iface)}</span>${build.hub_iface_existing ? " (existing)" : ""}</span></div>
         <div class="kv"><span>Hub tunnel IP</span><span class="mono">${esc(build.hub_tunnel_ip || "")}</span></div>
         <div class="kv"><span>Public address</span><span>${esc(build.endpoint || "WAN IP")}</span></div>
-        <div class="kv"><span>Hub status</span><span>${hs(build.hub_hs)}</span></div></div>
-      <div><div class="kv"><span>Client</span><span>${esc(build.client || "")} <span class="mono small">${esc(build.client_iface)}</span></span></div>
+        <div class="kv"><span>Hub status</span><span id="wgbHubHs">${hs(build.hub_hs)}</span></div></div>
+      <div><div class="kv"><span>Client</span><span>${esc(build.client || "")} <span class="mono small">${esc(build.client_iface)}</span>${build.client_org && build.client_org !== build.org ? ` <span class="pill">${esc(build.client_org)}</span>` : ""}</span></div>
         <div class="kv"><span>Client tunnel IP</span><span class="mono">${esc(build.client_tunnel_ip || "")}</span></div>
         <div class="kv"><span>Routing</span><span>${build.routing === "bgp" ? "BGP" : "Static routes"}</span></div>
-        <div class="kv"><span>Client status</span><span>${hs(build.client_hs)}${build.ping_ms != null ? ` · ping ${Math.round(build.ping_ms)}ms` : ""}</span></div></div></div>
+        <div class="kv"><span>Client status</span><span id="wgbCliHs">${hs(build.client_hs)}${build.ping_ms != null ? ` · ping ${Math.round(build.ping_ms)}ms` : ""}</span></div></div></div>
       <div class="kv"><span>Hub advertises</span><span>${(build.hub_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
       <div class="kv"><span>Client advertises</span><span>${(build.client_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
       ${ro ? "" : `<div class="actions"><button class="btn primary" type="button" id="wgbEditBtn">Edit settings</button><button class="btn" type="button" id="wgbReapply">Re-apply</button>
@@ -5954,13 +5965,19 @@ async function wgbStatus(build, cands) {
     if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again to delete"; return; }
     try { const r = await post(`/api/wg-builds/${build.id}/delete`); if (r.deleted) go("wgbuild"); else say("Removing from the routers, then deleting…", true); } catch (err) { say(err.message); }
   });
-  // live refresh while applied
+  // live refresh while applied - update the status values in place so the page doesn't flicker, reset buttons or lose scroll
+  let cur = build;
   clearInterval(window._wgbTimer);
   window._wgbTimer = setInterval(async () => {
     if (view !== "wgbuild") { clearInterval(window._wgbTimer); return; }
-    try { const b = (await api(`/api/wg-builds/${build.id}`)).build; if (b.status !== build.status || b.hub_hs !== build.hub_hs || b.client_hs !== build.client_hs) wgbStatus(b, cands); }
-    catch { clearInterval(window._wgbTimer); }
-  }, 8000);
+    let b;
+    try { b = (await api(`/api/wg-builds/${cur.id}`)).build; } catch { clearInterval(window._wgbTimer); return; }
+    if (b.status !== cur.status) return wgbStatus(b, cands);   // status changed: buttons/pills/error block differ - full redraw
+    cur = b;
+    const pill = $("wgbPill"); if (pill) pill.innerHTML = `${vpnPill(b.status)}${b.up ? ` <span class="pill up-done">up</span>` : ""}`;
+    const hh = $("wgbHubHs"); if (hh) hh.innerHTML = hs(b.hub_hs);
+    const ch = $("wgbCliHs"); if (ch) ch.innerHTML = hs(b.client_hs) + (b.ping_ms != null ? ` · ping ${Math.round(b.ping_ms)}ms` : "");
+  }, 15000);
 }
 
 const NAV_ICONS = {

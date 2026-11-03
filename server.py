@@ -893,13 +893,15 @@ class Handler(BaseHTTPRequestHandler):
         # --- Wizards > WireGuard Builder (technicians) ---
         if path == "/api/wg-builds":   # every build with its live-ish status
             self.require(tech=True)
-            rows = db.q("""SELECT b.*, o.name AS org, h.name AS hub, c.name AS client FROM wg_builds b JOIN orgs o ON o.id = b.org_id
-                           LEFT JOIN devices h ON h.id = b.hub_device_id LEFT JOIN devices c ON c.id = b.client_device_id ORDER BY o.name, b.name""")
+            rows = db.q("""SELECT b.*, o.name AS org, h.name AS hub, c.name AS client, c.org_id AS client_org_id, co.name AS client_org
+                           FROM wg_builds b JOIN orgs o ON o.id = b.org_id LEFT JOIN devices h ON h.id = b.hub_device_id
+                           LEFT JOIN devices c ON c.id = b.client_device_id LEFT JOIN orgs co ON co.id = c.org_id ORDER BY o.name, b.name""")
             return self.json([self.wgb_row(b) for b in rows])
         if m := re.fullmatch(r"/api/wg-builds/(\d+)", path):
             self.require(tech=True)
-            b = db.one("""SELECT b.*, o.name AS org, h.name AS hub, c.name AS client FROM wg_builds b JOIN orgs o ON o.id = b.org_id
-                          LEFT JOIN devices h ON h.id = b.hub_device_id LEFT JOIN devices c ON c.id = b.client_device_id WHERE b.id=?""", (m.group(1),))
+            b = db.one("""SELECT b.*, o.name AS org, h.name AS hub, c.name AS client, c.org_id AS client_org_id, co.name AS client_org
+                          FROM wg_builds b JOIN orgs o ON o.id = b.org_id LEFT JOIN devices h ON h.id = b.hub_device_id
+                          LEFT JOIN devices c ON c.id = b.client_device_id LEFT JOIN orgs co ON co.id = c.org_id WHERE b.id=?""", (m.group(1),))
             if not b:
                 raise HttpError(404, "Build not found.")
             return self.json({"build": self.wgb_row(b), "candidates": self.vpn_candidates(b["org_id"], None)})
