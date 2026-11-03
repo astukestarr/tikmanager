@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.10 - 2026-11-03
+
+- **IPsec wizard: 1:1 NAT (netmap) for overlapping subnets.** On the Local subnets step you can now present a local
+  network to the far end as a **different** range. Two kinds: a **mapped subnet** (e.g. `192.168.0.0/24` seen as
+  `172.16.2.0/24`, host octet preserved so `.4` = `.4`), and **specific host mappings** (e.g. `172.16.0.5` =
+  `192.168.0.4`, with any unmapped address deliberately unreachable). TikManager writes the netmap NAT pair and points the
+  IPsec policy at the mapped range; the far-end settings sheet shows the mapped ranges (what the remote must use) plus the
+  real-address translations for your records.
+- **Name your tunnel up front.** The IPsec wizard now asks for a friendly tunnel name on the first step (e.g.
+  "Connection to Pepsi") instead of only on the last.
+
 ## 3.1.0-beta.9 - 2026-11-03
 
 - **IPsec wizard: more crypto control and a key you can see.** The Advanced section now also sets the **phase-1 and

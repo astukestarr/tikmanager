@@ -952,16 +952,32 @@ class RouterOS:
         self._req("PUT", "/ip/ipsec/peer", {"name": n, "address": cfg["remote_addr"], "profile": n,
                                             "exchange-mode": cfg["exchange"], "comment": tag})
         self._req("PUT", "/ip/ipsec/identity", {"peer": n, "auth-method": "pre-shared-key", "secret": cfg["psk"], "comment": tag})
-        for src in cfg["local_subnets"]:
-            for dst in cfg["remote_subnets"]:
-                self._req("PUT", "/ip/ipsec/policy", {"peer": n, "tunnel": "yes", "src-address": src, "dst-address": dst,
-                                                      "proposal": n, "action": "encrypt", "level": "unique", "comment": tag})
-        # NAT bypass: don't masquerade traffic between the two sites (accept, before the masquerade rule)
+        remotes = cfg["remote_subnets"]
         first_nat = next((r.get(".id") for r in self.optional(lambda: self.get("/ip/firewall/nat"), []) or [] if r.get("dynamic") != "true"), None)
+        place_nat = {"place-before": first_nat} if first_nat else {}
+        policy = lambda s, d: self._req("PUT", "/ip/ipsec/policy", {"peer": n, "tunnel": "yes", "src-address": s, "dst-address": d,
+                                                                    "proposal": n, "action": "encrypt", "level": "unique", "comment": tag})
+        nat = lambda body: self._req("PUT", "/ip/firewall/nat", {**body, "comment": tag, **place_nat})
+        # plain local subnets: one policy per pair + a NAT-bypass accept so the tunnel traffic isn't masqueraded
         for src in cfg["local_subnets"]:
-            for dst in cfg["remote_subnets"]:
-                self._req("PUT", "/ip/firewall/nat", {"chain": "srcnat", "action": "accept", "src-address": src, "dst-address": dst,
-                                                      "comment": tag, **({"place-before": first_nat} if first_nat else {})})
+            for dst in remotes:
+                policy(src, dst)
+                nat({"chain": "srcnat", "action": "accept", "src-address": src, "dst-address": dst})
+        # 1:1 NAT (netmap): the far end sees a MAPPED range; translate it to the real LAN both ways, and the policy uses the mapped range
+        for e in cfg.get("nat") or []:
+            if e["mode"] == "netmap":
+                real, mapped = e["real"], e["mapped"]
+                nat({"chain": "dstnat", "action": "netmap", "dst-address": mapped, "to-addresses": real})
+                for dst in remotes:
+                    policy(mapped, dst)
+                    nat({"chain": "srcnat", "action": "netmap", "src-address": real, "dst-address": dst, "to-addresses": mapped})
+            elif e["mode"] == "hosts":   # specific 1:1 host mappings; only the mapped addresses are reachable
+                for h in e["hosts"]:
+                    m, r = h["mapped"], h["real"]
+                    nat({"chain": "dstnat", "action": "netmap", "dst-address": m, "to-addresses": r})
+                    for dst in remotes:
+                        policy(f"{m}/32", dst)
+                        nat({"chain": "srcnat", "action": "netmap", "src-address": r, "dst-address": dst, "to-addresses": m})
         # firewall: let the far end reach IKE (UDP 500/4500) and ESP, at the top before any drop
         first = next((r.get(".id") for r in self.get("/ip/firewall/filter") or [] if r.get("dynamic") != "true"), None)
         src = {"src-address": cfg["remote_ip"]} if cfg.get("remote_ip") else {}   # only when the far end is an IP, not a DNS name

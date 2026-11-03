@@ -6117,9 +6117,12 @@ async function ipsecList() {
 async function ipsecWizard(isNew, build, cands, orgs) {
   const st = {
     id: build ? build.id : null, step: 1, adv: false,
+    name: build ? (build.name || "") : "",
     org_id: build ? build.org_id : (orgs[0] ? orgs[0].id : null),
     device_id: build ? build.device_id : null, remote_addr: build ? (build.remote_addr || "") : "",
     local_subnets: new Set(build ? build.local_subnets : []), remote_subnets: new Set(build ? build.remote_subnets : []),
+    nat_netmap: build ? (build.local_nat || []).filter((e) => e.mode === "netmap").map((e) => ({ real: e.real, mapped: e.mapped })) : [],
+    nat_hosts: build ? (((build.local_nat || []).find((e) => e.mode === "hosts") || { hosts: [] }).hosts || []).map((h) => ({ mapped: h.mapped, real: h.real })) : [],
     ike: build ? (build.ike || "ike2") : "ike2", psk: "",
     ...Object.fromEntries(["p1_enc", "p1_hash", "p1_dh", "p1_life", "p2_enc", "p2_auth", "pfs", "p2_life"].map((k) => [k, build && build[k] ? build[k] : IPSEC_DEF[k]])),
   };
@@ -6141,18 +6144,39 @@ async function ipsecWizard(isNew, build, cands, orgs) {
   const sel = (k, label) => `<label class="field">${esc(label)} <select data-crypto="${k}">${IPSEC_OPTS[k].map((o) =>
       `<option value="${o}" ${st[k] === o ? "selected" : ""}>${o === "none" ? "none (off)" : esc(o)}${k.endsWith("dh") || k === "pfs" ? (DH_GRP[o] ? ` (${DH_GRP[o]})` : "") : ""}</option>`).join("")}</select></label>`;
   const life = (k, label) => `<label class="field">${esc(label)} <input data-crypto="${k}" maxlength="20" value="${esc(st[k])}" placeholder="${esc(IPSEC_DEF[k])}"></label>`;
+  const natRow = (i, which, aKey, bKey, aPh, bPh) => `<div class="ip-natrow" data-which="${which}">
+      <input data-nat="${aKey}" data-i="${i}" value="${esc((which === "map" ? st.nat_netmap : st.nat_hosts)[i][aKey])}" placeholder="${aPh}">
+      <span>→</span><input data-nat="${bKey}" data-i="${i}" value="${esc((which === "map" ? st.nat_netmap : st.nat_hosts)[i][bKey])}" placeholder="${bPh}">
+      <button type="button" class="btn icon" data-natrm="${which}" data-i="${i}" aria-label="Remove">✕</button></div>`;
+  const drawNat = () => {
+    const m = $("ipNatMap"); if (m) m.innerHTML = st.nat_netmap.map((_, i) => natRow(i, "map", "real", "mapped", "192.168.0.0/24", "172.16.2.0/24")).join("");
+    const h = $("ipNatHost"); if (h) h.innerHTML = st.nat_hosts.map((_, i) => natRow(i, "host", "mapped", "real", "172.16.0.5", "192.168.0.4")).join("");
+    document.querySelectorAll("[data-nat]").forEach((inp) => inp.addEventListener("input", (e) => {
+      const arr = inp.closest(".ip-natrow").dataset.which === "map" ? st.nat_netmap : st.nat_hosts; arr[+inp.dataset.i][inp.dataset.nat] = e.target.value.trim();
+    }));
+    document.querySelectorAll("[data-natrm]").forEach((b) => b.addEventListener("click", () => {
+      (b.dataset.natrm === "map" ? st.nat_netmap : st.nat_hosts).splice(+b.dataset.i, 1); drawNat();
+    }));
+  };
 
   const draw = () => {
     let body = "";
     if (st.step === 1) {
       body = `<div class="card"><h2>Which MikroTik is the local end?</h2>
         <p class="small muted">TikManager configures this router; the far end is any other firewall you set up by hand.</p>
+        <label class="field">Tunnel name <input id="ipNameTop" maxlength="80" value="${esc(st.name)}" placeholder="e.g. Connection to Pepsi"></label>
         ${isNew ? `<label class="field">Client <select id="ipOrg">${allOrgs.map((o) => `<option value="${o.id}" ${o.id === st.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>` : `<div class="kv"><span>Client</span><span>${esc(build.org || "")}</span></div>`}
         <div class="table-wrap"><table><thead><tr><th>Use</th><th>Router</th></tr></thead><tbody id="ipRows"></tbody></table></div></div>`;
     } else if (st.step === 2) {
       const d = dev(st.device_id);
       body = `<div class="card"><h2>Local subnets on ${esc(d ? d.name : "")}</h2>
-        <p class="small muted">The networks on this side that should reach the far end (ticked are included).</p>${subPick(d, st.local_subnets, "local")}</div>`;
+        <p class="small muted">The networks on this side that should reach the far end (ticked are included). Leave all unticked if every local network is 1:1 NAT'd below.</p>${subPick(d, st.local_subnets, "local")}
+        <h3>1:1 NAT (optional)</h3>
+        <p class="small muted">Present a local network to the far end as a <b>different</b> range (for overlapping subnets). The far end uses the mapped range; the router translates 1:1 — host .4 maps to .4.</p>
+        <div class="ip-nat"><div class="small b">Mapped subnets <span class="muted">real → mapped (same size)</span></div><div id="ipNatMap"></div>
+          <button type="button" class="btn" id="ipNatMapAdd">Add mapped subnet</button></div>
+        <div class="ip-nat"><div class="small b">Specific host mappings <span class="muted">mapped IP → real IP (only these are reachable)</span></div><div id="ipNatHost"></div>
+          <button type="button" class="btn" id="ipNatHostAdd">Add host mapping</button></div></div>`;
     } else if (st.step === 3) {
       body = `<div class="card"><h2>The far end</h2>
         <label class="field">Remote public IP or DNS name <input id="ipRemote" maxlength="120" value="${esc(st.remote_addr)}" placeholder="203.0.113.10 or vpn.example.com"></label>
@@ -6171,8 +6195,11 @@ async function ipsecWizard(isNew, build, cands, orgs) {
       if (!st.id && !st.psk) st.psk = genPsk();   // a key is ready to copy as soon as you reach Review on a new tunnel
       const sum = (l, v) => `<div class="kv"><span>${esc(l)}</span><span>${v}</span></div>`;
       body = `<div class="card"><h2>Review</h2>
-        <label class="field">Name <input id="ipName" maxlength="80" value="${esc(build ? build.name : "IPsec tunnel")}"></label>
+        <label class="field">Name <input id="ipName" maxlength="80" value="${esc(st.name)}" placeholder="e.g. Connection to Pepsi"></label>
         <div class="grid2"><div>${sum("Local router", esc(d ? d.name : ""))}${sum("Local subnets", [...st.local_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}
+            ${(st.nat_netmap.some((e) => e.real && e.mapped) || st.nat_hosts.some((h) => h.mapped && h.real)) ? sum("1:1 NAT", [
+              ...st.nat_netmap.filter((e) => e.real && e.mapped).map((e) => `<span class="mono small">${esc(e.mapped)}=${esc(e.real)}</span>`),
+              ...st.nat_hosts.filter((h) => h.mapped && h.real).map((h) => `<span class="mono small">${esc(h.mapped)}=${esc(h.real)}</span>`)].join(" ")) : ""}
             ${sum("IKE", st.ike === "ike2" ? "IKEv2" : "IKEv1")}${sum("Phase 1", `${esc(st.p1_enc)} / ${esc(st.p1_hash)} / ${esc(st.p1_dh)} / ${esc(st.p1_life)}`)}</div>
           <div>${sum("Remote", esc(st.remote_addr))}${sum("Remote subnets", [...st.remote_subnets].map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—")}
             ${sum("PFS", st.pfs === "none" ? "off" : esc(st.pfs))}${sum("Phase 2", `${esc(st.p2_enc)} / ${esc(st.p2_auth)} / ${esc(st.p2_life)}`)}</div></div>
@@ -6195,6 +6222,10 @@ async function ipsecWizard(isNew, build, cands, orgs) {
     if (rows) rows.innerHTML = cands.length ? cands.map((d) => `<tr><td><input type="radio" name="ipDev" value="${d.id}" ${st.device_id === d.id ? "checked" : ""} aria-label="${esc(d.name)}"></td>
       <td><b>${esc(d.name)}</b> <span class="dot ${d.online ? "on" : "off"}"></span><div class="small muted">${esc(d.model || "")} · WAN <span class="mono">${esc(d.wan_ip || "—")}</span> · ${(d.networks || []).length} subnets</div></td></tr>`).join("") : `<tr><td colspan="2" class="muted">This client has no approved routers.</td></tr>`;
     document.querySelectorAll('[name="ipDev"]').forEach((r) => r.addEventListener("change", () => { st.device_id = +r.value; }));
+    $("ipNameTop")?.addEventListener("input", (e) => { st.name = e.target.value; });
+    if (st.step === 2) drawNat();
+    $("ipNatMapAdd")?.addEventListener("click", () => { st.nat_netmap.push({ real: "", mapped: "" }); drawNat(); });
+    $("ipNatHostAdd")?.addEventListener("click", () => { st.nat_hosts.push({ mapped: "", real: "" }); drawNat(); });
     $("ipRemote")?.addEventListener("input", (e) => { st.remote_addr = e.target.value.trim(); });
     document.querySelectorAll('[name="ipIke"]').forEach((r) => r.addEventListener("change", () => { st.ike = r.value; }));
     $("ipAdvBtn")?.addEventListener("click", () => { st.adv = !st.adv; draw(); });
@@ -6208,7 +6239,7 @@ async function ipsecWizard(isNew, build, cands, orgs) {
       if (!ipsecSubnet(i.value)) { $("ipNav").textContent = "Enter a subnet like 10.20.0.0/24."; return; }
       (i.dataset.iadd === "local" ? st.local_subnets : st.remote_subnets).add(i.value.trim()); draw();
     }));
-    $("ipName")?.addEventListener("input", (e) => { if (build) build.name = e.target.value; });
+    $("ipName")?.addEventListener("input", (e) => { st.name = e.target.value; });
     $("ipSaveBtn")?.addEventListener("click", () => save(false));
     $("ipApply")?.addEventListener("click", () => save(true));
   };
@@ -6216,7 +6247,8 @@ async function ipsecWizard(isNew, build, cands, orgs) {
   const next = () => {
     const nav = (m) => { $("ipNav").textContent = m; };
     if (st.step === 1 && !st.device_id) return nav("Pick the local router.");
-    if (st.step === 2 && !st.local_subnets.size) return nav("Add at least one local subnet.");
+    if (st.step === 2 && !st.local_subnets.size && !st.nat_netmap.some((e) => e.real && e.mapped) && !st.nat_hosts.some((h) => h.mapped && h.real))
+      return nav("Add at least one local subnet, or a 1:1 NAT mapping.");
     if (st.step === 3 && !st.remote_addr) return nav("Enter the far end's public IP or DNS name.");
     if (st.step === 3 && !st.remote_subnets.size) return nav("Add at least one remote subnet.");
     st.step++; draw();
@@ -6224,12 +6256,16 @@ async function ipsecWizard(isNew, build, cands, orgs) {
 
   const save = async (apply) => {
     try {
+      const local_nat = [
+        ...st.nat_netmap.filter((e) => e.real && e.mapped).map((e) => ({ mode: "netmap", real: e.real, mapped: e.mapped })),
+        ...(st.nat_hosts.filter((h) => h.mapped && h.real).length ? [{ mode: "hosts", hosts: st.nat_hosts.filter((h) => h.mapped && h.real).map((h) => ({ mapped: h.mapped, real: h.real })) }] : []),
+      ];
       await post("/api/ipsec-builds", {
-        id: st.id, org_id: st.org_id, name: $("ipName") ? $("ipName").value : (build ? build.name : "IPsec tunnel"),
+        id: st.id, org_id: st.org_id, name: (st.name || "").trim() || "IPsec tunnel",
         device_id: st.device_id, remote_addr: st.remote_addr, ike: st.ike, psk: st.psk,
         p1_enc: st.p1_enc, p1_hash: st.p1_hash, p1_dh: st.p1_dh, p1_life: st.p1_life,
         p2_enc: st.p2_enc, p2_auth: st.p2_auth, pfs: st.pfs, p2_life: st.p2_life,
-        local_subnets: [...st.local_subnets], remote_subnets: [...st.remote_subnets], apply });
+        local_subnets: [...st.local_subnets], remote_subnets: [...st.remote_subnets], local_nat, apply });
       ipsecEdit = false;
       go("ipsec");   // back to the tunnel list
     } catch (e) { say(e.message); }
@@ -6237,16 +6273,29 @@ async function ipsecWizard(isNew, build, cands, orgs) {
   draw();
 }
 
+function ipsecAdvertised(b) {   // what the far end sees as the networks behind the MikroTik (real subnets + any 1:1-NAT mapped ranges)
+  const out = [...(b.local_subnets || [])];
+  (b.local_nat || []).forEach((e) => {
+    if (e.mode === "netmap") out.push(e.mapped);
+    else if (e.mode === "hosts") (e.hosts || []).forEach((h) => out.push(h.mapped + "/32"));
+  });
+  return out;
+}
 function ipsecSheet(b) {   // the parameter sheet for the far-end firewall (written from its point of view)
   const dh = (v) => `${v}${DH_GRP[v] ? ` (${DH_GRP[v]})` : ""}`;
-  return [
+  const rows = [
     ["Peer / remote gateway", b.device_wan || "the MikroTik's public IP"],
     ["IKE version", b.ike === "ike2" ? "IKEv2" : "IKEv1"],
     ["Phase 1 (IKE)", `${b.p1_enc} · ${b.p1_hash} · DH ${dh(b.p1_dh)} · lifetime ${b.p1_life || "1d"}`],
     ["Phase 2 (ESP)", `${b.p2_enc} · ${b.p2_auth} · PFS ${b.pfs === "none" ? "off" : dh(b.pfs)} · lifetime ${b.p2_life || "30m"}`],
     ["Their local subnets", (b.remote_subnets || []).join(", ") || "—"],
-    ["Their remote subnets (behind the MikroTik)", (b.local_subnets || []).join(", ") || "—"],
+    ["Their remote subnets (behind the MikroTik)", ipsecAdvertised(b).join(", ") || "—"],
   ];
+  (b.local_nat || []).forEach((e) => {
+    if (e.mode === "netmap") rows.push(["1:1 NAT (for your records)", `${e.mapped} on the tunnel = ${e.real} real`]);
+    else if (e.mode === "hosts") (e.hosts || []).forEach((h) => rows.push(["1:1 host NAT", `${h.mapped} = ${h.real} real`]));
+  });
+  return rows;
 }
 
 async function ipsecStatus(build, cands) {
@@ -6258,6 +6307,7 @@ async function ipsecStatus(build, cands) {
     <div class="card"><h2>Tunnel</h2>
       <div class="grid2"><div><div class="kv"><span>Local router</span><span>${esc(build.device || "")}</span></div>
         <div class="kv"><span>Local subnets</span><span>${(build.local_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
+        ${(build.local_nat || []).length ? `<div class="kv"><span>1:1 NAT</span><span>${(build.local_nat || []).flatMap((e) => e.mode === "netmap" ? [`${e.mapped}=${e.real}`] : (e.hosts || []).map((h) => `${h.mapped}=${h.real}`)).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ")}</span></div>` : ""}
         <div class="kv"><span>IPsec state</span><span id="ipState">${stText}</span></div></div>
       <div><div class="kv"><span>Remote</span><span class="mono">${esc(build.remote_addr || "")}</span></div>
         <div class="kv"><span>Remote subnets</span><span>${(build.remote_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>

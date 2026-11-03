@@ -410,6 +410,7 @@ class Handler(BaseHTTPRequestHandler):
         b = dict(b)
         b["local_subnets"] = json.loads(b.get("local_subnets") or "[]")
         b["remote_subnets"] = json.loads(b.get("remote_subnets") or "[]")
+        b["local_nat"] = json.loads(b.get("local_nat") or "[]")
         b["up"] = b["status"] == "active" and b.get("peer_state") == "established"
         b["busy"] = b["id"] in ipsecbuilds.busy
         b.pop("psk_blob", None)
@@ -2302,7 +2303,7 @@ class Handler(BaseHTTPRequestHandler):
                      "ike": str(b.get("ike") or "ike2").strip(),
                      "local_subnets": [str(n) for n in (b.get("local_subnets") or [])][:50],
                      "remote_subnets": [str(n) for n in (b.get("remote_subnets") or [])][:50],
-                     "psk": str(b.get("psk") or "").strip()[:128],
+                     "local_nat": (b.get("local_nat") or [])[:50], "psk": str(b.get("psk") or "").strip()[:128],
                      **{k: str(b.get(k) or "").strip()[:40] or None for k in ("p1_enc", "p1_hash", "p1_dh", "p1_life", "p2_enc", "p2_auth", "pfs", "p2_life")}}
             try:
                 bid = ipsecbuilds.save(int(b["id"]) if b.get("id") else None, build, s["email"])

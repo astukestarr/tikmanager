@@ -44,6 +44,14 @@ def as_ip(s):
         return None
 
 
+def host_ip(s):
+    """A single IP address (for a 1:1 host mapping), or raise."""
+    try:
+        return str(ipaddress.ip_address(str(s).strip()))
+    except ValueError:
+        raise IpsecError(f"{s!r} isn't a valid IP address.") from None
+
+
 def tag_for(build_id):
     return f"{IPSEC_TAG} #{build_id}"
 
@@ -67,12 +75,15 @@ class IpsecBuilds:
             raise IpsecError("Enter the far end's public IP address or DNS name.")
         local = self._subnets(b.get("local_subnets") or [], "local")
         far = self._subnets(b.get("remote_subnets") or [], "remote")
-        if not local or not far:
-            raise IpsecError("Add at least one local subnet and one remote subnet.")
-        for a in local:
+        if not far:
+            raise IpsecError("Add at least one remote subnet.")
+        nat, advertised = self._nat(b.get("local_nat") or [], local, far)   # 1:1 NAT; advertised = what the far end sees (policy src)
+        if not advertised:
+            raise IpsecError("Add at least one local subnet, or a 1:1 NAT mapping.")
+        for a in advertised:   # nothing advertised to the far end may collide with its subnets
             for c in far:
                 if a.overlaps(c):
-                    raise IpsecError(f"{a} (local) overlaps {c} (remote) - the two ends need different subnets.")
+                    raise IpsecError(f"{a} (seen by the far end) overlaps {c} (remote) - they must be different ranges.")
         ike = (b.get("ike") or "ike2").strip()
         if ike not in ("ike2", "ike"):
             raise IpsecError("IKE version must be IKEv2 or IKEv1.")
@@ -83,8 +94,39 @@ class IpsecBuilds:
         for k in ("p1_life", "p2_life"):   # a RouterOS time string, e.g. 8h, 1d, 30m, 1h30m
             if not re.fullmatch(r"(\d+[smhdw])+|\d+", crypto[k]):
                 raise IpsecError(f"Lifetime {crypto[k]!r} isn't valid - use a time like 8h, 1d or 30m.")
-        return {"device": d, "remote": remote, "ike": ike,
+        return {"device": d, "remote": remote, "ike": ike, "nat": nat,
                 "local": [str(n) for n in local], "far": [str(n) for n in far], **crypto}
+
+    def _nat(self, raw, local, far):
+        """Validate the 1:1 NAT entries. Returns (normalized nat list, advertised networks) - advertised is what the far
+        end negotiates/sees: the plain local subnets plus every mapped subnet and mapped host /32."""
+        nat, advertised = [], list(local)
+        for e in raw:
+            mode = (e.get("mode") or "").strip()
+            if mode == "netmap":
+                real, mapped = net(e.get("real")), net(e.get("mapped"))
+                if real.prefixlen != mapped.prefixlen:
+                    raise IpsecError(f"1:1 NAT: the real ({real}) and mapped ({mapped}) subnets must be the same size.")
+                for p in local:
+                    if mapped.overlaps(p):
+                        raise IpsecError(f"1:1 NAT: the mapped subnet {mapped} overlaps your local subnet {p} - pick a free range.")
+                nat.append({"mode": "netmap", "real": str(real), "mapped": str(mapped)})
+                advertised.append(mapped)
+            elif mode == "hosts":
+                hosts, seen = [], set()
+                for h in e.get("hosts") or []:
+                    m, r = host_ip(h.get("mapped")), host_ip(h.get("real"))
+                    if m in seen:
+                        raise IpsecError(f"1:1 NAT: the mapped address {m} is listed twice.")
+                    seen.add(m)
+                    hosts.append({"mapped": m, "real": r})
+                    advertised.append(ipaddress.ip_network(m + "/32"))
+                if not hosts:
+                    raise IpsecError("A 1:1 NAT host mapping needs at least one address pair.")
+                nat.append({"mode": "hosts", "hosts": hosts})
+            else:
+                raise IpsecError("Unknown 1:1 NAT mode.")
+        return nat, advertised
 
     def _subnets(self, raw, who):
         out = []
@@ -105,7 +147,7 @@ class IpsecBuilds:
         psk = (b.get("psk") or "").strip()   # the tech can set the key in the wizard; blank keeps the existing one (edit) or auto-generates (new)
         fields = (b["org_id"], b.get("name") or "IPsec tunnel", v["device"]["id"], v["remote"], v["ike"],
                   v["p1_enc"], v["p1_hash"], v["p1_dh"], v["p1_life"], v["p2_enc"], v["p2_auth"], v["pfs"], v["p2_life"],
-                  json.dumps(v["local"]), json.dumps(v["far"]))
+                  json.dumps(v["local"]), json.dumps(v["far"]), json.dumps(v["nat"]))
         if build_id:
             row = self.db.one("SELECT * FROM ipsec_builds WHERE id=?", (build_id,))
             if not row or row["org_id"] != b["org_id"]:
@@ -113,14 +155,14 @@ class IpsecBuilds:
             if row["id"] in self.busy:
                 raise IpsecError("This tunnel is being applied right now - try again in a minute.")
             self.db.run("""UPDATE ipsec_builds SET org_id=?, name=?, device_id=?, remote_addr=?, ike=?, p1_enc=?, p1_hash=?,
-                           p1_dh=?, p1_life=?, p2_enc=?, p2_auth=?, pfs=?, p2_life=?, local_subnets=?, remote_subnets=?, updated_at=? WHERE id=?""",
+                           p1_dh=?, p1_life=?, p2_enc=?, p2_auth=?, pfs=?, p2_life=?, local_subnets=?, remote_subnets=?, local_nat=?, updated_at=? WHERE id=?""",
                         (*fields, now, build_id))
             if psk:
                 self._seal_psk(build_id, psk)
             return build_id
         bid = self.db.run("""INSERT INTO ipsec_builds (org_id, name, device_id, remote_addr, ike, p1_enc, p1_hash, p1_dh, p1_life,
-                             p2_enc, p2_auth, pfs, p2_life, local_subnets, remote_subnets, created_by, created_at, updated_at)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (*fields, user, now, now))
+                             p2_enc, p2_auth, pfs, p2_life, local_subnets, remote_subnets, local_nat, created_by, created_at, updated_at)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (*fields, user, now, now))
         self._seal_psk(bid, psk or secrets.token_urlsafe(24))   # the wizard supplies a key; fall back to a strong random one
         return bid
 
@@ -157,7 +199,7 @@ class IpsecBuilds:
                    "p1": {"enc": row["p1_enc"], "hash": row["p1_hash"], "dh": row["p1_dh"], "life": row["p1_life"]},
                    "p2": {"enc": row["p2_enc"], "auth": row["p2_auth"], "pfs": row["pfs"], "life": row["p2_life"]},
                    "local_subnets": json.loads(row["local_subnets"]), "remote_subnets": json.loads(row["remote_subnets"]),
-                   "psk": self.reveal_psk(build_id) or ""}
+                   "nat": json.loads(row["local_nat"] or "[]"), "psk": self.reveal_psk(build_id) or ""}
             self.client_for(d).ipsec_apply(cfg, tag)
             self.db.run("UPDATE ipsec_builds SET status='active', last_error=NULL, last_applied=? WHERE id=?", (time.time(), build_id))
             self.db.event(d["id"], d["org_id"], "ipsec tunnel applied", f"{row['name']} -> {row['remote_addr']}")
