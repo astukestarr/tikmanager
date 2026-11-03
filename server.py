@@ -917,6 +917,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"interfaces": poller.client(d).wg_list()})
             except RouterError as e:
                 raise HttpError(502, f"Couldn't read {d['name']}: {e}")
+        if m := re.fullmatch(r"/api/devices/(\d+)/bgp", path):   # the router's existing BGP AS, to prefill the wizard
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if not d["online"]:
+                return self.json({"as": None})
+            try:
+                return self.json({"as": poller.client(d).bgp_existing_as()})
+            except RouterError:
+                return self.json({"as": None})
         # --- scripts, groups, tasks (technicians) ---
         if path == "/api/scripts":
             self.require(tech=True)
@@ -2227,7 +2236,9 @@ class Handler(BaseHTTPRequestHandler):
                      "client_iface": str(b.get("client_iface") or "").strip()[:60], "client_tunnel_ip": str(b.get("client_tunnel_ip") or "").strip(),
                      "port": int(b.get("port") or 13232), "endpoint": str(b.get("endpoint") or "").strip()[:120],
                      "hub_subnets": [str(n) for n in (b.get("hub_subnets") or [])][:50], "client_subnets": [str(n) for n in (b.get("client_subnets") or [])][:50],
-                     "routing": str(b.get("routing") or "static").strip()}
+                     "routing": str(b.get("routing") or "static").strip(), "bgp_type": str(b.get("bgp_type") or "").strip() or None,
+                     "hub_as": int(b.get("hub_as")) if str(b.get("hub_as") or "").strip() else None,
+                     "client_as": int(b.get("client_as")) if str(b.get("client_as") or "").strip() else None}
             try:
                 bid = wgbuilds.save(int(b["id"]) if b.get("id") else None, build, s["email"])
             except (WgError, KeyError, TypeError, ValueError) as e:

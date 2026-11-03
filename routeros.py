@@ -839,8 +839,10 @@ class RouterOS:
 
     def wgb_apply(self, name, cfg, tag, create_iface):
         """One side of a build. cfg: {address?, port, peer: {public-key, allowed: [...], endpoint?, port?}, routes: [...],
-        open_port: bool}. create_iface makes/keeps the interface (hub-new / client); when False (existing hub interface)
-        the interface, its address and listen-port are left exactly as they are. Everything added carries `tag`."""
+        open_port: bool, bgp?: {local_as, remote_as, role, list_name, networks, local_addr, peer_addr}}. create_iface
+        makes/keeps the interface (hub-new / client); when False (existing hub interface) the interface, its address and
+        listen-port are left as they are. With `bgp` the routing layer is BGP (no static routes); otherwise static routes
+        from `routes`. Everything added carries `tag`."""
         self.wgb_clear(tag, name, remove_interface=False)
         if create_iface:
             self.wg_ensure(name, cfg["port"], tag=tag)
@@ -857,21 +859,46 @@ class RouterOS:
                 self._req("PUT", "/interface/wireguard/peers", body)
         else:
             self._req("PUT", "/interface/wireguard/peers", body)
-        for dst in cfg["routes"]:
-            self._req("PUT", "/ip/route", {"dst-address": dst, "gateway": name, "comment": tag})
+        bgp = cfg.get("bgp")
+        if not bgp:   # static routing: a route to each remote subnet via the tunnel
+            for dst in cfg["routes"]:
+                self._req("PUT", "/ip/route", {"dst-address": dst, "gateway": name, "comment": tag})
         # firewall: accept rules at the top, before whatever drop rules the router already has
         first = next((r.get(".id") for r in self.get("/ip/firewall/filter") or [] if r.get("dynamic") != "true"), None)
         rules = ([{"chain": "input", "protocol": "udp", "dst-port": str(cfg["port"])}] if cfg.get("open_port") else []) + [
             {"chain": "input", "in-interface": name, "protocol": "icmp"},
             {"chain": "forward", "in-interface": name}, {"chain": "forward", "out-interface": name}]
+        if bgp:   # BGP rides the tunnel as TCP 179 to the router
+            rules.append({"chain": "input", "in-interface": name, "protocol": "tcp", "dst-port": "179"})
         for r in rules:
             self._req("PUT", "/ip/firewall/filter", {**r, "action": "accept", "comment": tag, **({"place-before": first} if first else {})})
+        if bgp:   # BGP routing (modeled on the client's real iBGP fabric: a shared instance, output.network -> address-list)
+            for netw in bgp["networks"]:   # advertise our subnets via an address-list the connection originates (v7 has no 'network' statement)
+                self._req("PUT", "/ip/firewall/address-list", {"list": bgp["list_name"], "address": netw, "comment": tag})
+            if bgp.get("create_instance"):   # a router has one BGP AS; reuse an existing instance, else make one shared instance (never per-build)
+                self._req("PUT", "/routing/bgp/instance", {"name": bgp["instance"], "as": str(bgp["local_as"]),
+                                                           "router-id": bgp["local_addr"], "comment": WGB_TAG})
+            conn = {"name": bgp["conn_name"], "instance": bgp["instance"], "as": str(bgp["local_as"]), "remote.as": str(bgp["remote_as"]),
+                    "local.role": bgp["role"], "local.address": bgp["local_addr"], "remote.address": f"{bgp['peer_addr']}/32",
+                    "address-families": "ip", "output.network": bgp["list_name"], "routing-table": "main",
+                    "connect": "yes", "listen": "yes", "comment": tag}
+            if bgp.get("filters"):   # per-build safety filters: advertise only our own subnets; accept only private ranges
+                out_c, in_c = bgp["out_chain"], bgp["in_chain"]
+                self._req("PUT", "/routing/filter/rule", {"chain": out_c, "rule": f"if (dst in {bgp['list_name']}) {{ accept }}", "comment": tag})
+                self._req("PUT", "/routing/filter/rule", {"chain": out_c, "rule": "reject", "comment": tag})
+                for pr in ("192.168.0.0/16", "172.16.0.0/12", "10.0.0.0/8"):
+                    self._req("PUT", "/routing/filter/rule", {"chain": in_c, "rule": f"if (dst in {pr} && dst-len <= 24) {{ accept }}", "comment": tag})
+                self._req("PUT", "/routing/filter/rule", {"chain": in_c, "rule": "reject", "comment": tag})
+                conn.update({"output.filter-chain": out_c, "input.filter": in_c})
+            self._req("PUT", "/routing/bgp/connection", conn)
 
     def wgb_clear(self, tag, name, remove_interface=False):
-        """Remove every peer, route, address and firewall rule this build added (matched by its exact `tag` comment);
-        optionally the interface too, but only if the builder created it (its comment is the build's tag)."""
+        """Remove every object this build added (matched by its exact `tag` comment): BGP connection and filter rules,
+        firewall rules and address-list, static routes, the peer and the address; optionally the interface too, but only
+        if the builder created it. The shared BGP instance is left alone - other tunnels may use it and an empty one is harmless."""
         q = urllib.parse.quote(tag)
-        for menu in ("/ip/firewall/filter", "/ip/route", "/interface/wireguard/peers", "/ip/address"):
+        for menu in ("/routing/bgp/connection", "/routing/filter/rule", "/ip/firewall/filter", "/ip/firewall/address-list",
+                     "/ip/route", "/interface/wireguard/peers", "/ip/address"):
             for r in self.optional(lambda menu=menu: self.get(f"{menu}?comment={q}"), []) or []:
                 if r.get("comment") == tag:
                     self._req("DELETE", f"{menu}/{r['.id']}")
@@ -879,6 +906,23 @@ class RouterOS:
             for r in self.get(f"/interface/wireguard?name={urllib.parse.quote(name)}") or []:
                 if r.get("comment") == tag:   # never delete an interface someone made by hand (or the hub's existing one)
                     self._req("DELETE", f"/interface/wireguard/{r['.id']}")
+
+    def bgp_instance(self):
+        """The router's existing BGP instance as {name, as}, or None. A router has one AS, so the builder reuses this
+        instance (and its AS) rather than configuring a second one."""
+        for r in self.optional(lambda: self.get("/routing/bgp/instance"), []) or []:
+            if r.get("name"):
+                return {"name": r["name"], "as": r.get("as")}
+        return None
+
+    def bgp_existing_as(self):
+        """The first BGP AS already configured on this router (instance or connection), or None - for the wizard's prefill
+        so it reuses an existing AS instead of configuring a conflicting one."""
+        for menu in ("/routing/bgp/instance", "/routing/bgp/connection"):
+            for r in self.optional(lambda menu=menu: self.get(menu), []) or []:
+                if r.get("as"):
+                    return r["as"]
+        return None
 
     # --- remote access (remoteaccess.py) - everything carries RA_TAG, so it can be removed exactly -----------------------
     def ra_setup(self, name, cfg):
@@ -1307,12 +1351,17 @@ class SimRouter:
                            "defaults": [{"gateway": "203.0.113.1", "distance": "1", "kind": "static", "table": "main"}]}}
 
     def bgp_sessions(self):
-        if self.id % 2:
-            return []
-        core_up = not (self.id == 4 and int(time.time() // 300) % 2)
-        out = [{"name": "isp-a-1", "remote.address": "203.0.113.1", "remote.as": "64500", "established": "true", "uptime": "3d2h", "prefix-count": "1"}]
-        if core_up:
-            out.append({"name": "core-1", "remote.address": "10.10.7.100", "remote.as": "65001", "established": "true", "uptime": "41m", "prefix-count": "12"})
+        out = []
+        if self.id % 2 == 0:
+            core_up = not (self.id == 4 and int(time.time() // 300) % 2)
+            out = [{"name": "isp-a-1", "remote.address": "203.0.113.1", "remote.as": "64500", "established": "true", "uptime": "3d2h", "prefix-count": "1"}]
+            if core_up:
+                out.append({"name": "core-1", "remote.address": "10.10.7.100", "remote.as": "65001", "established": "true", "uptime": "41m", "prefix-count": "12"})
+        for tag, b in (self._sim().get("wgb") or {}).items():   # WireGuard Builder tunnels using BGP
+            bg = (b.get("cfg") or {}).get("bgp")
+            if bg:
+                out.append({"name": b["iface"], "remote.address": bg["peer_addr"], "remote.as": str(bg["remote_as"]),
+                            "established": "true", "uptime": "5m", "prefix-count": str(len(bg.get("networks") or []))})
         return out
 
     def https_setup(self, tm_ip):
@@ -1679,6 +1728,12 @@ class SimRouter:
 
     def wgb_clear(self, tag, name, remove_interface=False):
         (self._sim().get("wgb") or {}).pop(tag, None)
+
+    def bgp_existing_as(self):
+        return None   # simulated routers have no pre-existing BGP, so the wizard exercises the create-new path
+
+    def bgp_instance(self):
+        return None
 
     def ra_setup(self, name, cfg):
         time.sleep(0.3)

@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS wg_builds (               -- WireGuard Builder wizard
   client_iface TEXT, client_tunnel_ip TEXT, client_pubkey TEXT,
   tunnel_net TEXT, endpoint TEXT, port INTEGER NOT NULL DEFAULT 13232,
   hub_subnets TEXT NOT NULL DEFAULT '[]', client_subnets TEXT NOT NULL DEFAULT '[]',
-  routing TEXT NOT NULL DEFAULT 'static',
+  routing TEXT NOT NULL DEFAULT 'static',            -- static / bgp
+  bgp_type TEXT, hub_as INTEGER, client_as INTEGER, bgp_state TEXT,   -- BGP routing: ebgp / ibgp, the AS on each side, live session state
   status TEXT NOT NULL DEFAULT 'draft',              -- draft / applying / active / failed / disabled
   last_error TEXT, hub_hs INTEGER, client_hs INTEGER, ping_ms REAL, checked_at REAL,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL, last_applied REAL
@@ -332,6 +333,11 @@ class DB:
             c.execute("ALTER TABLE ra_sessions ADD COLUMN flag TEXT")
         if "sessions" in tables and "as_user_id" not in {r[1] for r in c.execute("PRAGMA table_info(sessions)")}:
             c.execute("ALTER TABLE sessions ADD COLUMN as_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
+        if "wg_builds" in tables:
+            wcols = {r[1] for r in c.execute("PRAGMA table_info(wg_builds)")}
+            for col, ddl in (("bgp_type", "TEXT"), ("hub_as", "INTEGER"), ("client_as", "INTEGER"), ("bgp_state", "TEXT")):
+                if col not in wcols:
+                    c.execute(f"ALTER TABLE wg_builds ADD COLUMN {col} {ddl}")
         if "upgrades" in tables:
             ucols = {r[1] for r in c.execute("PRAGMA table_info(upgrades)")}
             for col, ddl in (("seq", "INTEGER"), ("sequential", "INTEGER NOT NULL DEFAULT 0"), ("max_fail", "INTEGER"), ("pin_version", "TEXT")):

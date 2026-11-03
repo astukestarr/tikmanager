@@ -106,8 +106,24 @@ class WgBuilds:
             raise WgError("Choose at least one subnet for one of the ends to reach over the tunnel.")
 
         routing = (b.get("routing") or "static").strip()
-        if routing != "static":
-            raise WgError("BGP routing isn't available yet - choose Static routes.")
+        if routing not in ("static", "bgp"):
+            raise WgError("Routing must be static or BGP.")
+        bgp = None
+        if routing == "bgp":
+            bgp_type = (b.get("bgp_type") or "ebgp").strip()
+            if bgp_type not in ("ebgp", "ibgp"):
+                raise WgError("BGP type must be eBGP or iBGP.")
+            try:
+                hub_as = int(b.get("hub_as") or 0)
+                client_as = int(b.get("client_as") or 0) if bgp_type == "ebgp" else hub_as
+            except (TypeError, ValueError):
+                raise WgError("AS numbers must be whole numbers.") from None
+            for a in (hub_as, client_as):
+                if not 1 <= a <= 4294967295:
+                    raise WgError("AS numbers must be 1-4294967295 (private ranges: 64512-65534, or 4200000000-4294967294).")
+            if bgp_type == "ebgp" and hub_as == client_as:
+                raise WgError("eBGP needs a different AS on each side - pick iBGP if both ends should share one AS.")
+            bgp = {"type": bgp_type, "hub_as": hub_as, "client_as": client_as}
 
         ep = (b.get("endpoint") or "").strip()
         if not ep:
@@ -121,7 +137,8 @@ class WgBuilds:
                           "(IP > Cloud) and forward the UDP port to it, or pick a different hub.")
         return {"hub": hub, "client": client, "hub_name": hub_name, "client_name": client_name,
                 "hub_ip": str(hub_ip), "client_ip": str(client_ip), "prefix": prefix, "tunnel_net": str(tunnel_net),
-                "port": port, "endpoint": ep, "hub_subs": [str(n) for n in hub_subs], "client_subs": [str(n) for n in client_subs]}
+                "port": port, "endpoint": ep, "hub_subs": [str(n) for n in hub_subs], "client_subs": [str(n) for n in client_subs],
+                "routing": routing, "bgp": bgp}
 
     def _subnets(self, raw, who, tunnel_net):
         out = []
@@ -148,9 +165,11 @@ class WgBuilds:
     def save(self, build_id, b, user):
         v = self.validate(b)
         now = time.time()
+        bgp = v["bgp"]
         fields = (b["org_id"], b.get("name") or "WireGuard tunnel", v["hub"]["id"], v["hub_name"], 1 if b.get("hub_iface_existing") else 0,
                   v["hub_ip"], b.get("hub_pubkey") or None, v["client"]["id"], v["client_name"], v["client_ip"], v["tunnel_net"],
-                  v["endpoint"], v["port"], json.dumps(v["hub_subs"]), json.dumps(v["client_subs"]), "static")
+                  v["endpoint"], v["port"], json.dumps(v["hub_subs"]), json.dumps(v["client_subs"]), v["routing"],
+                  bgp["type"] if bgp else None, bgp["hub_as"] if bgp else None, bgp["client_as"] if bgp else None)
         if build_id:
             row = self.db.one("SELECT * FROM wg_builds WHERE id=?", (build_id,))
             if not row or row["org_id"] != b["org_id"]:
@@ -159,12 +178,12 @@ class WgBuilds:
                 raise WgError("This build is being applied right now - try again in a minute.")
             self.db.run("""UPDATE wg_builds SET org_id=?, name=?, hub_device_id=?, hub_iface=?, hub_iface_existing=?, hub_tunnel_ip=?,
                            hub_pubkey=COALESCE(?, hub_pubkey), client_device_id=?, client_iface=?, client_tunnel_ip=?, tunnel_net=?,
-                           endpoint=?, port=?, hub_subnets=?, client_subnets=?, routing=?, updated_at=? WHERE id=?""",
+                           endpoint=?, port=?, hub_subnets=?, client_subnets=?, routing=?, bgp_type=?, hub_as=?, client_as=?, updated_at=? WHERE id=?""",
                         (*fields, now, build_id))
             return build_id
         return self.db.run("""INSERT INTO wg_builds (org_id, name, hub_device_id, hub_iface, hub_iface_existing, hub_tunnel_ip, hub_pubkey,
                               client_device_id, client_iface, client_tunnel_ip, tunnel_net, endpoint, port, hub_subnets, client_subnets, routing,
-                              created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                              bgp_type, hub_as, client_as, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                            (*fields, user, now, now))
 
     # --- applying ---------------------------------------------------------------------------------------------
@@ -186,7 +205,7 @@ class WgBuilds:
                  "hub_pubkey": row["hub_pubkey"], "client_device_id": row["client_device_id"], "client_iface": row["client_iface"],
                  "client_tunnel_ip": f"{row['client_tunnel_ip']}/{net(row['tunnel_net']).prefixlen}", "port": row["port"],
                  "endpoint": row["endpoint"], "hub_subnets": json.loads(row["hub_subnets"]), "client_subnets": json.loads(row["client_subnets"]),
-                 "routing": row["routing"]}
+                 "routing": row["routing"], "bgp_type": row["bgp_type"], "hub_as": row["hub_as"], "client_as": row["client_as"]}
             v = self.validate(b)
             hub, client = v["hub"], v["client"]
             offline = [d["name"] for d in (hub, client) if not d["online"]]
@@ -211,16 +230,39 @@ class WgBuilds:
                 raise WgError("A router didn't report its WireGuard public key - try applying again.")
 
             prefix = v["prefix"]
-            # hub: peer = the client (its tunnel /32 + its subnets), routes to the client's subnets, the UDP port open
+            # BGP (optional): eBGP/iBGP over the tunnel instead of static routes - each side advertises its own subnets.
+            # Modeled on the client's fabric: a shared per-router instance (reused if present), output.network -> address-list,
+            # hub = route reflector for iBGP so spokes see each other; per-build safety filters.
+            bg = v["bgp"]
+            hub_bgp = client_bgp = None
+            if bg:
+                common = {"list_name": f"tm-wg-{build_id}", "filters": True,
+                          "out_chain": f"tm-wg-{build_id}-out", "in_chain": f"tm-wg-{build_id}-in"}
+                hub_inst, cli_inst = hub_cl.bgp_instance(), client_cl.bgp_instance()
+                as_of = lambda inst, dflt: int(inst["as"]) if inst and str(inst.get("as") or "").isdigit() else dflt
+                hub_as, cli_as = as_of(hub_inst, bg["hub_as"]), as_of(cli_inst, bg["client_as"])
+                if bg["type"] == "ibgp":   # one shared AS: prefer an existing instance's AS (a router has a single AS)
+                    hub_as = cli_as = (as_of(hub_inst, None) or as_of(cli_inst, None) or bg["hub_as"])
+                hub_role = "ebgp" if bg["type"] == "ebgp" else "ibgp-rr"   # hub reflects routes between spokes
+                cli_role = "ebgp" if bg["type"] == "ebgp" else "ibgp"
+                hub_bgp = {**common, "local_as": hub_as, "remote_as": cli_as, "role": hub_role,
+                           "networks": v["hub_subs"], "local_addr": v["hub_ip"], "peer_addr": v["client_ip"],
+                           "conn_name": f"tm-wg-{build_id}-{client['name'].replace(' ', '-')}"[:40],
+                           "instance": hub_inst["name"] if hub_inst else "tikmanager-bgp", "create_instance": not hub_inst}
+                client_bgp = {**common, "local_as": cli_as, "remote_as": hub_as, "role": cli_role,
+                              "networks": v["client_subs"], "local_addr": v["client_ip"], "peer_addr": v["hub_ip"],
+                              "conn_name": f"tm-wg-{build_id}-{hub['name'].replace(' ', '-')}"[:40],
+                              "instance": cli_inst["name"] if cli_inst else "tikmanager-bgp", "create_instance": not cli_inst}
+            # hub: peer = the client (its tunnel /32 + its subnets), routes/BGP to the client's subnets, the UDP port open
             hub_cl.wgb_apply(v["hub_name"], {
                 "address": None if row["hub_iface_existing"] else f"{v['hub_ip']}/{prefix}", "port": v["port"],
                 "peer": {"public-key": client_pub, "name": client["name"], "allowed": [f"{v['client_ip']}/32"] + v["client_subs"]},
-                "routes": v["client_subs"], "open_port": True}, tag, create_iface=not row["hub_iface_existing"])
-            # client: peer = the hub (the tunnel network + the hub's subnets, with the hub's public endpoint), routes to them
+                "routes": v["client_subs"], "open_port": True, "bgp": hub_bgp}, tag, create_iface=not row["hub_iface_existing"])
+            # client: peer = the hub (the tunnel network + the hub's subnets, with the hub's public endpoint), routes/BGP to them
             client_cl.wgb_apply(v["client_name"], {
                 "address": f"{v['client_ip']}/{prefix}", "port": v["port"],
                 "peer": {"public-key": hub_pub, "name": hub["name"], "allowed": [v["tunnel_net"]] + v["hub_subs"], "endpoint": v["endpoint"], "port": v["port"]},
-                "routes": v["hub_subs"], "open_port": False}, tag, create_iface=True)
+                "routes": v["hub_subs"], "open_port": False, "bgp": client_bgp}, tag, create_iface=True)
 
             self.db.run("UPDATE wg_builds SET status='active', last_error=NULL, hub_pubkey=?, client_pubkey=?, last_applied=? WHERE id=?",
                         (hub_pub, client_pub, time.time(), build_id))
@@ -300,8 +342,18 @@ class WgBuilds:
                             pass
             except RouterError:
                 pass
-        self.db.run("UPDATE wg_builds SET hub_hs=?, client_hs=?, ping_ms=?, checked_at=? WHERE id=?",
-                    (hub_hs, client_hs, ping, time.time(), build_id))
+        bgp_state = None
+        if row["routing"] == "bgp":   # read the BGP session on the hub (matched to the client's tunnel address)
+            hub_d = self.db.one("SELECT * FROM devices WHERE id=?", (row["hub_device_id"],)) if row["hub_device_id"] else None
+            if hub_d and hub_d["online"]:
+                try:
+                    s = next((x for x in self.client_for(hub_d).bgp_sessions()
+                              if str(x.get("remote.address") or "").split("/")[0] == row["client_tunnel_ip"]), None)
+                    bgp_state = ("established" if str(s.get("established")) in ("true", "yes") else (s.get("state") or "idle")) if s else "down"
+                except RouterError:
+                    pass
+        self.db.run("UPDATE wg_builds SET hub_hs=?, client_hs=?, ping_ms=?, bgp_state=?, checked_at=? WHERE id=?",
+                    (hub_hs, client_hs, ping, bgp_state, time.time(), build_id))
 
     def loop(self):
         while True:

@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.3 - 2026-11-03
+
+- **BGP routing in the WireGuard Builder.** On the Routing step you can now choose **BGP** instead of static routes, and
+  pick **eBGP** (a different AS per side, the default for joining two sites) or **iBGP** (one shared AS) - with an info
+  button explaining the difference. The wizard writes real RouterOS 7 BGP: it reuses the router's existing BGP instance
+  and AS when there is one (so it slots into an existing fabric) or creates a shared `tikmanager-bgp` instance, advertises
+  the chosen subnets via `output.network` + a firewall address-list, and for iBGP makes the **hub a route reflector** so
+  spokes can reach each other. Each build also gets its own safety route-filters (advertise only your own subnets; accept
+  only private ranges). BGP peers over the tunnel addresses; the tunnel still only passes the listed subnets. Removal
+  takes out the connection, filters and address-list but leaves the shared instance in place.
+- **"Router Wizard" landing.** The sidebar entry is now **Router Wizard** (same icon) and opens a page of tiles, one per
+  wizard, with the WireGuard Builder as the first. More wizards will appear here as tiles.
+
 ## 3.1.0-beta.2 - 2026-11-03
 
 - **WireGuard Builder: peers are now named after the router on the other end.** Each tunnel's peer shows the remote

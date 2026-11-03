@@ -271,6 +271,23 @@ fieldset.up-when { border: 1px solid var(--border); border-radius: 10px; padding
 .wgb-steps li.done::before { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .wgb-choice { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 12px; }
 .wgb-soon { opacity: .6; }
+.wgb-bgptype { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 4px 0 10px; }
+.wgb-bgptype .b { font-weight: 600; }
+.info-btn { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); color: var(--muted);
+  font-size: 11px; font-style: italic; font-weight: 700; line-height: 1; cursor: pointer; padding: 0; }
+.info-btn:hover { color: var(--accent); border-color: var(--accent); }
+.info-pop { border: 1px solid var(--border); background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px;
+  font-size: 12px; line-height: 1.5; max-width: 60ch; }
+/* Router Wizard landing tiles */
+.wiz-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-top: 10px; }
+.wiz-tile { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 8px; padding: 18px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.wiz-tile:hover { border-color: var(--accent); }
+.wiz-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wiz-ico { width: 30px; height: 30px; color: var(--accent); }
+.wiz-ico svg { width: 30px; height: 30px; }
+.wiz-name { font-size: 15px; font-weight: 600; }
+.wiz-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
 .tabs + #vpnBody { margin-top: 12px; }
 .cw-types { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0; }
 

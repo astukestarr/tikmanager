@@ -119,16 +119,19 @@ SLIDES_1_46 = [
              "is understood everywhere."},
 ]
 SLIDES_3_1 = [
-    {"id": "wizards", "title": "A Wizards section", "img": "wgbuild", "view": "wgbuild", "who": "tech",
-     "text": "A new Wizards group in the sidebar for guided, step-by-step jobs. The first wizard is the WireGuard Builder - more "
-             "will follow."},
+    {"id": "wizards", "title": "Router Wizard", "img": "wgbuild", "view": "wizards", "who": "tech",
+     "text": "A new Router Wizard in the sidebar: a page of tiles for guided, step-by-step jobs on your routers. The first is the "
+             "WireGuard Builder - more will follow."},
     {"id": "wg-builder", "title": "WireGuard Builder", "img": None, "view": "wgbuild", "who": "tech",
      "text": "Wizards > WireGuard Builder connects two of a client's routers with a point-to-point tunnel, step by step: pick a hub "
              "(a brand-new interface or one that's already on the router), a client router, the tunnel addresses, and the subnets "
              "each end should reach - including downstream subnets behind another router. Both routers are backed up first."},
     {"id": "wg-builder-managed", "title": "Tracked and removable", "img": None, "view": "wgbuild", "who": "tech",
      "text": "Each tunnel you build is listed with its live handshake status, and everything the wizard writes on a router is tagged, "
-             "so one click removes exactly what it added and nothing made by hand. Static routing for now; BGP is coming."},
+             "so one click removes exactly what it added and nothing made by hand."},
+    {"id": "wg-builder-bgp", "title": "Static routes or BGP", "img": None, "view": "wgbuild", "who": "tech",
+     "text": "Choose how the tunnel routes: static routes, or BGP (eBGP or iBGP) where the two routers peer and exchange routes "
+             "dynamically. BGP reuses a router's existing AS when it has one, so a new tunnel slots into an existing fabric."},
 ]
 SLIDES = SLIDES_3_1
 IDS = {s["id"] for s in SLIDES}
