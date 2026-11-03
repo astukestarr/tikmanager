@@ -5743,6 +5743,8 @@ async function wgbList() {
       </tbody></table></div>` : `<p class="muted">No tunnels yet.${isTech() ? " Click New build to create one." : ""}</p>`}</div>`;
   $("wgbNew")?.addEventListener("click", () => go("wgbuild", "new"));
   document.querySelectorAll("[data-wgb]").forEach((r) => r.addEventListener("click", () => go("wgbuild", r.dataset.wgb)));
+  clearTimeout(window._wgbListT);   // while a tunnel is applying, refresh the list so its status updates on its own
+  if (rows.some((b) => b.status === "applying")) window._wgbListT = setTimeout(() => { if (location.hash === "#wgbuild") wgbList(); }, 3000);
 }
 
 const WGB_STEPS = ["Hub router", "Hub interface", "Client router", "Client interface", "Routing", "Review"];
@@ -6107,6 +6109,8 @@ async function ipsecList() {
       </tbody></table></div>` : `<p class="muted">No IPsec tunnels yet.${isTech() ? " Click New tunnel to create one." : ""}</p>`}</div>`;
   $("ipNew")?.addEventListener("click", () => go("ipsec", "new"));
   document.querySelectorAll("[data-ip]").forEach((r) => r.addEventListener("click", () => go("ipsec", r.dataset.ip)));
+  clearTimeout(window._ipsecListT);   // while a tunnel is applying, refresh the list so its status updates on its own
+  if (rows.some((b) => b.status === "applying")) window._ipsecListT = setTimeout(() => { if (location.hash === "#ipsec") ipsecList(); }, 3000);
 }
 
 async function ipsecWizard(isNew, build, cands, orgs) {

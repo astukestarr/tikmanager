@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.7 - 2026-11-03
+
+- **The tunnel list now refreshes itself while a tunnel is applying**, in both the WireGuard Builder and the IPsec
+  Tunnel. After Apply you land on the list and the status updates on its own from "Applying..." to Active or Needs
+  attention - no more manual refresh to find out what happened.
+
 ## 3.1.0-beta.6 - 2026-11-03
 
 - **Wizards return to the tunnel list after Apply and Delete** instead of sitting on the review/status screen (both the
