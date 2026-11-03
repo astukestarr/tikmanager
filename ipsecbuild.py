@@ -177,7 +177,7 @@ class IpsecBuilds:
                 d = self.db.one("SELECT * FROM devices WHERE id=?", (row["device_id"],)) if row["device_id"] else None
                 if d:
                     try:
-                        self.client_for(d).ipsec_clear(tag)
+                        self.client_for(d).ipsec_clear(tag, f"tm-ipsec-{build_id}")
                     except RouterError as e:
                         err = str(e)
                 if delete and not err:

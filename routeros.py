@@ -938,12 +938,13 @@ class RouterOS:
         """Configure the local MikroTik side of a policy-based IPsec tunnel. cfg: {name, remote_addr, remote_ip, exchange,
         p1:{enc,hash,dh}, p2:{enc,auth,pfs}, local_subnets:[...], remote_subnets:[...], psk}. The far end (any brand) is
         configured by hand from the wizard's parameter sheet. Everything added carries comment=tag."""
-        self.ipsec_clear(tag)
         n = cfg["name"]
+        self.ipsec_clear(tag, n)
+        # profile and proposal have no comment field in RouterOS - they're identified by their (TikManager-specific) name
         self._req("PUT", "/ip/ipsec/profile", {"name": n, "dh-group": cfg["p1"]["dh"], "enc-algorithm": cfg["p1"]["enc"],
-                                               "hash-algorithm": cfg["p1"]["hash"], "nat-traversal": "yes", "comment": tag})
+                                               "hash-algorithm": cfg["p1"]["hash"], "nat-traversal": "yes"})
         self._req("PUT", "/ip/ipsec/proposal", {"name": n, "auth-algorithms": cfg["p2"]["auth"], "enc-algorithms": cfg["p2"]["enc"],
-                                                "pfs-group": cfg["p2"]["pfs"], "comment": tag})
+                                                "pfs-group": cfg["p2"]["pfs"]})
         self._req("PUT", "/ip/ipsec/peer", {"name": n, "address": cfg["remote_addr"], "profile": n,
                                             "exchange-mode": cfg["exchange"], "comment": tag})
         self._req("PUT", "/ip/ipsec/identity", {"peer": n, "auth-method": "pre-shared-key", "secret": cfg["psk"], "comment": tag})
@@ -964,15 +965,20 @@ class RouterOS:
             self._req("PUT", "/ip/firewall/filter", {"chain": "input", "action": "accept", **r, **src, "comment": tag,
                                                      **({"place-before": first} if first else {})})
 
-    def ipsec_clear(self, tag):
-        """Remove every object this IPsec build added, matched by its exact comment tag (policy/identity first, then the
-        peer, proposal and profile they reference, plus the firewall and NAT rules)."""
+    def ipsec_clear(self, tag, name=None):
+        """Remove every object this IPsec build added. Policy/identity/peer and the firewall rules carry the comment tag;
+        the profile and proposal have no comment field, so they're matched by `name` (tm-ipsec-<id>). Order matters:
+        policy and identity reference the peer; the peer references the profile; the policy references the proposal."""
         q = urllib.parse.quote(tag)
-        for menu in ("/ip/ipsec/policy", "/ip/ipsec/identity", "/ip/ipsec/peer", "/ip/ipsec/proposal", "/ip/ipsec/profile",
-                     "/ip/firewall/nat", "/ip/firewall/filter"):
+        for menu in ("/ip/ipsec/policy", "/ip/ipsec/identity", "/ip/ipsec/peer", "/ip/firewall/nat", "/ip/firewall/filter"):
             for r in self.optional(lambda menu=menu: self.get(f"{menu}?comment={q}"), []) or []:
                 if r.get("comment") == tag:
                     self._req("DELETE", f"{menu}/{r['.id']}")
+        if name:
+            for menu in ("/ip/ipsec/proposal", "/ip/ipsec/profile"):
+                for r in self.optional(lambda menu=menu: self.get(f"{menu}?name={urllib.parse.quote(name)}"), []) or []:
+                    if r.get("name") == name:
+                        self._req("DELETE", f"{menu}/{r['.id']}")
 
     def ipsec_status(self, remote_ip):
         """The live state of the IPsec tunnel to remote_ip (from /ip/ipsec/active-peers): 'established' etc., or None."""
@@ -1799,7 +1805,7 @@ class SimRouter:
         time.sleep(0.3)
         self._sim().setdefault("ipsec", {})[tag] = cfg
 
-    def ipsec_clear(self, tag):
+    def ipsec_clear(self, tag, name=None):
         (self._sim().get("ipsec") or {}).pop(tag, None)
 
     def ipsec_status(self, remote_ip):

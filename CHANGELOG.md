@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.8 - 2026-11-03
+
+- **Fix: IPsec tunnels failed to apply** with *"unknown parameter comment"*. The IPsec profile and proposal menus have no
+  comment field in RouterOS, so the wizard no longer tags them - it identifies them by their (TikManager-specific) name
+  instead, and removes them that way. Re-apply any IPsec tunnel that landed in "Needs attention".
+
 ## 3.1.0-beta.7 - 2026-11-03
 
 - **The tunnel list now refreshes itself while a tunnel is applying**, in both the WireGuard Builder and the IPsec
