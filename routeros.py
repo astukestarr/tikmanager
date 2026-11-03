@@ -880,7 +880,7 @@ class RouterOS:
                                                            "router-id": bgp["local_addr"], "comment": WGB_TAG})
             conn = {"name": bgp["conn_name"], "instance": bgp["instance"], "as": str(bgp["local_as"]), "remote.as": str(bgp["remote_as"]),
                     "local.role": bgp["role"], "local.address": bgp["local_addr"], "remote.address": f"{bgp['peer_addr']}/32",
-                    "address-families": "ip", "output.network": bgp["list_name"], "routing-table": "main",
+                    "output.network": bgp["list_name"], "routing-table": "main",   # address-families defaults to ip; RouterOS REST rejects it as an explicit parameter
                     "connect": "yes", "listen": "yes", "comment": tag}
             if bgp.get("filters"):   # per-build safety filters: advertise only our own subnets; accept only private ranges
                 out_c, in_c = bgp["out_chain"], bgp["in_chain"]

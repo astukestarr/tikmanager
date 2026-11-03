@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.4 - 2026-11-03
+
+- **Fix: BGP tunnels failed to apply** with *"unknown parameter address-families"* on RouterOS 7.24/7.25. The BGP
+  connection no longer sends `address-families` (it defaults to `ip`, and RouterOS rejects it as an explicit REST
+  parameter). Re-apply any BGP tunnel that landed in "Needs attention" after upgrading.
+
 ## 3.1.0-beta.3 - 2026-11-03
 
 - **BGP routing in the WireGuard Builder.** On the Routing step you can now choose **BGP** instead of static routes, and
