@@ -1828,7 +1828,11 @@ class Handler(BaseHTTPRequestHandler):
                     tags.append(x)
             notes = str(b.get("notes") or "")[:4000]
             kind_o = b.get("kind") if b.get("kind") in DEVICE_KINDS else None
-            db.run("UPDATE devices SET tags=?, notes=?, kind_override=? WHERE id=?", (json.dumps(tags[:20]) if tags else None, notes, kind_o, d["id"]))
+            pt = str(b.get("ping_target") or "").strip()[:100]
+            if pt and not re.fullmatch(r"[A-Za-z0-9.:_-]{1,100}", pt):
+                raise HttpError(400, "The latency target is an IP address or host name.")
+            db.run("UPDATE devices SET tags=?, notes=?, kind_override=?, ping_target=? WHERE id=?",
+                   (json.dumps(tags[:20]) if tags else None, notes, kind_o, pt or None, d["id"]))
             db.audit(s["email"], "router tags / notes", d["name"], self.client_ip(), detail=f"tags: {', '.join(tags) or '-'}", org_id=d["org_id"])
             return self.json({"ok": True, "tags": tags[:20]})
         if m := re.fullmatch(r"/api/devices/(\d+)/isp", path):   # which interfaces are the router's internet links ([] = automatic)

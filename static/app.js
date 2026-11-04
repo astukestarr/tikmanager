@@ -541,19 +541,29 @@ const CONSOLE_CMDS = [
   ["DNS", "/ip dns print"], ["Services", "/ip service print"], ["WireGuard peers", "/interface wireguard peers print"],
   ["BGP sessions", "/routing bgp session print"], ["Ping 1.1.1.1", "/ping 1.1.1.1 count=4"], ["Recent logs", "/log print"],
 ];
+const conHistory = {};   // per-device command history, kept while the app is open
 function consoleTab(d) {
   const out = $("conOut"), cmd = $("conCmd"), form = $("conForm");
   if (!form) return;
+  const hist = conHistory[d.id] = conHistory[d.id] || [];
+  let hi = hist.length;   // points past the end; ↑ walks back
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const c = cmd.value.trim();
     if (!c) return;
+    if (hist[hist.length - 1] !== c) hist.push(c);
+    hi = hist.length;
     out.textContent += `[${d.name}] > ${c}\n`;
     cmd.value = ""; cmd.disabled = true;
     try { const r = await post(`/api/devices/${d.id}/console`, { command: c }); out.textContent += (r.output && r.output.trim() ? r.output.replace(/\s+$/, "") : "(no output)") + "\n\n"; }
     catch (err) { out.textContent += "error: " + err.message + "\n\n"; }
     cmd.disabled = false; cmd.focus(); out.scrollTop = out.scrollHeight;
   });
+  cmd.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp" && hi > 0) { e.preventDefault(); hi--; cmd.value = hist[hi]; cmd.setSelectionRange(cmd.value.length, cmd.value.length); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); hi = Math.min(hist.length, hi + 1); cmd.value = hi < hist.length ? hist[hi] : ""; }
+  });
+  $("conClear")?.addEventListener("click", () => { out.textContent = ""; cmd.focus(); });
   document.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click", () => { cmd.value = b.dataset.cmd; form.requestSubmit(); }));
   cmd.focus();
 }
@@ -681,6 +691,8 @@ async function router(id) {
         <label class="field">Notes (technicians only - clients don't see them) <textarea id="mNotes" rows="4" maxlength="4000">${esc(d.notes || "")}</textarea></label>
         <label class="field">Device type <select id="mKind"><option value="">Automatic (${esc(KIND_LABEL[d.kind] || "Router")} from its model)</option>
           ${Object.entries(KIND_LABEL).map(([k, l]) => `<option value="${k}" ${d.kind_override === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">Latency target <input id="mPing" value="${esc(d.ping_target || "")}" placeholder="blank = the global default (Admin &gt; Settings)" spellcheck="false" maxlength="100">
+          <span class="small muted">The address this router pings for its latency/packet-loss figure. Override it when the router can't reach the global target (e.g. a switch with no internet - point it at its gateway).</span></label>
         <div class="actions"><button class="btn primary" type="button" id="mSave">Save</button><span class="status" id="mMetaStatus"></span></div></div>` : ""}
       ${adopted && tab === "settings" && canWrite() ? ispSettings(d) : ""}
       ${adopted && tab === "settings" && canWrite() ? `<div class="card"><h2>Management connection</h2>
@@ -717,8 +729,8 @@ async function router(id) {
         <p class="small muted">Runs one RouterOS command at a time through TikManager's limited router user and shows the output - it's a command runner, not an interactive shell (no prompts, Safe Mode or editors). Every command is logged. For a full interactive session use Winbox.</p>
         <div class="console-cmds">${CONSOLE_CMDS.map((c) => `<button type="button" class="cmd-chip" data-cmd="${esc(c[1])}" title="${esc(c[1])}">${esc(c[0])}</button>`).join("")}</div>
         <pre class="console-out" id="conOut" aria-live="polite"></pre>
-        <form id="conForm" class="row"><input id="conCmd" class="mono console-in" placeholder="/system resource print" spellcheck="false" autocomplete="off" autocapitalize="off">
-          <button class="btn primary" type="submit">Run</button></form></div>` : ""}
+        <form id="conForm" class="row"><input id="conCmd" class="mono console-in" placeholder="/system resource print — ↑/↓ for history" spellcheck="false" autocomplete="off" autocapitalize="off">
+          <button class="btn primary" type="submit">Run</button><button class="btn" type="button" id="conClear">Clear</button></form></div>` : ""}
     </section>
   </div>`;
   setBars($("main"));
@@ -773,7 +785,7 @@ async function router(id) {
     api("/api/devices").then((all) => { $("mTagList").innerHTML = [...new Set(all.flatMap((x) => x.tags || []))].map((t) => `<option value="${esc(t)}">`).join(""); }).catch(() => {});
     $("mSave").addEventListener("click", async () => {
       try {
-        await post(`/api/devices/${d.id}/meta`, { tags: $("mTags").value.split(",").map((x) => x.trim()).filter(Boolean), notes: $("mNotes").value, kind: $("mKind").value });
+        await post(`/api/devices/${d.id}/meta`, { tags: $("mTags").value.split(",").map((x) => x.trim()).filter(Boolean), notes: $("mNotes").value, kind: $("mKind").value, ping_target: $("mPing").value.trim() });
         refreshNavCounts();
         router(d.id);
       } catch (e) { $("mMetaStatus").textContent = e.message; $("mMetaStatus").className = "status err"; }

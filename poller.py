@@ -220,7 +220,7 @@ class Poller:
         has_net = bool(st.get("wan_ip")) or any(i.get("default_route") for i in (st.get("interfaces") or []))
         if has_net and hasattr(cl, "ping"):
             try:
-                latency, loss = cl.ping(getattr(self.s, "ping_target", "") or "1.1.1.1")
+                latency, loss = cl.ping(d.get("ping_target") or getattr(self.s, "ping_target", "") or "1.1.1.1")
             except RouterError:
                 latency, loss = None, None
         else:

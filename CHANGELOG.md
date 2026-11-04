@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.4.0-beta.3 - 2026-11-04
+
+- **Per-router latency target.** A router's **Settings** tab now has a "Latency target" field that overrides the global
+  ping target just for that router - useful when a router can't reach the global target (e.g. a switch with no internet:
+  point it at its gateway). Blank keeps the global default.
+- **Console: history and clear.** Up/Down arrow recalls previous commands (kept per router while the app is open), and a
+  **Clear** button empties the output. (Interactive shell access stays in Winbox.)
+
 ## 3.4.0-beta.2 - 2026-11-04
 
 - **Console: common command chips.** The Console page now has one-click chips for common read-only RouterOS commands
