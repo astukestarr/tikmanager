@@ -2304,6 +2304,7 @@ class Handler(BaseHTTPRequestHandler):
                      "local_subnets": [str(n) for n in (b.get("local_subnets") or [])][:50],
                      "remote_subnets": [str(n) for n in (b.get("remote_subnets") or [])][:50],
                      "local_nat": (b.get("local_nat") or [])[:50], "psk": str(b.get("psk") or "").strip()[:128],
+                     **{k: str(b.get(k) or "").strip()[:120] for k in ("my_id_type", "my_id", "remote_id_type", "remote_id")},
                      **{k: str(b.get(k) or "").strip()[:40] or None for k in ("p1_enc", "p1_hash", "p1_dh", "p1_life", "p2_enc", "p2_auth", "pfs", "p2_life")}}
             try:
                 bid = ipsecbuilds.save(int(b["id"]) if b.get("id") else None, build, s["email"])

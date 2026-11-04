@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS ipsec_builds (            -- IPsec Tunnel wizard: a M
   p1_enc TEXT, p1_hash TEXT, p1_dh TEXT, p1_life TEXT, p2_enc TEXT, p2_auth TEXT, pfs TEXT, p2_life TEXT,   -- phase-1 / phase-2 crypto + lifetimes
   local_subnets TEXT NOT NULL DEFAULT '[]', remote_subnets TEXT NOT NULL DEFAULT '[]',
   local_nat TEXT NOT NULL DEFAULT '[]',             -- 1:1 NAT (netmap): [{mode:netmap, real, mapped} | {mode:hosts, hosts:[{mapped, real}]}]
+  my_id_type TEXT, my_id TEXT, remote_id_type TEXT, remote_id TEXT,   -- IKE identities (My ID / Remote ID) - needed when behind NAT
   psk_blob BLOB, psk_alg TEXT,                      -- the pre-shared key, sealed by vault.py; never stored or listed in plain text
   status TEXT NOT NULL DEFAULT 'draft',             -- draft / applying / active / failed / disabled
   last_error TEXT, peer_state TEXT, checked_at REAL,
@@ -353,7 +354,8 @@ class DB:
                     c.execute(f"ALTER TABLE wg_builds ADD COLUMN {col} {ddl}")
         if "ipsec_builds" in tables:
             icols = {r[1] for r in c.execute("PRAGMA table_info(ipsec_builds)")}
-            for col, ddl in (("p1_life", "TEXT"), ("p2_life", "TEXT"), ("local_nat", "TEXT NOT NULL DEFAULT '[]'")):
+            for col, ddl in (("p1_life", "TEXT"), ("p2_life", "TEXT"), ("local_nat", "TEXT NOT NULL DEFAULT '[]'"),
+                             ("my_id_type", "TEXT"), ("my_id", "TEXT"), ("remote_id_type", "TEXT"), ("remote_id", "TEXT")):
                 if col not in icols:
                     c.execute(f"ALTER TABLE ipsec_builds ADD COLUMN {col} {ddl}")
         if "upgrades" in tables:

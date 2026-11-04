@@ -7,6 +7,16 @@ and link() points each tunnel's remote address at the TikManager router that own
 "Existing VPNs" page shows which sites already talk to each other. TikManager's own tunnels are left out.
 """
 import json
+import re
+
+WIZ_RE = re.compile(r"TikManager (IPsec|WG) #(\d+)")
+
+
+def wiz(comment):
+    """If a tunnel object's comment is a Router Wizard tag, return {view, id} to link back to its wizard page, else None."""
+    m = WIZ_RE.match(str(comment or ""))
+    return {"view": "ipsec" if m.group(1) == "IPsec" else "wgbuild", "id": int(m.group(2))} if m else None
+
 
 # what "Reconnect" may touch: only these menus, only an entry the inventory saw (routeros.RouterOS.tunnel_reconnect)
 RECONNECT_MENUS = {"/interface/wireguard/peers", "/ip/ipsec/active-peers", "/interface/l2tp-client", "/interface/sstp-client",
@@ -66,7 +76,7 @@ def normalize(raw):
                     "status": state, "since": f"handshake {age}s ago" if age is not None else "never connected",
                     "networks": nets, "rx": int(p.get("rx") or 0), "tx": int(p.get("tx") or 0),
                     "notes": "Built by TikManager (managed VPNs are turned off for now - left running as it is)" if built
-                             else "" if p.get("endpoint-address") else "remote end connects in", "iface": iface,
+                             else "" if p.get("endpoint-address") else "remote end connects in", "iface": iface, "wizard": wiz(p.get("comment")),
                     "rid": None if built else rid("/interface/wireguard/peers", {"interface": iface, "allowed-address": p.get("allowed-address") or ""})})
 
     # IPsec: one row per peer, with its policies (the subnets it carries) and whether phase 1/2 are up
@@ -94,6 +104,7 @@ def normalize(raw):
                     "status": state, "since": f"up {a.get('uptime')}" if a and a.get("uptime") else "",
                     "networks": [f"{p.get('src-address')} ↔ {p.get('dst-address')}" for p in pol],
                     "rx": int((a or {}).get("rx-bytes") or 0), "tx": int((a or {}).get("tx-bytes") or 0), "notes": "; ".join(notes),
+                    "wizard": wiz(peer.get("comment")),
                     "rid": rid("/ip/ipsec/active-peers", {"remote": remote}) if remote not in ("0.0.0.0", "::", "") else None})
 
     # dial-out clients and plain tunnels

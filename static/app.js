@@ -5453,7 +5453,7 @@ function tunnelState(s) {
 const tunPill = (st) => `<span class="pill ${{ up: "up-done", down: "up-failed", listening: "up-run", disabled: "up-cancelled" }[st] || ""}">${esc({ up: "Up", down: "Down", listening: "Listening", disabled: "Disabled" }[st] || st)}</span>`;
 function tunnelRows(list, showRouter) {
   return list.map(({ r, t }) => `<tr>${showRouter ? `<td><a href="#router/${r.id}">${esc(r.name)}</a> <span class="dot ${r.online ? "on" : "off"}"></span></td>` : ""}
-    <td class="nowrap">${esc(t.kind)}</td><td>${esc(t.name)}</td>
+    <td class="nowrap">${esc(t.kind)}</td><td>${esc(t.name)}${t.wizard ? ` <a class="pill wiz-link" href="#${t.wizard.view}/${t.wizard.id}" title="Created by the Router Wizard - open it">wizard ↗</a>` : ""}</td>
     <td class="small">${t.peer ? `<a href="#router/${t.peer.id}"><b>${esc(t.peer.name)}</b></a>${t.peer.org && showRouter && t.peer.org !== r.org ? ` <span class="muted">(${esc(t.peer.org)})</span>` : ""}<div class="mono muted">${esc(t.remote)}</div>`
       : `<span class="mono">${esc(t.remote || "—")}</span>`}</td>
     <td>${tunPill(t.status)}${t.since ? `<div class="small muted">${esc(t.since)}</div>` : ""}</td>
@@ -6124,6 +6124,8 @@ async function ipsecWizard(isNew, build, cands, orgs) {
     nat_netmap: build ? (build.local_nat || []).filter((e) => e.mode === "netmap").map((e) => ({ real: e.real, mapped: e.mapped })) : [],
     nat_hosts: build ? (((build.local_nat || []).find((e) => e.mode === "hosts") || { hosts: [] }).hosts || []).map((h) => ({ mapped: h.mapped, real: h.real })) : [],
     ike: build ? (build.ike || "ike2") : "ike2", psk: "",
+    my_id_type: build && build.my_id_type ? build.my_id_type : "auto", my_id: build ? (build.my_id || "") : "",
+    remote_id_type: build && build.remote_id_type ? build.remote_id_type : "auto", remote_id: build ? (build.remote_id || "") : "",
     ...Object.fromEntries(["p1_enc", "p1_hash", "p1_dh", "p1_life", "p2_enc", "p2_auth", "pfs", "p2_life"].map((k) => [k, build && build[k] ? build[k] : IPSEC_DEF[k]])),
   };
   let allOrgs = orgs.length ? orgs : [];
@@ -6178,9 +6180,18 @@ async function ipsecWizard(isNew, build, cands, orgs) {
         <div class="ip-nat"><div class="small b">Specific host mappings <span class="muted">mapped IP → real IP (only these are reachable)</span></div><div id="ipNatHost"></div>
           <button type="button" class="btn" id="ipNatHostAdd">Add host mapping</button></div></div>`;
     } else if (st.step === 3) {
+      const idSel = (id, cur, opts) => `<select id="${id}">${opts.map((o) => `<option value="${o[0]}" ${cur === o[0] ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select>`;
       body = `<div class="card"><h2>The far end</h2>
         <label class="field">Remote public IP or DNS name <input id="ipRemote" maxlength="120" value="${esc(st.remote_addr)}" placeholder="203.0.113.10 or vpn.example.com"></label>
-        <h3>Remote subnets</h3><p class="small muted">The networks behind the far-end firewall that this side should reach.</p>${subPick(null, st.remote_subnets, "remote")}</div>`;
+        <h3>Remote subnets</h3><p class="small muted">The networks behind the far-end firewall that this side should reach.</p>${subPick(null, st.remote_subnets, "remote")}
+        <h3>IKE identity <span class="small muted">— set when this router is behind NAT, or the far end expects a specific ID</span></h3>
+        <p class="small muted">Behind NAT the automatic ID is the private IP, which the far end usually rejects. Set <b>My ID</b> to <b>Address</b> = your public IP (it must match the peer's remote-id). Leave both Auto otherwise.</p>
+        <div class="grid2">
+          <label class="field">My ID ${idSel("ipMyType", st.my_id_type, [["auto", "Auto"], ["address", "Address (IP)"], ["fqdn", "FQDN"], ["user-fqdn", "User FQDN"], ["key-id", "Key ID"]])}</label>
+          <label class="field">My ID value <input id="ipMyVal" maxlength="120" value="${esc(st.my_id)}" placeholder="e.g. 64.32.39.177" ${st.my_id_type === "auto" ? "disabled" : ""}></label>
+          <label class="field">Remote ID ${idSel("ipRemType", st.remote_id_type, [["auto", "Auto"], ["fqdn", "FQDN"], ["user-fqdn", "User FQDN"], ["key-id", "Key ID"], ["ignore", "Ignore"]])}</label>
+          <label class="field">Remote ID value <input id="ipRemVal" maxlength="120" value="${esc(st.remote_id)}" placeholder="what the far end sends" ${["auto", "ignore"].includes(st.remote_id_type) ? "disabled" : ""}></label>
+        </div></div>`;
     } else if (st.step === 4) {
       body = `<div class="card"><h2>Encryption</h2>
         <div class="wgb-choice"><label class="chk"><input type="radio" name="ipIke" value="ike2" ${st.ike === "ike2" ? "checked" : ""}> IKEv2 <span class="small muted">— recommended</span></label>
@@ -6227,6 +6238,10 @@ async function ipsecWizard(isNew, build, cands, orgs) {
     $("ipNatMapAdd")?.addEventListener("click", () => { st.nat_netmap.push({ real: "", mapped: "" }); drawNat(); });
     $("ipNatHostAdd")?.addEventListener("click", () => { st.nat_hosts.push({ mapped: "", real: "" }); drawNat(); });
     $("ipRemote")?.addEventListener("input", (e) => { st.remote_addr = e.target.value.trim(); });
+    $("ipMyType")?.addEventListener("change", (e) => { st.my_id_type = e.target.value; draw(); });
+    $("ipMyVal")?.addEventListener("input", (e) => { st.my_id = e.target.value.trim(); });
+    $("ipRemType")?.addEventListener("change", (e) => { st.remote_id_type = e.target.value; draw(); });
+    $("ipRemVal")?.addEventListener("input", (e) => { st.remote_id = e.target.value.trim(); });
     document.querySelectorAll('[name="ipIke"]').forEach((r) => r.addEventListener("change", () => { st.ike = r.value; }));
     $("ipAdvBtn")?.addEventListener("click", () => { st.adv = !st.adv; draw(); });
     document.querySelectorAll("[data-crypto]").forEach((s) => ["change", "input"].forEach((ev) => s.addEventListener(ev, (e) => { st[s.dataset.crypto] = e.target.value.trim(); })));
@@ -6265,6 +6280,7 @@ async function ipsecWizard(isNew, build, cands, orgs) {
         device_id: st.device_id, remote_addr: st.remote_addr, ike: st.ike, psk: st.psk,
         p1_enc: st.p1_enc, p1_hash: st.p1_hash, p1_dh: st.p1_dh, p1_life: st.p1_life,
         p2_enc: st.p2_enc, p2_auth: st.p2_auth, pfs: st.pfs, p2_life: st.p2_life,
+        my_id_type: st.my_id_type, my_id: st.my_id, remote_id_type: st.remote_id_type, remote_id: st.remote_id,
         local_subnets: [...st.local_subnets], remote_subnets: [...st.remote_subnets], local_nat, apply });
       ipsecEdit = false;
       go("ipsec");   // back to the tunnel list
@@ -6291,6 +6307,8 @@ function ipsecSheet(b) {   // the parameter sheet for the far-end firewall (writ
     ["Their local subnets", (b.remote_subnets || []).join(", ") || "—"],
     ["Their remote subnets (behind the MikroTik)", ipsecAdvertised(b).join(", ") || "—"],
   ];
+  if (b.my_id_type && b.my_id_type !== "auto" && b.my_id) rows.push(["Our IKE ID — set as the peer's remote-id", `${b.my_id_type}: ${b.my_id}`]);
+  if (["fqdn", "user-fqdn", "key-id"].includes(b.remote_id_type) && b.remote_id) rows.push(["Peer's IKE ID (its my-id)", `${b.remote_id_type}: ${b.remote_id}`]);
   (b.local_nat || []).forEach((e) => {
     if (e.mode === "netmap") rows.push(["1:1 NAT (for your records)", `${e.mapped} on the tunnel = ${e.real} real`]);
     else if (e.mode === "hosts") (e.hosts || []).forEach((h) => rows.push(["1:1 host NAT", `${h.mapped} = ${h.real} real`]));

@@ -271,6 +271,8 @@ fieldset.up-when { border: 1px solid var(--border); border-radius: 10px; padding
 .wgb-steps li.done::before { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .ip-psk { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
 .ip-psk input { flex: 1 1 280px; min-width: 0; font-family: var(--mono, monospace); }
+.wiz-link { text-decoration: none; cursor: pointer; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+.wiz-link:hover { background: var(--accent); color: #fff; }
 .ip-nat { margin: 6px 0 12px; }
 .ip-natrow { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
 .ip-natrow input { flex: 1 1 140px; min-width: 0; font-family: var(--mono, monospace); font-size: 13px; }

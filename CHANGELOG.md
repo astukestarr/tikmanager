@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0-beta.11 - 2026-11-03
+
+- **IPsec wizard: set the IKE identities (My ID / Remote ID).** On the far-end step you can now set the local identity -
+  essential when the router is **behind NAT**, where the automatic ID is the private IP and the far end rejects it. Set
+  My ID to **Address = your public IP** (it must match the peer's remote-id); FQDN / user-FQDN / key-id are also
+  available, and a Remote ID can be set to match what the far end sends. Both default to Auto. The far-end settings sheet
+  lists the identity so the other box can be configured to match.
+- **Spot wizard-built tunnels and jump back to them.** In "Existing VPNs on routers", a tunnel the Router Wizard created
+  now shows a small **wizard ↗** link next to its name that opens its wizard page.
+
 ## 3.1.0-beta.10 - 2026-11-03
 
 - **IPsec wizard: 1:1 NAT (netmap) for overlapping subnets.** On the Local subnets step you can now present a local

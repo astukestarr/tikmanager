@@ -951,7 +951,12 @@ class RouterOS:
         self._req("PUT", "/ip/ipsec/proposal", prop)
         self._req("PUT", "/ip/ipsec/peer", {"name": n, "address": cfg["remote_addr"], "profile": n,
                                             "exchange-mode": cfg["exchange"], "comment": tag})
-        self._req("PUT", "/ip/ipsec/identity", {"peer": n, "auth-method": "pre-shared-key", "secret": cfg["psk"], "comment": tag})
+        ident = {"peer": n, "auth-method": "pre-shared-key", "secret": cfg["psk"], "comment": tag}
+        if cfg.get("my_id"):   # the local IKE identity (e.g. address:<public IP> when behind NAT); auto by default
+            ident["my-id"] = cfg["my_id"]
+        if cfg.get("remote_id"):
+            ident["remote-id"] = cfg["remote_id"]
+        self._req("PUT", "/ip/ipsec/identity", ident)
         remotes = cfg["remote_subnets"]
         first_nat = next((r.get(".id") for r in self.optional(lambda: self.get("/ip/firewall/nat"), []) or [] if r.get("dynamic") != "true"), None)
         place_nat = {"place-before": first_nat} if first_nat else {}

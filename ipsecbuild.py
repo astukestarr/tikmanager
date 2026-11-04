@@ -94,8 +94,29 @@ class IpsecBuilds:
         for k in ("p1_life", "p2_life"):   # a RouterOS time string, e.g. 8h, 1d, 30m, 1h30m
             if not re.fullmatch(r"(\d+[smhdw])+|\d+", crypto[k]):
                 raise IpsecError(f"Lifetime {crypto[k]!r} isn't valid - use a time like 8h, 1d or 30m.")
-        return {"device": d, "remote": remote, "ike": ike, "nat": nat,
+        ident = self._identity(b)
+        return {"device": d, "remote": remote, "ike": ike, "nat": nat, **ident,
                 "local": [str(n) for n in local], "far": [str(n) for n in far], **crypto}
+
+    def _identity(self, b):
+        """Validate the IKE identities. my-id: auto/address/fqdn/user-fqdn/key-id; remote-id: auto/fqdn/user-fqdn/key-id/
+        ignore (no 'address'). Returns the stored type/value for each (empty type means auto)."""
+        mt = (b.get("my_id_type") or "auto").strip()
+        mv = (b.get("my_id") or "").strip()
+        rt = (b.get("remote_id_type") or "auto").strip()
+        rv = (b.get("remote_id") or "").strip()
+        if mt not in ("auto", "address", "fqdn", "user-fqdn", "key-id"):
+            raise IpsecError("My ID type must be auto, address, FQDN, user-FQDN or key-id.")
+        if rt not in ("auto", "fqdn", "user-fqdn", "key-id", "ignore"):
+            raise IpsecError("Remote ID type must be auto, FQDN, user-FQDN, key-id or ignore (not address).")
+        if mt == "address" and as_ip(mv) is None:
+            raise IpsecError("My ID is set to an address, so enter a valid IP (e.g. your public IP when behind NAT).")
+        if mt in ("fqdn", "user-fqdn", "key-id") and not mv:
+            raise IpsecError("Enter the My ID value.")
+        if rt in ("fqdn", "user-fqdn", "key-id") and not rv:
+            raise IpsecError("Enter the Remote ID value.")
+        return {"my_id_type": mt, "my_id": mv if mt != "auto" else "",
+                "remote_id_type": rt, "remote_id": rv if rt in ("fqdn", "user-fqdn", "key-id") else ""}
 
     def _nat(self, raw, local, far):
         """Validate the 1:1 NAT entries. Returns (normalized nat list, advertised networks) - advertised is what the far
@@ -147,7 +168,8 @@ class IpsecBuilds:
         psk = (b.get("psk") or "").strip()   # the tech can set the key in the wizard; blank keeps the existing one (edit) or auto-generates (new)
         fields = (b["org_id"], b.get("name") or "IPsec tunnel", v["device"]["id"], v["remote"], v["ike"],
                   v["p1_enc"], v["p1_hash"], v["p1_dh"], v["p1_life"], v["p2_enc"], v["p2_auth"], v["pfs"], v["p2_life"],
-                  json.dumps(v["local"]), json.dumps(v["far"]), json.dumps(v["nat"]))
+                  json.dumps(v["local"]), json.dumps(v["far"]), json.dumps(v["nat"]),
+                  v["my_id_type"], v["my_id"], v["remote_id_type"], v["remote_id"])
         if build_id:
             row = self.db.one("SELECT * FROM ipsec_builds WHERE id=?", (build_id,))
             if not row or row["org_id"] != b["org_id"]:
@@ -155,14 +177,16 @@ class IpsecBuilds:
             if row["id"] in self.busy:
                 raise IpsecError("This tunnel is being applied right now - try again in a minute.")
             self.db.run("""UPDATE ipsec_builds SET org_id=?, name=?, device_id=?, remote_addr=?, ike=?, p1_enc=?, p1_hash=?,
-                           p1_dh=?, p1_life=?, p2_enc=?, p2_auth=?, pfs=?, p2_life=?, local_subnets=?, remote_subnets=?, local_nat=?, updated_at=? WHERE id=?""",
+                           p1_dh=?, p1_life=?, p2_enc=?, p2_auth=?, pfs=?, p2_life=?, local_subnets=?, remote_subnets=?, local_nat=?,
+                           my_id_type=?, my_id=?, remote_id_type=?, remote_id=?, updated_at=? WHERE id=?""",
                         (*fields, now, build_id))
             if psk:
                 self._seal_psk(build_id, psk)
             return build_id
         bid = self.db.run("""INSERT INTO ipsec_builds (org_id, name, device_id, remote_addr, ike, p1_enc, p1_hash, p1_dh, p1_life,
-                             p2_enc, p2_auth, pfs, p2_life, local_subnets, remote_subnets, local_nat, created_by, created_at, updated_at)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (*fields, user, now, now))
+                             p2_enc, p2_auth, pfs, p2_life, local_subnets, remote_subnets, local_nat,
+                             my_id_type, my_id, remote_id_type, remote_id, created_by, created_at, updated_at)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (*fields, user, now, now))
         self._seal_psk(bid, psk or secrets.token_urlsafe(24))   # the wizard supplies a key; fall back to a strong random one
         return bid
 
@@ -199,7 +223,11 @@ class IpsecBuilds:
                    "p1": {"enc": row["p1_enc"], "hash": row["p1_hash"], "dh": row["p1_dh"], "life": row["p1_life"]},
                    "p2": {"enc": row["p2_enc"], "auth": row["p2_auth"], "pfs": row["pfs"], "life": row["p2_life"]},
                    "local_subnets": json.loads(row["local_subnets"]), "remote_subnets": json.loads(row["remote_subnets"]),
-                   "nat": json.loads(row["local_nat"] or "[]"), "psk": self.reveal_psk(build_id) or ""}
+                   "nat": json.loads(row["local_nat"] or "[]"),
+                   "my_id": (f"{row['my_id_type']}:{row['my_id']}" if row["my_id_type"] and row["my_id_type"] != "auto" and row["my_id"] else ""),
+                   "remote_id": ("ignore" if row["remote_id_type"] == "ignore" else
+                                 f"{row['remote_id_type']}:{row['remote_id']}" if row["remote_id_type"] and row["remote_id_type"] != "auto" and row["remote_id"] else ""),
+                   "psk": self.reveal_psk(build_id) or ""}
             self.client_for(d).ipsec_apply(cfg, tag)
             self.db.run("UPDATE ipsec_builds SET status='active', last_error=NULL, last_applied=? WHERE id=?", (time.time(), build_id))
             self.db.event(d["id"], d["org_id"], "ipsec tunnel applied", f"{row['name']} -> {row['remote_addr']}")
