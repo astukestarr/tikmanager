@@ -1504,7 +1504,8 @@ async function users() {
       ${isTech() ? `<select id="iOrg" aria-label="Client">${orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
       <input id="iEmail" type="email" placeholder="Email" required aria-label="Email"><input id="iName" placeholder="Name" aria-label="Name">
       <select id="iRole" aria-label="Role"><option value="viewer">Viewer</option><option value="admin">Client admin</option></select>
-      <button class="btn primary" type="submit">Create invitation</button></form><div id="iResult"></div></div>` : ""}
+      ${isTech() ? `<label class="chk" title="Create a client user who signs in with Microsoft (no password/TOTP - Microsoft does MFA). Needs 'Client Microsoft sign-in' turned on in Admin > Settings."><input type="checkbox" id="iMs"> Microsoft sign-in</label>` : ""}
+      <button class="btn primary" type="submit">Create</button></form><div id="iResult"></div></div>` : ""}
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Type</th>${isTech() ? "<th>Client</th>" : ""}<th>Role</th><th>MFA</th><th>Last sign-in</th><th></th></tr></thead><tbody>
       ${rows.map((u) => `<tr><td>${esc(u.email)}${u.disabled ? ` <span class="pill">disabled</span>` : ""}${u.invited ? ` <span class="pill">invited</span>` : ""}</td>
         <td>${esc(u.name)}</td><td>${u.kind === "tech" ? esc((window.BRAND && window.BRAND.company) || "Staff") : "Client"}</td>${isTech() ? `<td>${esc(u.org || "")}</td>` : ""}<td>${esc(u.role)}</td>
@@ -1519,7 +1520,13 @@ async function users() {
   $("iForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const r = await post("/api/users/invite", { org_id: $("iOrg")?.value, email: $("iEmail").value, name: $("iName").value, role: $("iRole").value });
+      const r = await post("/api/users/invite", { org_id: $("iOrg")?.value, email: $("iEmail").value, name: $("iName").value, role: $("iRole").value, ms_login: $("iMs")?.checked || false });
+      if (r.ms) {
+        $("iResult").innerHTML = `<p class="status ok">Created. ${esc(r.email)} can now sign in at the sign-in page with <b>Sign in with Microsoft</b> (locked to the <b>${esc(r.domain)}</b> domain). No password needed - Microsoft handles MFA.</p>
+          ${r.enabled ? "" : `<p class="status err small">Note: Client Microsoft sign-in is turned off - enable it in Admin &gt; Settings &gt; Microsoft sign-in before they can sign in.</p>`}`;
+        setTimeout(users, 4000);
+        return;
+      }
       $("iResult").innerHTML = `${r.emailed === true ? `<p class="status ok">Invitation emailed.</p><p class="small muted">The link, if you'd rather send it yourself (valid ${r.expires_days} days):</p>`
         : `${typeof r.emailed === "string" ? `<p class="status err">The email couldn't be sent: ${esc(r.emailed)}</p>` : ""}<p>Send this link to the person (valid ${r.expires_days} days). They'll choose a password and set up their authenticator app.</p>`}
         <div class="code">${esc(r.link)}</div>`;
@@ -2333,6 +2340,11 @@ async function adminSystem() {
       <div class="grid2">${f("cfTenant", "Directory (tenant) ID", s.entra_tenant_id, { ph: "00000000-0000-0000-0000-000000000000" })}
         ${f("cfClient", "Application (client) ID", s.entra_client_id, { ph: "00000000-0000-0000-0000-000000000000" })}
         <label class="field">Client secret <input id="cfSecret" type="password" autocomplete="new-password" placeholder="${s.entra_client_secret_set ? "saved - leave blank to keep" : ""}"></label></div>
+      <label class="chk"><input type="checkbox" id="cfMulti" ${s.entra_multitenant ? "checked" : ""}> Let client (customer) users sign in with Microsoft</label>
+      <p class="small muted">Off by default - only your own staff use Microsoft; clients use a password + authenticator. To turn on, first set the
+        app registration to <b>multi-tenant</b> ("Accounts in any organizational directory") in Entra. Then invite client users with the
+        "Microsoft sign-in" option on the Users tab - each is matched to their email and locked to its domain, whether they're a guest in your
+        tenant or sign in from their own Microsoft. Your staff sign-in is unchanged either way.</p>
       <h3>Routers</h3>
       <div class="grid2">${f("cfEndpoint", "WireGuard address routers connect to", s.wg_endpoint, { ph: "tikmanager.example.com:51820" })}
         ${f("cfPing", "Latency test target", s.ping_target, { ph: "1.1.1.1" })}</div>
@@ -2363,7 +2375,7 @@ async function adminSystem() {
   $("cfSave").addEventListener("click", async () => {
     try {
       await post("/api/admin/settings", { tech_domains: $("cfDomains").value, tech_admins: $("cfAdmins").value, entra_tenant_id: $("cfTenant").value,
-        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value });
+        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, entra_multitenant: $("cfMulti").checked, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value });
       await adminSystem(); say("cfStatus", "Saved.", true);
     } catch (e) { say("cfStatus", e.message); }
   });

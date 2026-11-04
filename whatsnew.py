@@ -173,6 +173,10 @@ SLIDES_3_4 = [
      "text": "A Console tab on the router page runs a RouterOS command and shows the output, right in the browser. It's a command "
              "runner (one command at a time, through TikManager's limited router user, every command logged) - for a full interactive "
              "session use Winbox. Needs the Winbox permission."},
+    {"id": "client-ms-signin", "title": "Microsoft sign-in for client users", "img": None, "view": "admin", "who": "techadmin",
+     "text": "Optional (off by default): let client users sign in with Microsoft instead of a password. Turn it on in Admin > Settings "
+             "(needs a multi-tenant app registration), then invite a client user with the Microsoft sign-in option - they use their own "
+             "Microsoft, or a guest account in your tenant, matched to their email and locked to its domain. Your staff sign-in is unchanged."},
 ]
 SLIDES = SLIDES_3_4
 IDS = {s["id"] for s in SLIDES}

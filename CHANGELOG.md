@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.4.0-beta.4 - 2026-11-04
+
+- **Client users can sign in with Microsoft (optional, off by default).** Turn on "Let client users sign in with Microsoft"
+  in Admin > Settings (it needs the app registration set to **multi-tenant**), then invite a client user with the new
+  **Microsoft sign-in** option. They sign in with the normal "Sign in with Microsoft" button - either as a **guest you
+  invited into your tenant** or from **their own Microsoft** - matched to their email address and **locked to its domain**,
+  with no TikManager password or TOTP (Microsoft handles MFA). Your own staff sign-in is unchanged, and technicians still
+  must be members of your tenant (guests/other tenants can only be client users). While the toggle is off, nothing changes.
+
 ## 3.4.0-beta.3 - 2026-11-04
 
 - **Per-router latency target.** A router's **Settings** tab now has a "Latency target" field that overrides the global

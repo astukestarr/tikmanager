@@ -45,6 +45,9 @@ class Settings:
     entra_tenant_id: str = field(default_factory=lambda: env("ENTRA_TENANT_ID"))
     entra_client_id: str = field(default_factory=lambda: env("ENTRA_CLIENT_ID"))
     entra_client_secret: str = field(default_factory=lambda: env("ENTRA_CLIENT_SECRET"))
+    # let client (customer) users sign in with Microsoft too - needs the app registration to be multi-tenant. Off = only
+    # the MSP's own staff use Microsoft (single-tenant), clients use password + TOTP (the default, unchanged behaviour).
+    entra_multitenant: bool = field(default_factory=lambda: env("TM_ENTRA_MULTITENANT", "0").lower() in ("1", "true", "yes"))
     tech_admins: str = field(default_factory=lambda: env("TM_TECH_ADMINS"))    # comma-separated emails who are admins
     tech_domains: str = field(default_factory=lambda: env("TM_TECH_DOMAINS"))  # e.g. example.com - who may sign in as a tech
     # WireGuard

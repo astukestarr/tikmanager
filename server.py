@@ -3271,8 +3271,26 @@ class Handler(BaseHTTPRequestHandler):
         # the account is tied to Microsoft's permanent user ID: if an email address is later renamed or reused, the new
         # holder doesn't inherit the old technician account
         user = db.one("SELECT * FROM users WHERE entra_oid=?", (who["oid"],)) or db.one("SELECT * FROM users WHERE email=?", (email,))
-        if user and user["kind"] != "tech":
-            raise HttpError(403, "That address belongs to a client account - sign in with your password instead.")
+        # Client (customer) users may sign in with Microsoft only when it's turned on and the account is set up for it.
+        if user and user["kind"] == "client":
+            if not (settings.entra_multitenant and user["ms_login"]):
+                raise HttpError(403, "That address belongs to a client account - sign in with your password instead.")
+            dom = (user["ms_domain"] or "").strip().lower()
+            if dom and not (email.endswith("@" + dom) or (who.get("tid") or "").lower() == dom):
+                db.audit(email, "client Microsoft sign-in refused (wrong domain)", ip=self.client_ip(), org_id=user["org_id"])
+                raise HttpError(403, "This account signs in from a different Microsoft domain - check with your IT provider.")
+            if user["entra_oid"] and user["entra_oid"] != who["oid"]:
+                db.audit(email, "sign-in refused (different Microsoft account)", ip=self.client_ip(), org_id=user["org_id"])
+                raise HttpError(403, f"{email} is linked to a different Microsoft account. Ask your IT provider to reset its sign-in.")
+            if user["disabled"]:
+                raise HttpError(403, "Your account is disabled.")
+            if not user["entra_oid"]:
+                db.run("UPDATE users SET entra_oid=? WHERE id=?", (who["oid"], user["id"]))
+            db.audit(email, "client Microsoft sign-in", ip=self.client_ip(), org_id=user["org_id"])
+            return self.redirect(ret or "/", [("Set-Cookie", self.start_session(user)), ("Set-Cookie", cookie(STATE_COOKIE, "", 0, settings.secure_cookies))])
+        # Technicians must be members of YOUR tenant - never guests or other tenants (only matters in multi-tenant mode).
+        if not who.get("member", True):
+            raise HttpError(403, "Only accounts from your own Microsoft organization can be technicians.")
         if user and user["entra_oid"] and user["entra_oid"] != who["oid"]:
             db.audit(email, "sign-in refused (different Microsoft account)", ip=self.client_ip())
             raise HttpError(403, f"{email} is linked to a different Microsoft account. An administrator can use "
@@ -3427,6 +3445,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "Pick the client this person belongs to.")
         if db.one("SELECT id FROM users WHERE email=?", (email,)):
             raise HttpError(400, "There's already an account with that email.")
+        if b.get("ms_login") and s["kind"] == "tech":   # a client user who signs in with Microsoft (no password/TOTP - Microsoft does MFA)
+            dom = str(b.get("ms_domain") or email.split("@")[-1]).strip().lower()[:253]
+            db.run("INSERT INTO users (email, name, kind, role, org_id, created_at, ms_login, ms_domain) VALUES (?,?,?,?,?,?,1,?)",
+                   (email, str(b.get("name") or "")[:120], "client", role, org_id, now(), dom))
+            db.audit(s["email"], "user invited (Microsoft sign-in)", email, self.client_ip(), org_id=org_id, detail=role)
+            return self.json({"ok": True, "ms": True, "email": email, "domain": dom, "enabled": bool(settings.entra_multitenant)})
         t = token()
         db.run("INSERT INTO users (email, name, kind, role, org_id, invite_hash, invite_expires, created_at) VALUES (?,?,?,?,?,?,?,?)",
                (email, str(b.get("name") or "")[:120], "client", role, org_id, token_hash(t), now() + INVITE_TTL, now()))
