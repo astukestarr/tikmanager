@@ -6866,6 +6866,71 @@ async function diagReport(id) {
   if (running) window._diagRT = setTimeout(() => { if (location.hash === `#diag/${r.id}`) diagReport(r.id); }, 3000);
 }
 
+// ===== ConnectWise billing reconciliation (server billing_report / integrations.cw_*) ==============================
+async function billingPage() {
+  let info;
+  try { info = await api("/api/billing/types"); } catch (e) { $("main").innerHTML = `<div class="row"><h1>ConnectWise billing</h1></div><div class="card"><p class="status err">${esc(e.message)}</p></div>`; return; }
+  if (!info.configured) {
+    $("main").innerHTML = `<div class="row"><h1>ConnectWise billing</h1></div>
+      <div class="card"><p class="muted">Connect ConnectWise PSA in <a href="#admin">Admin → Integrations</a> to reconcile your managed MikroTiks against your configurations and agreements.</p></div>`;
+    return;
+  }
+  const { orgs } = await api("/api/billing/orgs");
+  const isAdmin = adminArea();
+  const typeOpts = `<option value="">— pick a type —</option>` + info.types.map((t) =>
+    `<option value="${t.id}" ${String(t.id) === String(info.type_id) ? "selected" : ""}>${esc(t.name)}</option>`).join("");
+  $("main").innerHTML = `<div class="row"><h1>ConnectWise billing</h1></div>
+    <p class="muted">Find managed MikroTiks that aren't on a ConnectWise agreement - the ones you may be missing billing for. A router is matched
+      to a configuration by serial number; "billed" means its configuration is set on an active agreement addition.</p>
+    <div class="card">
+      <div class="row"><label class="field grow">MikroTik configuration type
+        ${isAdmin ? `<select id="bType">${typeOpts}</select>` : `<input value="${esc(info.type_name || "(not set)")}" disabled>`}</label>
+        ${isAdmin ? `<button class="btn" type="button" id="bTypeSave">Save</button>` : ""}</div>
+      <p class="small muted">The ConnectWise Configuration Type a managed MikroTik is - used to match routers and to create configurations.${info.type_id ? "" : " Set this first for accurate results."}</p>
+      <p class="small status" id="bTypeMsg"></p>
+    </div>
+    ${orgs.length ? `<div class="card"><label class="field">Client <select id="bOrg"><option value="">— pick a client —</option>${orgs.map((o) =>
+        `<option value="${o.id}">${esc(o.name)} (${o.routers} router${o.routers === 1 ? "" : "s"})</option>`).join("")}</select></label></div>`
+      : `<div class="card"><p class="muted">No clients are linked to a ConnectWise company yet. Link them in <a href="#clients">Clients</a>.</p></div>`}
+    <div id="bReport"></div>`;
+  if (isAdmin) $("bTypeSave")?.addEventListener("click", async () => {
+    const sel = $("bType"), id = sel.value, name = sel.selectedOptions[0]?.textContent || "";
+    $("bTypeMsg").textContent = "Saving…"; $("bTypeMsg").className = "small status";
+    try { await post("/api/billing/type", { type_id: id, type_name: id ? name : "" }); $("bTypeMsg").textContent = "Saved."; $("bTypeMsg").className = "small status ok"; if ($("bOrg")?.value) billingReport(+$("bOrg").value); }
+    catch (e) { $("bTypeMsg").textContent = e.message; $("bTypeMsg").className = "small status err"; }
+  });
+  $("bOrg")?.addEventListener("change", () => billingReport(+$("bOrg").value));
+}
+async function billingReport(orgId) {
+  const box = $("bReport"); if (!box) return;
+  if (!orgId) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="card"><p class="muted">Loading from ConnectWise…</p></div>`;
+  let r;
+  try { r = await api(`/api/billing?org_id=${orgId}`); } catch (e) { box.innerHTML = `<div class="card"><p class="status err">${esc(e.message)}</p></div>`; return; }
+  const pill = (ok, yes, no) => ok ? `<span class="pill up-done">${yes}</span>` : `<span class="pill up-run">${no}</span>`;
+  const rows = r.rows.map((x) => `<tr>
+    <td><b>${esc(x.name)}</b></td><td class="small mono">${esc(x.serial || "—")}</td><td class="small">${esc(x.model || "")}</td>
+    <td class="small">${x.config ? esc(x.config.name) : `<span class="status err">not in ConnectWise</span>`}</td>
+    <td>${x.config ? pill(x.billed, "billed", "not billed") : pill(false, "", "not billed")}</td>
+    <td class="small">${x.billed_on ? esc(x.billed_on.agreement) : (x.config ? "" : `<button class="btn small" type="button" data-create="${x.device_id}" ${r.has_type ? "" : "disabled"}>Create in ConnectWise</button>`)}</td>
+  </tr>`).join("");
+  box.innerHTML = `<div class="tiles">${diagKpi(r.managed, "Managed")}${diagKpi(r.matched, "In ConnectWise")}${diagKpi(r.billed, "Billed")}${diagKpi(`<span class="${r.missed ? "status err" : ""}">${r.missed}</span>`, "Missed billing")}</div>
+    ${r.has_type ? "" : `<div class="card"><p class="small status err">No configuration type is set, so this matched across every configuration type. Set the MikroTik type above for accurate results.</p></div>`}
+    <div class="card"><h2>${esc(r.org)} — managed MikroTiks</h2>
+      ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Serial</th><th>Model</th><th>ConnectWise config</th><th>Billing</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">No managed routers for this client.</p>`}
+      <p class="small status" id="bRepMsg"></p></div>
+    ${r.orphans.length ? `<div class="card"><h2>ConnectWise configs with no managed router (${r.orphans.length})</h2>
+      <p class="small muted">Configurations of this type in ConnectWise that don't match any managed MikroTik here - possibly decommissioned, a serial mismatch, or managed elsewhere.</p>
+      <div class="table-wrap"><table><thead><tr><th>Config</th><th>Serial</th><th>Model</th><th>Site</th></tr></thead><tbody>
+        ${r.orphans.map((c) => `<tr><td class="small">${esc(c.name)}</td><td class="small mono">${esc(c.serial || "—")}</td><td class="small">${esc(c.model || "")}</td><td class="small">${esc(c.site || "")}</td></tr>`).join("")}</tbody></table></div></div>` : ""}`;
+  box.querySelectorAll("[data-create]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true; b.textContent = "Creating…";
+    const msg = $("bRepMsg"); if (msg) { msg.textContent = ""; msg.className = "small status"; }
+    try { await post("/api/billing/create", { device_id: +b.dataset.create }); billingReport(orgId); }
+    catch (e) { b.disabled = false; b.textContent = "Create in ConnectWise"; if (msg) { msg.textContent = e.message; msg.className = "small status err"; } }
+  }));
+}
+
 const NAV_ICONS = {
 "dashboard": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"5\" rx=\"1.5\"/><rect x=\"14\" y=\"12\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"3\" y=\"16\" width=\"7\" height=\"5\" rx=\"1.5\"/></svg>",
 "routers": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"13\" width=\"19\" height=\"7\" rx=\"2\"/><path d=\"M6.5 16.5h.01M10 16.5h.01M8 13l-2-6M16 13l2-6M5 7.5a1.5 1.5 0 1 0 0-.01M19 7.5a1.5 1.5 0 1 0 0-.01\"/></svg>",
@@ -6913,7 +6978,8 @@ const NAV = [
     { view: "vulns", label: "Vulnerabilities", who: "tech" }, { view: "compliance", label: "Compliance", who: "tech" }] },
   { group: "Maintenance", icon: "maint", items: [
     { view: "backups", label: "Backups", who: "tech" }, { view: "upgrades", label: "Upgrades", who: "tech", count: "updates" }, { view: "tasks", label: "Tasks", who: "tech" }] },
-  { group: "Clients & users", icon: "clients", items: [{ view: "clients", label: "Clients", who: "tech" }, { view: "users", label: "Users", who: "admin" }] },
+  { group: "Clients & users", icon: "clients", items: [{ view: "clients", label: "Clients", who: "tech" },
+    { view: "billing", label: "ConnectWise billing", who: "tech" }, { view: "users", label: "Users", who: "admin" }] },
   { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
 ];
 const navCounts = {};
@@ -7052,7 +7118,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, ipsec: ipsecView, diag: diagView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, ipsec: ipsecView, diag: diagView, upgrades: upgradesView, backups: backupsView, clients, users, audit, billing: billingPage, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;

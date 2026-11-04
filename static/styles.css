@@ -98,6 +98,7 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
 .brand { font-weight: 800; letter-spacing: .2px; font-size: 16px; }
 .brand b { color: var(--accent); }
 .spacer { flex: 1; }
+.field.grow { flex: 1; min-width: 0; }
 .main { padding: 24px 28px 40px; max-width: 1400px; width: 100%; }
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; }

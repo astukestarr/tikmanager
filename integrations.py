@@ -20,7 +20,8 @@ import urllib.request
 ITG_REGIONS = {"us": "https://api.itglue.com", "eu": "https://api.eu.itglue.com", "au": "https://api.au.itglue.com"}
 FIELDS = {   # name -> secret?
     "cw": {"site": False, "company": False, "public_key": False, "private_key": True, "client_id": False, "codebase": False,
-           "show_types": False, "active_only": False},   # which company types / statuses the import list shows
+           "show_types": False, "active_only": False,   # which company types / statuses the import list shows
+           "mikrotik_type_id": False, "mikrotik_type_name": False},   # the Configuration Type a managed MikroTik is (billing.py)
     "itg": {"region": False, "api_key": True, "config_type_id": False, "config_status_id": False, "sync": False},
     "teams": {"webhook": True},   # a Teams Workflows "post to a channel when a webhook request is received" URL (alerts.py)
     "github": {"library": False, "token": True},
@@ -243,6 +244,106 @@ class Integrations:
                                                "pageSize": 50}) or []
         return [{"id": x["id"], "identifier": x.get("identifier", ""), "name": x.get("name", ""), "status": (x.get("status") or {}).get("name", ""),
                  "types": ", ".join(t.get("name", "") for t in x.get("types") or []), "deleted": bool(x.get("deletedFlag"))} for x in rows]
+
+    # --- ConnectWise configurations & agreement billing (the "managed but not billed" report) ----------------
+    def cw_config_types(self):
+        """Configuration types in ConnectWise, so an admin can say which one a managed MikroTik is."""
+        if self._demo("cw"):
+            return [{"id": 25, "name": "Managed Router"}, {"id": 12, "name": "Firewall"}, {"id": 8, "name": "Network Switch"},
+                    {"id": 31, "name": "Wireless AP"}, {"id": 5, "name": "Server"}]
+        return [{"id": t["id"], "name": t.get("name", "")} for t in
+                self._cw("/company/configurations/types", {"conditions": "inactiveFlag=false", "fields": "id,name", "orderBy": "name", "pageSize": 1000}) or []]
+
+    def cw_configurations(self, company_id, type_id=None):
+        """Every configuration for a ConnectWise company (optionally just one type), with the fields the matcher needs."""
+        if self._demo("cw"):
+            return self._demo_configs(int(company_id))
+        cond = f"company/id={int(company_id)}"
+        if type_id:
+            cond += f" and type/id={int(type_id)}"
+        out, page = [], 1
+        while page < 50:
+            batch = self._cw("/company/configurations", {"conditions": cond, "orderBy": "name", "pageSize": 1000, "page": page,
+                             "fields": "id,name,serialNumber,modelNumber,tagNumber,site/name,status/name,type/name"}) or []
+            out += [{"id": c["id"], "name": c.get("name", ""), "serial": c.get("serialNumber") or "", "model": c.get("modelNumber") or "",
+                     "site": (c.get("site") or {}).get("name", ""), "status": (c.get("status") or {}).get("name", ""),
+                     "type": (c.get("type") or {}).get("name", "")} for c in batch]
+            if len(batch) < 1000:
+                break
+            page += 1
+        return out
+
+    def cw_billed(self, company_id):
+        """Configuration ids that sit on an active agreement addition (= being billed), each -> {agreement, addition}. The
+        billing model is one addition per managed unit with the configuration set on that addition."""
+        if self._demo("cw"):
+            return self._demo_billed(int(company_id))
+        billed = {}
+        ags = self._cw("/finance/agreements", {"conditions": f"company/id={int(company_id)} and cancelledFlag=false",
+                       "fields": "id,name", "pageSize": 1000}) or []
+        for ag in ags:
+            adds = self._cw(f"/finance/agreements/{int(ag['id'])}/additions",
+                            {"fields": "id,invoiceDescription,description,quantity,cancelledDate,configuration,configurationId", "pageSize": 1000}) or []
+            for a in adds:
+                if a.get("cancelledDate"):
+                    continue
+                for cid in self._addition_config_ids(a):
+                    billed[cid] = {"agreement": ag.get("name", ""), "addition": a.get("invoiceDescription") or a.get("description") or ""}
+        return billed
+
+    @staticmethod
+    def _addition_config_ids(a):
+        """Config ids referenced by an agreement addition - tolerant of where ConnectWise exposes them."""
+        ids = []
+        c = a.get("configuration")
+        if isinstance(c, dict) and c.get("id"):
+            ids.append(c["id"])
+        if a.get("configurationId"):
+            ids.append(a["configurationId"])
+        for c2 in a.get("configurations") or []:
+            if isinstance(c2, dict) and c2.get("id"):
+                ids.append(c2["id"])
+            elif isinstance(c2, int):
+                ids.append(c2)
+        return ids
+
+    def cw_create_configuration(self, company_id, type_id, name, serial, model, site):
+        """Create a configuration in ConnectWise for a managed MikroTik (used from the billing reconciliation)."""
+        if self._demo("cw"):
+            return {"id": 7000 + int(time.time()) % 1000, "name": name, "serial": serial, "model": model, "site": site,
+                    "status": "Active", "type": "Managed Router"}
+        body = {"name": name[:100], "type": {"id": int(type_id)}, "company": {"id": int(company_id)}}
+        if serial:
+            body["serialNumber"] = str(serial)[:50]
+        if model:
+            body["modelNumber"] = str(model)[:50]
+        if site:
+            body["site"] = {"name": str(site)[:100]}
+        c = self._cw("/company/configurations", method="POST", body=body) or {}
+        return {"id": c.get("id"), "name": c.get("name", ""), "serial": c.get("serialNumber") or "", "model": c.get("modelNumber") or "",
+                "site": (c.get("site") or {}).get("name", ""), "status": (c.get("status") or {}).get("name", ""), "type": (c.get("type") or {}).get("name", "")}
+
+    def _demo_configs(self, company_id):
+        org = self.db.one("SELECT id FROM orgs WHERE cw_id=?", (company_id,))
+        if not org:
+            return []
+        devs = self.db.q("SELECT name, serial, model, site FROM devices WHERE org_id=? AND state='adopted' ORDER BY name", (org["id"],))
+        out = []
+        for i, d in enumerate(devs):
+            if i == 0 and len(devs) > 1:   # leave one router without a config so "Create in ConnectWise" has something to do
+                continue
+            out.append({"id": 5000 + company_id * 100 + i, "name": d["name"], "serial": d["serial"] or f"DEMO-{company_id}-{i}",
+                        "model": d["model"] or "RB5009", "site": d["site"] or "", "status": "Active", "type": "Managed Router"})
+        out.append({"id": 5900 + company_id * 100, "name": "Old-Decommissioned-RB", "serial": f"STALE-{company_id}", "model": "RB3011",
+                    "site": "", "status": "Active", "type": "Managed Router"})   # a stale CW config with no managed router
+        return out
+
+    def _demo_billed(self, company_id):
+        billed = {}
+        for i, c in enumerate(self._demo_configs(company_id)):
+            if i % 2 == 0:   # bill every other one, so some routers show as missed billing
+                billed[c["id"]] = {"agreement": "Managed Services - Monthly", "addition": c["name"]}
+        return billed
 
     # --- IT Glue ----------------------------------------------------------------------------------------------
     def _itg(self, method, path, params=None, body=None):

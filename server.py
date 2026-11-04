@@ -509,6 +509,41 @@ class Handler(BaseHTTPRequestHandler):
                      f"Source: {res.get('source')}"]
         mailer.send(to, subject, "\n".join(lines) + "\n\n- TikManager")
 
+    # --- ConnectWise billing reconciliation -------------------------------------------------------------------
+    @staticmethod
+    def _norm_serial(s):
+        """Serials for matching: strip anything but letters/digits, upper-case (ConnectWise and RouterOS can differ on case/dashes)."""
+        return re.sub(r"[^A-Za-z0-9]", "", str(s or "")).upper()
+
+    def billing_report(self, org):
+        """Reconcile one client's managed MikroTiks against its ConnectWise configurations and agreements: which are in CW
+        (matched by serial), which are on an agreement (billed), and which are managed but not billed."""
+        cw = integ.config("cw")
+        tid = cw.get("mikrotik_type_id")
+        type_id = int(tid) if str(tid or "").isdigit() else None
+        cid = org["cw_id"]
+        configs = integ.cw_configurations(cid, type_id)
+        billed = integ.cw_billed(cid)
+        by_serial = {}
+        for c in configs:
+            n = self._norm_serial(c["serial"])
+            if n and n not in by_serial:
+                by_serial[n] = c
+        used, rows = set(), []
+        for d in db.q("SELECT id, name, serial, model, site FROM devices WHERE org_id=? AND state='adopted' ORDER BY name", (org["id"],)):
+            n = self._norm_serial(d["serial"])
+            cfg = by_serial.get(n) if n else None
+            if cfg:
+                used.add(cfg["id"])
+            b = billed.get(cfg["id"]) if cfg else None
+            rows.append({"device_id": d["id"], "name": d["name"], "serial": d["serial"] or "", "model": d["model"] or "",
+                         "site": d["site"] or "", "config": cfg, "billed": bool(b), "billed_on": b})
+        orphans = [c for c in configs if c["id"] not in used]   # CW configs of this type with no managed router here
+        return {"org": org["name"], "org_id": org["id"], "cw_id": cid, "type_id": type_id,
+                "type_name": cw.get("mikrotik_type_name") or "", "has_type": bool(type_id),
+                "managed": len(rows), "matched": sum(1 for r in rows if r["config"]), "billed": sum(1 for r in rows if r["billed"]),
+                "missed": sum(1 for r in rows if not r["billed"]), "rows": rows, "orphans": orphans}
+
     UPTIME_RANGES = {"1d": 86400, "3d": 3 * 86400, "7d": 7 * 86400, "14d": 14 * 86400, "1M": 30 * 86400}
 
     def uptime_report(self, d, rng):
@@ -1059,6 +1094,33 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require()
             d = self.device_for(s, m.group(1))
             return self.json(self.uptime_report(d, q.get("range") or "1M"))
+        # --- ConnectWise billing reconciliation (technicians) ---
+        if path == "/api/billing/types":   # configuration types + the one chosen as "a managed MikroTik"
+            self.require(tech=True)
+            cw = integ.config("cw")
+            try:
+                types = integ.cw_config_types() if integ.configured("cw") else []
+            except IntegrationError as e:
+                raise HttpError(502, str(e))
+            return self.json({"configured": integ.configured("cw"), "type_id": cw.get("mikrotik_type_id") or "",
+                              "type_name": cw.get("mikrotik_type_name") or "", "types": types})
+        if path == "/api/billing/orgs":   # clients linked to a ConnectWise company, with their managed-router counts
+            self.require(tech=True)
+            rows = db.q("""SELECT o.id, o.name, o.cw_id, COUNT(d.id) AS routers FROM orgs o
+                           LEFT JOIN devices d ON d.org_id=o.id AND d.state='adopted'
+                           WHERE o.cw_id IS NOT NULL AND o.active=1 GROUP BY o.id, o.name, o.cw_id ORDER BY o.name""")
+            return self.json({"configured": integ.configured("cw"), "orgs": [dict(r) for r in rows]})
+        if path == "/api/billing":   # reconcile one client
+            self.require(tech=True)
+            if not integ.configured("cw"):
+                raise HttpError(400, "ConnectWise PSA isn't set up yet (Admin > Integrations).")
+            org = db.one("SELECT * FROM orgs WHERE id=? AND cw_id IS NOT NULL", (int(q.get("org_id") or 0),))
+            if not org:
+                raise HttpError(404, "That client isn't linked to a ConnectWise company.")
+            try:
+                return self.json(self.billing_report(org))
+            except IntegrationError as e:
+                raise HttpError(502, str(e))
         # --- Wizards > WireGuard Builder (technicians) ---
         if path == "/api/wg-builds":   # every build with its live-ish status
             self.require(tech=True)
@@ -2550,6 +2612,34 @@ class Handler(BaseHTTPRequestHandler):
             db.audit(s["email"], "diagnostics packet sniffer", d["name"], self.client_ip(), org_id=d["org_id"],
                      detail=" ".join(x for x in [b.get("iface"), ip, ("port " + port) if port else ""] if x)[:200])
             return self.json({"ok": True, "id": rid})
+        # --- ConnectWise billing reconciliation ---
+        if path == "/api/billing/type":   # choose which Configuration Type a managed MikroTik is (admins)
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            integ.save("cw", {"mikrotik_type_id": str(b.get("type_id") or ""), "mikrotik_type_name": str(b.get("type_name") or "")})
+            db.audit(s["email"], "billing config type set", str(b.get("type_name") or ""), self.client_ip())
+            return self.json({"ok": True})
+        if path == "/api/billing/create":   # create a ConnectWise configuration for a managed router that has none
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            if not integ.configured("cw"):
+                raise HttpError(400, "ConnectWise PSA isn't set up yet.")
+            cw = integ.config("cw")
+            tid = cw.get("mikrotik_type_id")
+            if not str(tid or "").isdigit():
+                raise HttpError(400, "Choose the MikroTik configuration type first (at the top of this page).")
+            d = self.device_for(s, int(b.get("device_id") or 0))
+            if not d["org_id"]:
+                raise HttpError(400, "That router isn't assigned to a client yet.")
+            org = db.one("SELECT * FROM orgs WHERE id=? AND cw_id IS NOT NULL", (d["org_id"],))
+            if not org:
+                raise HttpError(400, "That router's client isn't linked to a ConnectWise company.")
+            try:
+                cfg = integ.cw_create_configuration(org["cw_id"], int(tid), d["name"], d["serial"] or "", d["model"] or "", d["site"] or "")
+            except IntegrationError as e:
+                raise HttpError(502, str(e))
+            db.audit(s["email"], "cw configuration created", f"{d['name']} ({d['serial'] or '?'})", self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True, "config": cfg})
         if m := re.fullmatch(r"/api/devices/(\d+)/console", path):   # run a RouterOS command and return its output
             s = self.require(tech=True, perm="winbox")
             d = self.device_for(s, m.group(1))

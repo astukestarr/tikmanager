@@ -3,6 +3,23 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.3 - 2026-11-04
+
+**New: ConnectWise billing reconciliation** (Clients & users → ConnectWise billing). Finds managed MikroTiks that
+aren't on a ConnectWise agreement - the ones you may be missing billing for.
+
+- Pick the **Configuration Type** that represents a managed MikroTik (admins, saved once).
+- For a client linked to a ConnectWise company, it matches each managed router to a configuration **by serial number**
+  and shows whether that configuration is on an active agreement addition ("billed"). Headline counts: managed, in
+  ConnectWise, billed, and **missed billing**.
+- **Create in ConnectWise** makes a configuration (name, serial, model, site, chosen type) for a managed router that
+  has none, so it can then be added to an agreement.
+- Lists ConnectWise configurations of that type with no matching managed router (decommissioned, serial mismatch, or
+  managed elsewhere).
+
+Needs a ConnectWise API member with Configurations (read/write) and Agreements (read). Technician-only; the type is set
+by administrators.
+
 ## 3.5.0-beta.2 - 2026-11-04
 
 **New Diagnostics test: Packet Sniffer.** Capture packet metadata on a router for a few seconds and see who's talking,
