@@ -505,23 +505,31 @@ class RouterOS:
         optional interface / IP / port filters, then read its host and protocol aggregation tables. Returns
         {ok, status, packets, bytes, hosts:[{address,packets,bytes}], protocols:[{proto,port,packets,bytes}]}. Needs the
         'sniff' policy. Only metadata (who talked to whom, how much, which protocol/port) - not packet contents."""
-        fset = ['file-name=""', 'memory-limit=10MiB', 'streaming-enabled=no', 'only-headers=yes']
+        filters = []
         if iface:
-            fset.append(f"filter-interface={iface}")
+            filters.append(f"filter-interface={iface}")
         if ip:
-            fset.append(f"filter-ip-address={ip}")
+            filters.append(f"filter-ip-address={ip}")
         if port:
-            fset.append(f"filter-port={int(port)}")
-        script = "\n".join([
+            filters.append(f"filter-port={int(port)}")
+        # Each setting in its own tolerant block: a property a given RouterOS build doesn't accept (e.g. the memory-limit
+        # unit) must not sink the whole capture - the sniffer's defaults are fine. Only start/stop and the filters report.
+        lines = [
             ':local st "ok";',
-            ':onerror e in={',
-            '  /tool sniffer stop;',
-            "  /tool sniffer set " + " ".join(fset) + ";",
+            ':onerror e in={ /tool sniffer stop } do={};',
+            ':onerror e in={ /tool sniffer set file-name="" streaming-enabled=no } do={};',
+            ':onerror e in={ /tool sniffer set only-headers=yes } do={};',
+            ':onerror e in={ /tool sniffer set memory-limit=10M } do={};',   # cap RAM; default is used if the build rejects the unit
+            ':onerror e in={']
+        if filters:
+            lines.append("  /tool sniffer set " + " ".join(filters) + ";")
+        lines += [
             '  /tool sniffer start;',
             f'  :delay {int(duration)}s;',
             '  /tool sniffer stop;',
             '} do={ :set st ("error: " . $e); }',
-            ':put $st;'])
+            ':put $st;']
+        script = "\n".join(lines)
         out = (self.run_script(script, timeout=int(duration) + 40) or "").strip()
         status = out.splitlines()[-1].strip() if out else ""
         if status != "ok":

@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.7 - 2026-11-04
+
+**Packet Sniffer fix.** The capture set `memory-limit=10MiB`, a unit some RouterOS builds reject ("invalid trailing
+characters"), which failed the whole capture - and because the first attempt right after granting `sniff` could still
+hit the router's pre-grant session, it sometimes mislabeled this as a missing-permission error. Each sniffer setting is
+now applied in its own tolerant step (a property this build doesn't accept falls back to the default instead of sinking
+the capture), and the memory cap uses a unit RouterOS accepts. Grant `sniff` per router as before.
+
 ## 3.5.0-beta.6 - 2026-11-04
 
 **ConnectWise billing: a permission error now tells you which option to grant.** When ConnectWise returns "403 / no
