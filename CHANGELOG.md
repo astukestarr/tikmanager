@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.6 - 2026-11-04
+
+**ConnectWise billing: a permission error now tells you which option to grant.** When ConnectWise returns "403 / no
+security permission", the billing page used to show only that - now it names the exact security-role option the API
+member is missing (e.g. *Companies > Configurations: Inquire*, *Finance > Agreements: Inquire*, *System > Table Setup:
+Inquire*, or *Companies > Configurations: Add* for the Create button) and points to the README's full list.
+
 ## 3.5.0-beta.5 - 2026-11-04
 
 **ConnectWise billing: match a router to a configuration by hand.** When a router's serial doesn't line up with its

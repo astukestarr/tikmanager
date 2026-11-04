@@ -516,6 +516,15 @@ class Handler(BaseHTTPRequestHandler):
         """Serials for matching: strip anything but letters/digits, upper-case (ConnectWise and RouterOS can differ on case/dashes)."""
         return re.sub(r"[^A-Za-z0-9]", "", str(s or "")).upper()
 
+    @staticmethod
+    def _cw_perm_hint(msg, needed):
+        """A ConnectWise 403 only says 'no permission' - add which security-role option the API member is missing."""
+        m = str(msg)
+        if "403" in m or "permission" in m.lower():
+            return (f"{m}  To fix: in ConnectWise, the API member's security role needs {needed} "
+                    "(set its Inquire level to All, not My). The full list of options is in README “Integrations”.")
+        return m
+
     def billing_report(self, org):
         """Reconcile one client's managed MikroTiks against its ConnectWise configurations and agreements: which are in CW
         (matched by serial), which are on an agreement (billed), and which are managed but not billed."""
@@ -1109,7 +1118,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 types = integ.cw_config_types() if integ.configured("cw") else []
             except IntegrationError as e:
-                raise HttpError(502, str(e))
+                raise HttpError(502, self._cw_perm_hint(str(e), "System > Table Setup: Inquire (to read the Configuration Types)"))
             return self.json({"configured": integ.configured("cw"), "type_id": cw.get("mikrotik_type_id") or "",
                               "type_name": cw.get("mikrotik_type_name") or "", "types": types})
         if path == "/api/billing/orgs":   # clients linked to a ConnectWise company, with their managed-router counts
@@ -1128,7 +1137,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self.json(self.billing_report(org))
             except IntegrationError as e:
-                raise HttpError(502, str(e))
+                raise HttpError(502, self._cw_perm_hint(str(e), "Companies > Configurations: Inquire and Finance > Agreements: Inquire "
+                                                               "(and System > Table Setup: Inquire to read the Configuration Type)"))
         # --- Wizards > WireGuard Builder (technicians) ---
         if path == "/api/wg-builds":   # every build with its live-ish status
             self.require(tech=True)
@@ -2657,7 +2667,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 cfg = integ.cw_create_configuration(org["cw_id"], int(tid), d["name"], d["serial"] or "", d["model"] or "", d["site"] or "")
             except IntegrationError as e:
-                raise HttpError(502, str(e))
+                raise HttpError(502, self._cw_perm_hint(str(e), "Companies > Configurations: Add"))
             db.audit(s["email"], "cw configuration created", f"{d['name']} ({d['serial'] or '?'})", self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True, "config": cfg})
         if path == "/api/billing/match":   # manually match a router to a ConnectWise configuration (or clear = back to serial)
