@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.2.1-beta.1 - 2026-11-04
+
+More reliable scheduled upgrades - a single flaky router (or a TikManager restart) no longer holds or fails a whole batch.
+
+- **The safety stop now only counts failures where the router was actually changed.** A router that was offline, whose
+  pre-upgrade backup failed, or that couldn't even check/download an update is marked failed but **no longer trips the
+  safety stop** - nothing was changed on it, so there's no reason to hold the rest of the batch. The stop still fires on
+  the real danger: a router that was upgraded and didn't come back (a bad release). Previously, with the safety stop set
+  to 1, one router whose backup wouldn't read could hold the entire fleet night after night.
+- **A TikManager restart mid-upgrade no longer just fails every in-flight job.** On startup each one is re-checked against
+  its router: if it came back on a newer version the upgrade is recorded as done; otherwise it's re-queued (the job
+  re-checks the version and only installs if the router is still behind, so a retry is safe).
+
 ## 3.2.0 - 2026-11-04
 
 **New: import existing tunnels into the Router Wizard.** Both wizards gain an **Import existing** button that adopts a

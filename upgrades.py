@@ -105,11 +105,14 @@ class Upgrades:
     def _step(self, jid, step):
         self.db.run("UPDATE upgrades SET step=? WHERE id=?", (step, jid))
 
-    def _finish(self, j, status, detail, to_version=None):
+    def _finish(self, j, status, detail, to_version=None, counts=True):
+        # counts=False for failures where the router was NOT changed (offline, pre-upgrade backup failed, couldn't even
+        # check/download): nothing broke, so they must not trip the safety stop - otherwise one flaky router holds the
+        # whole batch. The stop is for the real danger: a router that was changed and didn't come back (a bad release).
         self.db.run("UPDATE upgrades SET status=?, step=NULL, detail=?, to_version=COALESCE(?, to_version), finished_at=? WHERE id=?",
                     (status, detail[:500], to_version, time.time(), j["id"]))
         self.db.event(j["device_id"], j["org_id"], {"done": "upgraded", "skipped": "upgrade skipped"}.get(status, "upgrade failed"), detail[:300])
-        if status == "failed" and j.get("batch") and j.get("max_fail"):   # safety stop
+        if status == "failed" and counts and j.get("batch") and j.get("max_fail"):   # safety stop
             failed = self.db.one("SELECT COUNT(*) AS n FROM upgrades WHERE batch=? AND status='failed'", (j["batch"],))["n"]
             if failed >= j["max_fail"]:
                 held = self.db.q("SELECT id, device_id, org_id FROM upgrades WHERE batch=? AND status='scheduled'", (j["batch"],))
@@ -155,11 +158,11 @@ class Upgrades:
             if not d:
                 return
             if not d["online"]:
-                return self._finish(j, "failed", "The router was offline for 30 minutes after the scheduled time - nothing was changed.")
+                return self._finish(j, "failed", "The router was offline for 30 minutes after the scheduled time - nothing was changed.", counts=False)
             self._step(jid, "backing up")
             b = self.backups.run(d["id"], "pre-upgrade", j["created_by"] or "upgrade")
             if not b.get("ok"):
-                return self._finish(j, "failed", f"Stopped before changing anything: the pre-upgrade backup failed ({b.get('detail')}).")
+                return self._finish(j, "failed", f"Stopped before changing anything: the pre-upgrade backup failed ({b.get('detail')}).", counts=False)
             cl = self.client_for(d)
             self._step(jid, "checking for updates")
             info = self.check(d, j["channel"])
@@ -197,7 +200,8 @@ class Upgrades:
             self.db.run("UPDATE devices SET last_poll=NULL WHERE id=?", (d["id"],))   # poll right away to show the new versions
             self._finish(j, "done", "; ".join(notes), latest if latest and vkey(latest) > vkey(installed) else installed)
         except RouterError as e:
-            self._finish(j, "failed", f"{e} (step: {self.db.one('SELECT step FROM upgrades WHERE id=?', (jid,))['step']})")
+            # A RouterError means the step's API call didn't complete, so the router wasn't changed - don't trip the stop.
+            self._finish(j, "failed", f"{e} (step: {self.db.one('SELECT step FROM upgrades WHERE id=?', (jid,))['step']})", counts=False)
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             self._finish(j, "failed", f"Upgrade error: {e}")
@@ -206,10 +210,33 @@ class Upgrades:
                 self.running.discard(jid)
 
     # --- loop -------------------------------------------------------------------------------------------------
+    def _recover(self, j):
+        """A job was 'running' when TikManager stopped. Re-check the router instead of just failing it: if it came back on
+        a newer version the upgrade worked; otherwise re-queue it (run() re-checks and only installs if still behind, so a
+        retry is safe) rather than leaving a spurious failure that also used to trip the safety stop."""
+        d = self._device(j)
+        if not d:
+            return
+        frm = (j.get("from_version") or "").split(" ")[0]
+        try:
+            cur = ((self.client_for(d).status() or {}).get("version") or "").split(" ")[0]
+        except Exception:  # noqa: BLE001
+            cur = None
+        if cur and frm and vkey(cur) > vkey(frm):
+            return self._finish(j, "done", f"RouterOS {frm} → {cur} (confirmed after a TikManager restart)", cur)
+        self.db.run("UPDATE upgrades SET status='scheduled', step=NULL, started_at=NULL, scheduled_at=? WHERE id=?",
+                    (time.time(), j["id"]))
+        self.db.event(j["device_id"], j["org_id"], "upgrade re-queued",
+                      "TikManager restarted mid-upgrade - re-queued (it re-checks the version and only installs if still behind)")
+
     def loop(self):
-        # jobs that were mid-way when TikManager stopped can't be resumed safely
+        # Jobs that were mid-way when TikManager stopped: re-check the router rather than blindly failing them.
         for j in self.db.q("SELECT * FROM upgrades WHERE status='running'"):
-            self._finish(j, "failed", "TikManager restarted during this upgrade - check the router's version on its page.")
+            try:
+                self._recover(j)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+                self._finish(j, "failed", "TikManager restarted during this upgrade - check the router's version on its page.", counts=False)
         last_check = 0
         while True:
             try:
