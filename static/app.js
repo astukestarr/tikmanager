@@ -2393,7 +2393,7 @@ function upgradeDialog(list, onDone) {
   });
 }
 
-const upView = { q: "", org: "", only: false, sel: new Set() };
+const upView = { q: "", org: "", only: false, sel: new Set(), msg: "", msgUntil: 0 };
 async function upgradesView() {
   const r = await api("/api/upgrades");
   const active = new Map(r.jobs.filter((j) => j.status === "scheduled" || j.status === "running").map((j) => [j.device_id, j]));
@@ -2434,6 +2434,9 @@ async function upgradesView() {
         <td>${j.status === "scheduled" && canWrite() ? `<button class="btn" type="button" data-cancel="${j.id}">Cancel</button>` : ""}</td></tr>`).join("")}
       </tbody></table></div>` : `<p class="muted">No upgrades yet.</p>`}</div>`;
   if ($("upOrg")) $("upOrg").value = upView.org;
+  // Keep the "checking for updates..." progress note across the 20s auto-refresh (it clears itself after a few minutes).
+  if ($("upMsg")) $("upMsg").textContent = Date.now() < upView.msgUntil ? upView.msg : (upView.msg = "");
+  const upMsgSet = (t) => { upView.msg = t; upView.msgUntil = Date.now() + 180000; if ($("upMsg")) $("upMsg").textContent = t; };
   let shown = [];
   const draw = () => {
     const q = upView.q.toLowerCase();
@@ -2467,12 +2470,12 @@ async function upgradesView() {
   $("upAll")?.addEventListener("change", (e) => { shown.forEach((d) => (e.target.checked ? upView.sel.add(d.id) : upView.sel.delete(d.id))); draw(); });
   $("upGo")?.addEventListener("click", () => upgradeDialog(r.routers.filter((d) => upView.sel.has(d.id)), () => { upView.sel.clear(); upgradesView(); }));
   $("upCheck")?.addEventListener("click", async () => {
-    $("upCheck").disabled = true; $("upMsg").textContent = "Asking the routers for their newest version...";
+    $("upCheck").disabled = true; upMsgSet("Asking the routers for their newest version...");
     try {
       const x = await post("/api/upgrades/check", { device_ids: [...upView.sel] });
-      if (x.background) { $("upMsg").textContent = `Checking ${x.count} routers in the background - this page refreshes as results come in.`; }
-      else upgradesView();
-    } catch (e) { $("upMsg").textContent = e.message; $("upCheck").disabled = false; }
+      if (x.background) { upMsgSet(`Checking ${x.count} routers in the background - this page refreshes as results come in.`); }
+      else { upView.msg = ""; upView.msgUntil = 0; upgradesView(); }
+    } catch (e) { upMsgSet(e.message); $("upCheck").disabled = false; }
   });
   document.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", async () => { await post(`/api/upgrades/${b.dataset.cancel}/cancel`); upgradesView(); }));
   document.querySelectorAll("[data-batch]").forEach((b) => b.addEventListener("click", async () => { await post(`/api/upgrades/batch/${b.dataset.batch}/${b.dataset.act}`); upgradesView(); }));
