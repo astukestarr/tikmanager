@@ -111,7 +111,9 @@ CREATE TABLE IF NOT EXISTS upgrades (                 -- RouterOS / RouterBOARD 
   created_by TEXT, created_at REAL NOT NULL, started_at REAL, finished_at REAL,
   seq INTEGER, sequential INTEGER NOT NULL DEFAULT 0,  -- order in its batch; 1 = one at a time, each after the previous succeeded
   max_fail INTEGER,                                   -- safety stop: hold the rest of the batch after this many failures
-  pin_version TEXT                                    -- don't install anything newer than this (the version reviewed when scheduling)
+  pin_version TEXT,                                   -- don't install anything newer than this (the version reviewed when scheduling)
+  cw_ticket_on INTEGER NOT NULL DEFAULT 0,            -- open a ConnectWise ticket for this upgrade (attach backup, close when done)
+  cw_ticket INTEGER                                   -- the ConnectWise ticket number once opened
 );
 CREATE INDEX IF NOT EXISTS upgrades_due ON upgrades(status, scheduled_at);
 CREATE TABLE IF NOT EXISTS vpns (                     -- site-to-site WireGuard VPN, hub and spoke, one client each
@@ -385,7 +387,8 @@ class DB:
                     c.execute(f"ALTER TABLE ipsec_builds ADD COLUMN {col} {ddl}")
         if "upgrades" in tables:
             ucols = {r[1] for r in c.execute("PRAGMA table_info(upgrades)")}
-            for col, ddl in (("seq", "INTEGER"), ("sequential", "INTEGER NOT NULL DEFAULT 0"), ("max_fail", "INTEGER"), ("pin_version", "TEXT")):
+            for col, ddl in (("seq", "INTEGER"), ("sequential", "INTEGER NOT NULL DEFAULT 0"), ("max_fail", "INTEGER"), ("pin_version", "TEXT"),
+                             ("cw_ticket_on", "INTEGER NOT NULL DEFAULT 0"), ("cw_ticket", "INTEGER")):
                 if col not in ucols:
                     c.execute(f"ALTER TABLE upgrades ADD COLUMN {col} {ddl}")
         if "metrics" in tables:

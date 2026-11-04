@@ -2433,6 +2433,7 @@ function upgradeDialog(list, onDone) {
       <label class="chk"><input type="checkbox" id="upSeq"> One at a time, in this order (each starts when the previous one has finished)</label>
       <ol class="up-order hidden" id="upOrder"></ol></fieldset>` : ""}
     <label class="chk"><input type="checkbox" id="upPin" checked> Only install the RouterOS version shown now - if MikroTik publishes a newer one before this runs, skip it</label>
+    ${upView.ticketing?.configured ? `<label class="chk"><input type="checkbox" id="upTicket"> Open a ConnectWise ticket for each upgrade - attach the backup, and close it when the upgrade finishes</label>` : ""}
     <p class="small muted">Each router is backed up first (the upgrade stops if the backup fails), then reboots - expect 2-5 minutes offline per reboot.
       ${bulk ? "At most 4 routers upgrade at the same time (or one at a time, if ticked); with a stagger they start one after another." : ""}</p>
     <div class="actions"><button class="btn primary" type="button" id="upOk">Upgrade now</button><button class="btn" type="button" data-close>Cancel</button>
@@ -2461,7 +2462,8 @@ function upgradeDialog(list, onDone) {
     try {
       const r = await post("/api/upgrades", { device_ids: order.map((d) => d.id), when: at, channel: $("upChan").value, firmware: $("upFw").checked,
                                               stagger: $("upStag") ? $("upStag").value : 0, sequential: $("upSeq")?.checked || false,
-                                              max_fail: $("upStop")?.checked ? $("upMaxFail").value : 0, pin: $("upPin").checked });
+                                              max_fail: $("upStop")?.checked ? $("upMaxFail").value : 0, pin: $("upPin").checked,
+                                              cw_ticket: $("upTicket")?.checked || false });
       if (r.skipped.length) {
         dialog(`<h2>${r.created ? `${r.created} upgrade${r.created === 1 ? "" : "s"} ${later ? "scheduled" : "started"}` : "Nothing scheduled"}</h2>
           <p class="small">Skipped:</p><ul class="small">${r.skipped.map((x) => `<li>${esc(x.name)} - ${esc(x.reason)}</li>`).join("")}</ul>
@@ -2472,9 +2474,49 @@ function upgradeDialog(list, onDone) {
   });
 }
 
+async function wireUpTicketPanel() {
+  const body = $("upTicketBody"); if (!body) return;
+  let cfg;
+  try { cfg = await api("/api/upgrades/ticket-settings"); } catch (e) { body.innerHTML = `<p class="small status err">${esc(e.message)}</p>`; return; }
+  if (!cfg.cw_configured) { body.innerHTML = `<p class="small muted">Connect ConnectWise in <a href="#admin">Admin → Integrations</a> to open tickets for upgrades.</p>`; return; }
+  const s = cfg.settings || {};
+  let opts;
+  try { opts = await api(`/api/admin/alerts/cw-options?board=${s.board_id || ""}`); } catch (e) { body.innerHTML = `<p class="small status err">${esc(e.message)}</p>`; return; }
+  const sel = (v, want) => String(v) === String(want) ? "selected" : "";
+  const boardOpts = (w) => `<option value="">— none —</option>` + (opts.boards || []).map((b) => `<option value="${b.id}" ${sel(b.id, w)}>${esc(b.name)}</option>`).join("");
+  const statusOpts = (w) => `<option value="">— leave unchanged —</option>` + (opts.statuses || []).map((st) => `<option value="${st.id}" ${sel(st.id, w)}>${esc(st.name)}</option>`).join("");
+  const prioOpts = (w) => `<option value="">— default —</option>` + (opts.priorities || []).map((p) => `<option value="${p.id}" ${sel(p.id, w)}>${esc(p.name)}</option>`).join("");
+  body.innerHTML = `<p class="small muted">With this set, ticking "Open a ConnectWise ticket" when you upgrade opens a ticket on this board, attaches the pre-upgrade backup, moves it to the "while updating" status, then closes it when the upgrade finishes - or moves it to the trouble status if it fails.</p>
+    <div class="grid2">
+      <label class="field">Board <select id="utBoard">${boardOpts(s.board_id)}</select></label>
+      <label class="field">Priority <select id="utPrio">${prioOpts(s.priority_id)}</select></label>
+      <label class="field">Status while updating <select id="utUpd">${statusOpts(s.status_updating)}</select></label>
+      <label class="field">Status on trouble (failed) <select id="utTrb">${statusOpts(s.status_trouble)}</select></label>
+      <label class="field">Status when closing <select id="utCls">${statusOpts(s.status_closing)}</select></label>
+    </div>
+    <p class="small muted">Statuses come from the chosen board - pick the board first, then the three statuses.</p>
+    <div class="actions"><button class="btn primary" type="button" id="utSave">Save</button></div><p class="small status" id="utMsg"></p>`;
+  $("utBoard").addEventListener("change", async () => {
+    try {
+      const o = await api(`/api/admin/alerts/cw-options?board=${$("utBoard").value}`);
+      opts.statuses = o.statuses || [];
+      for (const id of ["utUpd", "utTrb", "utCls"]) $(id).innerHTML = statusOpts("");
+    } catch (e) { /* keep prior statuses */ }
+  });
+  $("utSave").addEventListener("click", async () => {
+    $("utMsg").textContent = "Saving…"; $("utMsg").className = "small status";
+    try {
+      await post("/api/upgrades/ticket-settings", { board_id: $("utBoard").value, priority_id: $("utPrio").value,
+        status_updating: $("utUpd").value, status_trouble: $("utTrb").value, status_closing: $("utCls").value });
+      $("utMsg").textContent = "Saved. The upgrade dialog now offers a ConnectWise ticket."; $("utMsg").className = "small status ok";
+    } catch (e) { $("utMsg").textContent = e.message; $("utMsg").className = "small status err"; }
+  });
+}
+
 const upView = { q: "", org: "", only: false, sel: new Set(), msg: "", msgUntil: 0 };
 async function upgradesView() {
   const r = await api("/api/upgrades");
+  upView.ticketing = r.ticketing || {};
   const active = new Map(r.jobs.filter((j) => j.status === "scheduled" || j.status === "running").map((j) => [j.device_id, j]));
   const ids = new Set(r.routers.map((d) => d.id));
   upView.sel.forEach((id) => { if (!ids.has(id)) upView.sel.delete(id); });
@@ -2487,6 +2529,8 @@ async function upgradesView() {
       <button type="button" class="tile tile-btn" data-upjump="upJobs" title="Go to the upgrade jobs"><div class="v">${count("running")}</div><div class="l">Upgrading now</div></button>
       <button type="button" class="tile tile-btn ${count("failed") ? "bad" : ""}" data-upjump="upJobs" title="Go to the upgrade jobs"><div class="v">${count("failed")}</div><div class="l">Failed (30 days)</div></button>
     </div>
+    ${adminArea() ? `<details class="card" id="upTicketPanel"><summary><b>ConnectWise ticket settings</b> <span class="small muted">— open a ticket for upgrades</span></summary>
+      <div id="upTicketBody"><p class="small muted">Loading…</p></div></details>` : ""}
     <div class="card" id="upList">
       <div class="row"><input id="upQ" type="search" placeholder="Search routers" value="${esc(upView.q)}">
         ${orgs.length > 1 ? `<select id="upOrg"><option value="">All clients</option>${orgs.map(([id, n]) => `<option value="${id}">${esc(n)}</option>`).join("")}</select>` : ""}
@@ -2513,6 +2557,7 @@ async function upgradesView() {
         <td>${j.status === "scheduled" && canWrite() ? `<button class="btn" type="button" data-cancel="${j.id}">Cancel</button>` : ""}</td></tr>`).join("")}
       </tbody></table></div>` : `<p class="muted">No upgrades yet.</p>`}</div>`;
   if ($("upOrg")) $("upOrg").value = upView.org;
+  wireUpTicketPanel();
   // Keep the "checking for updates..." progress note across the 20s auto-refresh (it clears itself after a few minutes).
   if ($("upMsg")) $("upMsg").textContent = Date.now() < upView.msgUntil ? upView.msg : (upView.msg = "");
   const upMsgSet = (t) => { upView.msg = t; upView.msgUntil = Date.now() + 180000; if ($("upMsg")) $("upMsg").textContent = t; };
@@ -7134,7 +7179,7 @@ async function go(v, arg) {
       const y = window.scrollY, board = v === "dashboard" ? $("main").dataset.board || arg : null;
       (v === "router" ? router(arg) : dashboard(board)).then(() => { if (v === "dashboard" && $("main").dataset.board === board) window.scrollTo({ top: y }); }).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => {
-      if ($("dlg").open || document.hidden || document.activeElement?.closest?.("#main input, #main select")) return;
+      if ($("dlg").open || document.hidden || $("upTicketPanel")?.open || document.activeElement?.closest?.("#main input, #main select")) return;
       const y = window.scrollY, jobs = $("upJobs")?.querySelector(".scroll-y"), jy = jobs ? jobs.scrollTop : 0;
       upgradesView().then(() => { window.scrollTo({ top: y }); const j = $("upJobs")?.querySelector(".scroll-y"); if (j) j.scrollTop = jy; }).catch(() => {}); }, 20000);
     // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)

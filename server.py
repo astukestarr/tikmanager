@@ -124,6 +124,7 @@ updates.channel_store = (lambda: db.setting("update_channel", "stable"), lambda 
 upgrades = Upgrades(db, poller.client, backups)
 tasks = Tasks(db, poller.client, backups, upgrades)
 integ =Integrations(db, backups.vault, settings)
+upgrades.integ = integ   # lets the upgrade engine open/close ConnectWise tickets (constructed after upgrades)
 vpns = Vpns(db, poller.client, backups)
 wgbuilds = WgBuilds(db, poller.client, backups)   # Router Wizard > WireGuard Builder: point-to-point tunnel between two routers
 ipsecbuilds = IpsecBuilds(db, poller.client, backups, backups.vault)   # Router Wizard > IPsec Tunnel: MikroTik to any-brand far end
@@ -1257,7 +1258,19 @@ class Handler(BaseHTTPRequestHandler):
                            WHERE u.status IN ('scheduled','running','held') OR u.created_at > ? ORDER BY
                            CASE u.status WHEN 'running' THEN 0 WHEN 'held' THEN 1 WHEN 'scheduled' THEN 2 ELSE 3 END, COALESCE(u.finished_at, u.scheduled_at) DESC
                            LIMIT 300""", (now() - 30 * 86400,))
-            return self.json({"routers": routers, "jobs": jobs, "channels": list(UPGRADE_CHANNELS)})
+            try:
+                utc = json.loads(db.setting("upgrade_ticket") or "{}")
+            except Exception:  # noqa: BLE001
+                utc = {}
+            ticketing = {"configured": bool(integ.configured("cw") and utc.get("board_id"))}
+            return self.json({"routers": routers, "jobs": jobs, "channels": list(UPGRADE_CHANNELS), "ticketing": ticketing})
+        if path == "/api/upgrades/ticket-settings":   # ConnectWise ticket settings for upgrades (board + statuses)
+            self.require(tech=True)
+            try:
+                utc = json.loads(db.setting("upgrade_ticket") or "{}")
+            except Exception:  # noqa: BLE001
+                utc = {}
+            return self.json({"cw_configured": integ.configured("cw"), "settings": utc})
         if path == "/api/library":   # the community script library (cached for an hour; ?refresh=1)
             self.require(tech=True)
             try:
@@ -2883,7 +2896,8 @@ class Handler(BaseHTTPRequestHandler):
                 max_fail = 0
             try:
                 created, skipped = upgrades.schedule(devices, max(when, now()), str(b.get("channel") or ""), bool(b.get("firmware", True)),
-                                                     s["email"], stagger, sequential=bool(b.get("sequential")), max_fail=max_fail, pin=bool(b.get("pin")))
+                                                     s["email"], stagger, sequential=bool(b.get("sequential")), max_fail=max_fail, pin=bool(b.get("pin")),
+                                                     cw_ticket=bool(b.get("cw_ticket")))
             except ValueError as e:
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "upgrade scheduled", f"{len(created)} router(s)", self.client_ip(),
@@ -2891,6 +2905,17 @@ class Handler(BaseHTTPRequestHandler):
                             f"firmware {'yes' if b.get('firmware', True) else 'no'}, stagger {stagger} min, one at a time {'yes' if b.get('sequential') else 'no'}, "
                             f"safety stop {max_fail or 'off'}, pinned {'yes' if b.get('pin') else 'no'}")
             return self.json({"ok": True, "created": len(created), "skipped": [{"name": n, "reason": r} for n, r in skipped]})
+        if path == "/api/upgrades/ticket-settings":   # save the ConnectWise ticket settings for upgrades (admins)
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            def _id(k):
+                v = str(b.get(k) or "").strip()
+                return int(v) if v.isdigit() else None
+            cfg = {"board_id": _id("board_id"), "status_updating": _id("status_updating"), "status_trouble": _id("status_trouble"),
+                   "status_closing": _id("status_closing"), "priority_id": _id("priority_id")}
+            db.set_setting("upgrade_ticket", json.dumps({k: v for k, v in cfg.items() if v is not None}))
+            db.audit(s["email"], "upgrade ticket settings saved", f"board {cfg['board_id']}", self.client_ip())
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/upgrades/batch/([0-9a-f]{12})/(resume|cancel)", path):   # a batch held by the safety stop
             s = self.require(tech=True, write=True)
             if m.group(2) == "resume":

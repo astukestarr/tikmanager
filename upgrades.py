@@ -15,6 +15,7 @@ Safer mass upgrades (options when scheduling several routers):
 - **Pinned version**: a job remembers the newest RouterOS when it was scheduled; if MikroTik has published something
   newer by the time it runs, nothing is installed (status 'skipped') - nobody installs a release they didn't review.
 """
+import json
 import re
 import threading
 import time
@@ -39,13 +40,20 @@ def vkey(v):
 
 
 class Upgrades:
-    def __init__(self, db, client_for, backups):
-        self.db, self.client_for, self.backups = db, client_for, backups
+    def __init__(self, db, client_for, backups, integ=None):
+        self.db, self.client_for, self.backups, self.integ = db, client_for, backups, integ
         self.running = set()   # job ids
         self.lock = threading.Lock()
 
+    def _ticket_cfg(self):
+        """ConnectWise ticket settings for upgrades (board + the three statuses), set on the Upgrades page."""
+        try:
+            return json.loads(self.db.setting("upgrade_ticket") or "{}")
+        except Exception:  # noqa: BLE001
+            return {}
+
     # --- scheduling -------------------------------------------------------------------------------------------
-    def schedule(self, devices, when, channel, firmware, user, stagger_min=0, sequential=False, max_fail=0, pin=False):
+    def schedule(self, devices, when, channel, firmware, user, stagger_min=0, sequential=False, max_fail=0, pin=False, cw_ticket=False):
         """One job per router, in the order given; returns (created, skipped [(name, reason)])."""
         if channel and channel not in CHANNELS:
             raise ValueError("Unknown update channel.")
@@ -61,9 +69,9 @@ class Upgrades:
             at = when if sequential else when + n * stagger_min * 60
             pin_v = d.get("ros_latest") if pin and d.get("ros_latest") and (not channel or channel == d.get("ros_channel")) else None
             jid = self.db.run("""INSERT INTO upgrades (device_id, org_id, batch, scheduled_at, channel, firmware, status, from_version,
-                                 created_by, created_at, seq, sequential, max_fail, pin_version) VALUES (?,?,?,?,?,?,'scheduled',?,?,?,?,?,?,?)""",
+                                 created_by, created_at, seq, sequential, max_fail, pin_version, cw_ticket_on) VALUES (?,?,?,?,?,?,'scheduled',?,?,?,?,?,?,?,?)""",
                               (d["id"], d["org_id"], batch, at, channel or None, 1 if firmware else 0, (d["version"] or "").split(" ")[0],
-                               user, time.time(), n, 1 if sequential and batch else 0, max_fail or None, pin_v))
+                               user, time.time(), n, 1 if sequential and batch else 0, max_fail or None, pin_v, 1 if cw_ticket else 0))
             self.db.event(d["id"], d["org_id"], "upgrade scheduled", f"by {user} for {time.strftime('%Y-%m-%d %H:%M', time.localtime(at))}")
             created.append(jid)
         return created, skipped
@@ -125,6 +133,52 @@ class Upgrades:
                     self.db.audit("upgrades", "safety stop", f"batch {j['batch']}", detail=f"{failed} failed, {len(held)} held")
         d = self._device(j)
         self.db.audit(j["created_by"], f"upgrade {status}", d["name"] if d else j["device_id"], detail=detail[:500], org_id=j["org_id"])
+        self._ticket_close(j, status, detail)
+
+    # --- ConnectWise ticket (optional, per job) ---------------------------------------------------------------
+    def _open_ticket(self, j, d, b):
+        """Open a ConnectWise ticket for this upgrade and attach the pre-upgrade backup. Never breaks the upgrade."""
+        try:
+            if not (self.integ and self.integ.configured("cw")):
+                return
+            cfg = self._ticket_cfg()
+            org = self.db.one("SELECT cw_id FROM orgs WHERE id=?", (j["org_id"],)) if j.get("org_id") else None
+            if not cfg.get("board_id") or not org or not org["cw_id"]:
+                return
+            frm = (j.get("from_version") or d.get("version") or "").split(" ")[0]
+            text = (f"TikManager is upgrading {d['name']} ({d.get('model') or ''}, serial {d.get('serial') or '?'}) from RouterOS {frm}. "
+                    "A pre-upgrade configuration backup was taken and is attached.")
+            tid = self.integ.cw_ticket(org["cw_id"], int(cfg["board_id"]), f"RouterOS upgrade - {d['name']}", text,
+                                       cfg.get("status_updating") or None, cfg.get("priority_id") or None)
+            if not tid:
+                return
+            self.db.run("UPDATE upgrades SET cw_ticket=? WHERE id=?", (int(tid), j["id"]))
+            try:
+                txt = self.backups.text_of(b.get("backup_id")) if b.get("backup_id") else None
+                if txt:
+                    self.integ.cw_attach(tid, f"{d['name']}-pre-upgrade.rsc", txt, title=f"{d['name']} pre-upgrade backup")
+            except Exception:  # noqa: BLE001 - attachment is best-effort
+                traceback.print_exc()
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+
+    def _ticket_close(self, j, status, detail):
+        """On a finished job with a ticket: set its status (trouble on failure, closing otherwise) and add a note."""
+        if status not in ("done", "failed", "skipped"):
+            return
+        try:
+            row = self.db.one("SELECT cw_ticket FROM upgrades WHERE id=?", (j["id"],))
+            tid = row and row["cw_ticket"]
+            if not tid or not (self.integ and self.integ.configured("cw")):
+                return
+            cfg = self._ticket_cfg()
+            if status == "failed":
+                self.integ.cw_close(tid, "Upgrade did not complete: " + (detail or ""), cfg.get("status_trouble") or None)
+            else:
+                pre = "Upgrade complete: " if status == "done" else "Upgrade skipped: "
+                self.integ.cw_close(tid, pre + (detail or ""), cfg.get("status_closing") or None)
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
 
     def _device(self, j):
         return self.db.one("SELECT * FROM devices WHERE id=?", (j["device_id"],))
@@ -163,6 +217,8 @@ class Upgrades:
             b = self.backups.run(d["id"], "pre-upgrade", j["created_by"] or "upgrade")
             if not b.get("ok"):
                 return self._finish(j, "failed", f"Stopped before changing anything: the pre-upgrade backup failed ({b.get('detail')}).", counts=False)
+            if j.get("cw_ticket_on"):
+                self._open_ticket(j, d, b)
             cl = self.client_for(d)
             self._step(jid, "checking for updates")
             info = self.check(d, j["channel"])

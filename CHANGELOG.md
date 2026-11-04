@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.4 - 2026-11-04
+
+**Upgrades can open a ConnectWise ticket.** When you upgrade a router (now or scheduled), tick "Open a ConnectWise
+ticket" and TikManager will, for each router: open a ticket on the ConnectWise company linked to that client, attach the
+pre-upgrade backup, move it to your "while updating" status, then close it when the upgrade finishes - or move it to your
+"trouble" status if it fails.
+
+- Set it up once on the **Upgrades page → ConnectWise ticket settings** (administrators): pick the board, priority, and
+  the three statuses (while updating / on trouble / when closing) - all chosen from dropdowns read live from ConnectWise.
+- The option only appears on the upgrade dialog once those settings are saved.
+
 ## 3.5.0-beta.3 - 2026-11-04
 
 **New: ConnectWise billing reconciliation** (Clients & users → ConnectWise billing). Finds managed MikroTiks that

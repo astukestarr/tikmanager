@@ -194,6 +194,35 @@ class Integrations:
             self._cw(f"/service/tickets/{int(ticket_id)}", method="PATCH",
                      body=[{"op": "replace", "path": "status", "value": {"id": int(closed_status_id)}}])
 
+    def cw_attach(self, ticket_id, filename, data, title=None):
+        """Attach a document (e.g. a pre-upgrade backup) to a ConnectWise ticket via /system/documents (multipart).
+        Best-effort: the exact shape varies by ConnectWise version, so callers must tolerate an IntegrationError."""
+        if self._demo("cw"):
+            return {"id": 1}
+        if isinstance(data, str):
+            data = data.encode()
+        c = self.config("cw")
+        token = base64.b64encode(f"{c['company']}+{c['public_key']}:{c['private_key']}".encode()).decode()
+        url = f"https://{c['site']}/{(c.get('codebase') or 'v4_6_release').strip('/')}/apis/3.0/system/documents"
+        boundary = "----tikmanager" + str(int(time.time() * 1000))
+        parts = []
+        for k, v in (("recordType", "Ticket"), ("recordId", str(int(ticket_id))), ("title", (title or filename)[:100])):
+            parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                     f'Content-Type: application/octet-stream\r\n\r\n'.encode() + data + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+        req = urllib.request.Request(url, data=b"".join(parts), method="POST", headers={
+            "Authorization": f"Basic {token}", "clientId": c["client_id"], "Accept": "application/json",
+            "Content-Type": f"multipart/form-data; boundary={boundary}"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read()
+                return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            raise IntegrationError(f"HTTP {e.code}: {e.read()[:200].decode('utf-8', 'replace')}") from None
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            raise IntegrationError(f"Couldn't reach ConnectWise: {getattr(e, 'reason', e)}") from None
+
     def teams_post(self, card):
         """Post an Adaptive Card to the Teams workflow webhook."""
         url = self.config("teams").get("webhook")
