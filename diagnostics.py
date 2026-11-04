@@ -29,7 +29,7 @@ def _in_net(ip, flt):
 SAMPLE_SECS = 3                 # torch sample window
 TORCH_MAX_MIN = 15              # cap on a Traffic Watch run
 SPEED_FLOOR = 3_000_000         # smallest test download (bytes) - for tiny-flash boards
-SPEED_CEIL = 120_000_000        # largest test download (bytes)
+SPEED_CEIL = 90_000_000         # largest test download (bytes) - Cloudflare's __down rejects >= 100 MB with HTTP 403
 SPEED_DEFAULT_URL = "https://speed.cloudflare.com/__down?bytes={bytes}"   # {bytes} = the size to request
 SPEED_PING = "1.1.1.1"
 
@@ -237,6 +237,10 @@ class Diagnostics:
                     best = last if (not best or last["mbps"] > best["mbps"]) else best
             if not best:
                 status = last.get("status") or "no result"
+                if "permission" in status.lower():   # the router user can't run /tool fetch - it needs the 'ftp' policy
+                    return self._fail(rid, f"The download test couldn't run (fetch status: {status}). TikManager's router user needs the "
+                                           "'ftp' policy to download. On the router (as an admin) run: /user group set [find name=tikmanager] "
+                                           "policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp")
                 return self._fail(rid, f"The download test didn't complete (fetch status: {status}). Check the router's internet "
                                        "access and DNS, that /tool fetch is allowed by its device-mode, and that it has room in flash. "
                                        "A pure switch with no internet route won't be able to run it.")

@@ -84,7 +84,7 @@ def stage2(s, device: dict, api_password: str) -> str:
 :if ([:len [/ip firewall filter find]] > 0) do={{
   /ip firewall filter add chain=input protocol=udp dst-port=$wgport action=accept comment="TikManager tunnel" place-before=0
 }}
-:if ([:len [/user group find name=$tm]] = 0) do={{ /user group add name=$tm policy=read,write,policy,test,api,rest-api,sensitive,reboot comment="TikManager" }}
+:if ([:len [/user group find name=$tm]] = 0) do={{ /user group add name=$tm policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp comment="TikManager" }} else={{ /user group set [find name=$tm] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp }}
 /user remove [find name=$tm]
 /user add name=$tm group=$tm password={_q(api_password)} address={srv}/32 comment="TikManager - do not remove"
 # HTTP management for the controller. RouterOS 7.2x renamed the service's "address" to "available-from" - handle both.

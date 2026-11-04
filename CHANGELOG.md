@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.5 - 2026-11-04
+
+Speed Test now works on real routers (two issues found running it live):
+
+- **Download no longer fails on big-flash routers.** It sized the test download to the router's free storage (up to
+  120 MB), but Cloudflare's test endpoint rejects any request of 100 MB or more with HTTP 403. The request is now
+  **capped at 90 MB**.
+- **The router user needs the `ftp` policy to download.** `/tool fetch` requires it, and TikManager's least-privilege
+  router user didn't have it. **Newly adopted routers now get it automatically.** On **existing** routers an
+  administrator must grant it once (TikManager can't grant itself a policy it doesn't hold): on the router, run
+  `/user group set [find name=tikmanager] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp`. The Speed
+  Test spells out this exact command when it detects the missing policy.
+
 ## 3.3.0-beta.4 - 2026-11-04
 
 - **Speed Test now reports the router's exact fetch error.** When `/tool fetch` fails it captures the router's actual
