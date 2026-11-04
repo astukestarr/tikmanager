@@ -3165,7 +3165,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"ok": True})
         if path == "/api/users/invite":
             return self.invite()
-        if m := re.fullmatch(r"/api/users/(\d+)/(disable|enable|reset-mfa|resend)", path):
+        if m := re.fullmatch(r"/api/users/(\d+)/(disable|enable|reset-mfa|resend|delete)", path):
             return self.user_action(int(m.group(1)), m.group(2))
         raise HttpError(404, "Not found.")
 
@@ -3373,10 +3373,17 @@ class Handler(BaseHTTPRequestHandler):
             raise HttpError(403, f"Your role doesn't allow this - it needs: {PERM_LABEL['techs']}.")
         if s["kind"] == "tech" and u["kind"] == "tech" and u["role"] == ROLE_ADMIN and not roles.is_admin(s):
             raise HttpError(403, "Only administrators can change an administrator's account.")
-        if u["email"] == s["email"] and action == "disable":
-            raise HttpError(400, "You can't disable yourself.")
+        if u["email"] == s["email"] and action in ("disable", "delete"):
+            raise HttpError(400, f"You can't {action} your own account.")
         extra = {}
-        if action in ("disable", "enable"):
+        if action == "delete":
+            if u["kind"] == "tech" and u["role"] == ROLE_ADMIN and not db.one(
+                    "SELECT 1 FROM users WHERE kind='tech' AND role=? AND disabled=0 AND id<>?", (ROLE_ADMIN, u["id"])):
+                raise HttpError(400, "That's the last administrator - make someone else an administrator first.")
+            sessions.end_all_for(uid)
+            db.run("UPDATE sessions SET as_user_id=NULL WHERE as_user_id=?", (uid,))   # don't strand an admin viewing-as them
+            db.run("DELETE FROM users WHERE id=?", (uid,))
+        elif action in ("disable", "enable"):
             db.run("UPDATE users SET disabled=? WHERE id=?", (1 if action == "disable" else 0, uid))
             if action == "disable":
                 sessions.end_all_for(uid)

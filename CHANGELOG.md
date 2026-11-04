@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.3 - 2026-11-04
+
+- **Delete users.** The Users and Technicians pages now have a **Delete** next to Disable (administrators only, with a
+  confirmation). You can't delete your own account or the last administrator, and deleting someone ends their sessions.
+- **A QR code on the two-step sign-in setup.** When a client user sets up their authenticator app, the enrolment screen
+  now shows a **scannable QR code** as well as the typed key (the key stays as a fallback). The QR is drawn in the
+  browser with no external libraries.
+- **No more false 100% packet loss on switches.** TikManager measured internet latency/loss by pinging from every device
+  - including L2 switches and internal routers that have no route to the internet, which then showed a permanent **100%
+  packet loss** (and a false "packet loss to the internet" finding in Router health). It now **skips that ping on devices
+  with no default route**, so those devices show no latency/loss instead of a false alarm.
+
 ## 3.3.0-beta.2 - 2026-11-04
 
 Fixes from running Diagnostics on real hardware:

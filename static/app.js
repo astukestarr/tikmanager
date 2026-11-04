@@ -1453,7 +1453,8 @@ async function users() {
           ${u.invited ? `<button class="btn" type="button" data-act="resend" data-id="${u.id}">New link</button>` : ""}
           ${u.kind === "client" && u.totp_enabled ? `<button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}">Reset MFA</button>` : ""}
           ${u.kind === "client" && !u.disabled && can("clients") ? `<button class="btn" type="button" data-viewas="${u.id}" title="See TikManager exactly as this user does (read-only)">View as</button>` : ""}
-          <button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>`}</td></tr>`).join("")}
+          <button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>
+          <button class="btn danger" type="button" data-act="delete" data-id="${u.id}">Delete</button>`}</td></tr>`).join("")}
     </tbody></table></div></div>`;
   $("iForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1469,6 +1470,7 @@ async function users() {
     try { await post(`/api/users/${b.dataset.viewas}/view-as`); location.href = "/#dashboard"; location.reload(); } catch (err) { alert(err.message); }
   }));
   document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
+    if (b.dataset.act === "delete" && !confirm("Permanently delete this user? This can't be undone.")) return;
     try {
       const r = await post(`/api/users/${b.dataset.id}/${b.dataset.act}`);
       if (r.link) { dialog(`<h2>New invitation link</h2>${r.emailed === true ? `<p class="status ok">Emailed to them.</p>` : typeof r.emailed === "string" ? `<p class="status err">The email couldn't be sent: ${esc(r.emailed)}</p>` : ""}
@@ -1549,7 +1551,8 @@ async function adminTechs() {
         ${roleList.filter((r) => r.id !== "admin" || R.is_admin || u.role === "admin").map((r) => `<option value="${r.id}" ${u.role === r.id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}
         ${byId[u.role] ? "" : `<option selected>${esc(u.role)} (missing)</option>`}</select></td>
       <td>${ago(u.last_login)}</td><td class="nowrap">${u.email === me.email || !edit ? "" : `<button class="btn" type="button" data-act="${u.disabled ? "enable" : "disable"}" data-id="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>
-        <button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}" title="Unlinks the Microsoft account (for a renamed or replaced account) and resets the authenticator app">Reset sign-in</button>`}</td></tr>`).join("")}
+        <button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}" title="Unlinks the Microsoft account (for a renamed or replaced account) and resets the authenticator app">Reset sign-in</button>
+        <button class="btn danger" type="button" data-act="delete" data-id="${u.id}">Delete</button>`}</td></tr>`).join("")}
     </tbody></table></div><span class="status" id="tStatus"></span></div>
     <div class="card"><div class="row"><h2>Roles</h2><span class="spacer"></span>${edit ? `<button class="btn primary" type="button" id="roleNew">New role</button>` : ""}</div>
       <p class="small muted">A role is a set of permissions - what someone can change. Built-in roles can't be edited; <b>Copy</b> one to start your own.</p>
@@ -1568,6 +1571,7 @@ async function adminTechs() {
     catch (e) { msg("tStatus", e.message); adminTechs(); }
   }));
   document.querySelectorAll("#adminBody [data-act]").forEach((b) => b.addEventListener("click", async () => {
+    if (b.dataset.act === "delete" && !confirm("Permanently delete this technician? This can't be undone.")) return;
     try { await post(`/api/users/${b.dataset.id}/${b.dataset.act}`); adminTechs(); } catch (e) { msg("tStatus", e.message); } }));
   const editor = (r, copy) => {
     const have = new Set(r ? r.perms : []);

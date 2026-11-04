@@ -211,9 +211,15 @@ class Poller:
             if fix:
                 self.db.run("UPDATE devices SET lat=?, lon=?, loc_source='gps', location=COALESCE(location, 'GPS') WHERE id=? AND "
                             "COALESCE(loc_source, '') <> 'manual'", (round(fix[0], 6), round(fix[1], 6), d["id"]))
-        try:
-            latency, loss = cl.ping(getattr(self.s, "ping_target", "") or "1.1.1.1") if hasattr(cl, "ping") else (None, None)
-        except RouterError:
+        # Latency/loss is an internet-reachability ping. Skip it on devices with no default route (L2 switches, internal
+        # routers) - they can't reach the ping target, which would otherwise read as a permanent false 100% packet loss.
+        has_net = bool(st.get("wan_ip")) or any(i.get("default_route") for i in (st.get("interfaces") or []))
+        if has_net and hasattr(cl, "ping"):
+            try:
+                latency, loss = cl.ping(getattr(self.s, "ping_target", "") or "1.1.1.1")
+            except RouterError:
+                latency, loss = None, None
+        else:
             latency, loss = None, None
         self.db.run("INSERT INTO metrics (device_id, ts, cpu, mem_pct, rx_bps, tx_bps, latency, loss) VALUES (?,?,?,?,?,?,?,?)",
                     (d["id"], now, st["cpu"], round(100 * st["mem_used"] / st["mem_total"], 1) if st["mem_total"] else None, rx_bps, tx_bps,

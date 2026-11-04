@@ -19,6 +19,8 @@ async function afterPassword(res) {
   const e = await post("/api/login/mfa", { ticket, want_secret: true });
   $("secret").textContent = e.secret.replace(/(.{4})/g, "$1 ").trim();
   $("uri").href = e.uri;
+  const svg = window.tmQrSvg && e.uri ? window.tmQrSvg(e.uri) : null;   // scannable QR; the key above is the fallback
+  if ($("qr")) $("qr").innerHTML = svg || "";
   show("stepEnroll");
   $("enrollCode").focus();
 }
