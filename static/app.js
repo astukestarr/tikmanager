@@ -2427,7 +2427,7 @@ async function upgradesView() {
         ${canWrite() ? `<div class="actions"><button class="btn primary" type="button" data-batch="${b}" data-act="resume">Resume them</button>
           <button class="btn" type="button" data-batch="${b}" data-act="cancel">Cancel them</button></div>` : ""}</div>`).join("");
     })()}
-    <div class="card" id="upJobs"><h2>Upgrade jobs</h2>${r.jobs.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Change</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>
+    <div class="card" id="upJobs"><h2>Upgrade jobs</h2>${r.jobs.length ? `<div class="table-wrap scroll-y"><table><thead><tr><th>When</th><th>Router</th><th>Client</th><th>Change</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>
       ${r.jobs.map((j) => `<tr><td class="nowrap">${when(j.finished_at || j.started_at || j.scheduled_at)}</td><td><a href="#router/${j.device_id}">${esc(j.device)}</a></td><td>${esc(j.org || "")}</td>
         <td class="nowrap">${esc(j.from_version || "")}${j.to_version && j.to_version !== j.from_version ? ` → ${esc(j.to_version)}` : ""}${j.channel ? ` <span class="small muted">(${esc(j.channel)})</span>` : ""}</td>
         <td>${upStatus(j)}${j.detail ? `<div class="small muted">${esc(j.detail)}</div>` : ""}</td><td class="small">${esc(j.created_by || "")}</td>
@@ -5716,6 +5716,7 @@ const wgbNextIp = (cidr) => { const m = /^(\d+\.\d+\.\d+\.)(\d+)(\/\d+)$/.exec((
 
 async function wgbuildView(arg) {
   if (!arg) return wgbList();
+  if (arg === "import") return wgbImport();
   const isNew = arg === "new";
   let build = null, cands = [];
   const orgs = isNew ? await api("/api/orgs") : [];
@@ -5731,17 +5732,18 @@ async function wgbList() {
   const rows = await api("/api/wg-builds");
   $("main").innerHTML = `<p><a href="#wizards">← Router Wizard</a></p>
     <div class="row"><h1>WireGuard Builder</h1><span class="spacer"></span>
-      ${isTech() ? `<button class="btn primary" type="button" id="wgbNew">New build</button>` : ""}</div>
+      ${isTech() ? `<button class="btn" type="button" id="wgbImport">Import existing</button> <button class="btn primary" type="button" id="wgbNew">New build</button>` : ""}</div>
     <p class="muted">Build a point-to-point WireGuard tunnel between two of a client's routers, step by step: pick a hub (a new interface or one that's already
       there), a client router, the tunnel addresses, and the subnets each end should reach. Both routers are backed up first, and everything the wizard adds is
       tagged so it can be removed cleanly.</p>
     <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Tunnel</th><th>Client</th><th>Hub → Client router</th><th>Routing</th><th>Status</th><th>Last applied</th></tr></thead><tbody>
       ${rows.map((b) => `<tr class="click" data-wgb="${b.id}"><td><b>${esc(b.name)}</b><div class="small muted mono">${esc(b.tunnel_net || "")}</div></td>
         <td>${esc(b.org)}</td><td>${esc(b.hub || "—")} <span class="mono small">${esc(b.hub_iface || "")}</span> → ${esc(b.client || "—")} <span class="mono small">${esc(b.client_iface || "")}</span>${b.client_org && b.client_org !== b.org ? ` <span class="pill">${esc(b.client_org)}</span>` : ""}</td>
-        <td>${b.routing === "bgp" ? "BGP" : "Static"}</td><td>${vpnPill(b.status)}${b.up ? ` <span class="pill up-done">up</span>` : ""}${b.last_error ? `<div class="small status err">${esc(b.last_error)}</div>` : ""}</td>
+        <td>${b.routing === "bgp" ? "BGP" : "Static"}</td><td>${vpnPill(b.status)}${b.adopted ? ` <span class="pill">imported</span>` : ""}${b.up ? ` <span class="pill up-done">up</span>` : ""}${b.last_error ? `<div class="small status err">${esc(b.last_error)}</div>` : ""}</td>
         <td class="small">${b.last_applied ? ago(b.last_applied) : "never"}</td></tr>`).join("")}
-      </tbody></table></div>` : `<p class="muted">No tunnels yet.${isTech() ? " Click New build to create one." : ""}</p>`}</div>`;
+      </tbody></table></div>` : `<p class="muted">No tunnels yet.${isTech() ? " Click New build to create one, or Import existing to adopt one that's already on the routers." : ""}</p>`}</div>`;
   $("wgbNew")?.addEventListener("click", () => go("wgbuild", "new"));
+  $("wgbImport")?.addEventListener("click", () => go("wgbuild", "import"));
   document.querySelectorAll("[data-wgb]").forEach((r) => r.addEventListener("click", () => go("wgbuild", r.dataset.wgb)));
   clearTimeout(window._wgbListT);   // while a tunnel is applying, refresh the list so its status updates on its own
   if (rows.some((b) => b.status === "applying")) window._wgbListT = setTimeout(() => { if (location.hash === "#wgbuild") wgbList(); }, 3000);
@@ -6027,8 +6029,9 @@ async function wgbStatus(build, cands) {
   const ro = !isTech();
   const hs = (v) => v == null ? "<span class='muted'>no handshake</span>" : v < 180 ? `<span class="status ok">handshake ${v}s ago</span>` : `<span class="status err">last handshake ${Math.round(v / 60)}m ago</span>`;
   $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p>
-    <div class="row"><h1>${esc(build.name)}</h1><span id="wgbPill">${vpnPill(build.status)}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
+    <div class="row"><h1>${esc(build.name)}</h1><span id="wgbPill">${vpnPill(build.status)}${build.adopted ? ` <span class="pill">imported</span>` : ""}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
     ${build.last_error ? `<div class="card"><p class="status err">${esc(build.last_error)}</p></div>` : ""}
+    ${build.adopted ? `<div class="card wiz-note"><p class="small"><b>Imported tunnel.</b> It was read live from both routers and tagged in place — the interfaces are left alone. It's tracked and can be disabled or deleted; Disable/Delete removes only the peers and routes, never the interfaces. Edit &amp; re-apply to bring it fully under the wizard.</p></div>` : ""}
     <div class="card"><h2>Tunnel</h2>
       <div class="grid2"><div><div class="kv"><span>Hub</span><span>${esc(build.hub || "")} <span class="mono small">${esc(build.hub_iface)}</span>${build.hub_iface_existing ? " (existing)" : ""}</span></div>
         <div class="kv"><span>Hub tunnel IP</span><span class="mono">${esc(build.hub_tunnel_ip || "")}</span></div>
@@ -6082,6 +6085,7 @@ const ipsecSubnet = (s) => /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test((s || "").tri
 
 async function ipsecView(arg) {
   if (!arg) return ipsecList();
+  if (arg === "import") return ipsecImport();
   const isNew = arg === "new";
   let build = null, cands = [];
   const orgs = isNew ? await api("/api/orgs") : [];
@@ -6098,17 +6102,18 @@ async function ipsecList() {
   const rows = await api("/api/ipsec-builds");
   $("main").innerHTML = `<p><a href="#wizards">← Router Wizard</a></p>
     <div class="row"><h1>IPsec Tunnel</h1><span class="spacer"></span>
-      ${isTech() ? `<button class="btn primary" type="button" id="ipNew">New tunnel</button>` : ""}</div>
+      ${isTech() ? `<button class="btn" type="button" id="ipImport">Import existing</button> <button class="btn primary" type="button" id="ipNew">New tunnel</button>` : ""}</div>
     <p class="muted">A policy-based IPsec site-to-site tunnel from one of a client's MikroTik routers to an <b>any-brand</b> firewall
       (Fortinet, Cisco, SonicWall, pfSense...). TikManager sets up the MikroTik end and gives you the matching settings to enter on the
       other box. For MikroTik-to-MikroTik, use the WireGuard Builder instead.</p>
     <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Tunnel</th><th>Client</th><th>Local router → Remote</th><th>Status</th><th>Last applied</th></tr></thead><tbody>
       ${rows.map((b) => `<tr class="click" data-ip="${b.id}"><td><b>${esc(b.name)}</b></td><td>${esc(b.org)}</td>
         <td>${esc(b.device || "—")} → <span class="mono small">${esc(b.remote_addr || "")}</span></td>
-        <td>${vpnPill(b.status)}${b.up ? ` <span class="pill up-done">up</span>` : ""}${b.last_error ? `<div class="small status err">${esc(b.last_error)}</div>` : ""}</td>
+        <td>${vpnPill(b.status)}${b.adopted ? ` <span class="pill">imported</span>` : ""}${b.up ? ` <span class="pill up-done">up</span>` : ""}${b.last_error ? `<div class="small status err">${esc(b.last_error)}</div>` : ""}</td>
         <td class="small">${b.last_applied ? ago(b.last_applied) : "never"}</td></tr>`).join("")}
-      </tbody></table></div>` : `<p class="muted">No IPsec tunnels yet.${isTech() ? " Click New tunnel to create one." : ""}</p>`}</div>`;
+      </tbody></table></div>` : `<p class="muted">No IPsec tunnels yet.${isTech() ? " Click New tunnel to create one, or Import existing to adopt one that's already on a router." : ""}</p>`}</div>`;
   $("ipNew")?.addEventListener("click", () => go("ipsec", "new"));
+  $("ipImport")?.addEventListener("click", () => go("ipsec", "import"));
   document.querySelectorAll("[data-ip]").forEach((r) => r.addEventListener("click", () => go("ipsec", r.dataset.ip)));
   clearTimeout(window._ipsecListT);   // while a tunnel is applying, refresh the list so its status updates on its own
   if (rows.some((b) => b.status === "applying")) window._ipsecListT = setTimeout(() => { if (location.hash === "#ipsec") ipsecList(); }, 3000);
@@ -6320,8 +6325,10 @@ async function ipsecStatus(build, cands) {
   const ro = !isTech();
   const stText = build.peer_state ? (build.peer_state === "established" ? `<span class="status ok">established</span>` : `<span class="status err">${esc(build.peer_state)}</span>`) : "<span class='muted'>not connected</span>";
   $("main").innerHTML = `<p><a href="#ipsec">← IPsec Tunnel</a></p>
-    <div class="row"><h1>${esc(build.name)}</h1><span>${vpnPill(build.status)}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
+    <div class="row"><h1>${esc(build.name)}</h1><span>${vpnPill(build.status)}${build.adopted ? ` <span class="pill">imported</span>` : ""}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
     ${build.last_error ? `<div class="card"><p class="status err">${esc(build.last_error)}</p></div>` : ""}
+    ${build.adopted ? `<div class="card wiz-note"><p class="small"><b>Imported tunnel.</b> It's tracked and can be disabled or deleted, but TikManager didn't read its pre-shared key${build.has_psk ? "" : " (the Reveal button has nothing to show)"}.
+      To re-apply or fully manage it, Edit it and enter the key — re-applying rebuilds the tunnel under the wizard's own settings. The crypto below was read from the router${(build.local_nat || []).length === 0 ? "; if the tunnel uses 1:1 NAT, the mapped ranges were captured but not the real-LAN mapping" : ""}.</p></div>` : ""}
     <div class="card"><h2>Tunnel</h2>
       <div class="grid2"><div><div class="kv"><span>Local router</span><span>${esc(build.device || "")}</span></div>
         <div class="kv"><span>Local subnets</span><span>${(build.local_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
@@ -6367,6 +6374,165 @@ async function ipsecStatus(build, cands) {
     if (b.status !== build.status) return ipsecStatus(b, cands);
     const el = $("ipState"); if (el) el.innerHTML = b.peer_state ? (b.peer_state === "established" ? `<span class="status ok">established</span>` : `<span class="status err">${esc(b.peer_state)}</span>`) : "<span class='muted'>not connected</span>";
   }, 15000);
+}
+
+// ---- Import (adopt) an existing IPsec tunnel into the wizard --------------------------------------------------------
+async function ipsecImport() {
+  const orgs = await api("/api/orgs").catch(() => []);
+  if (!orgs.length) { $("main").innerHTML = `<p><a href="#ipsec">← IPsec Tunnel</a></p><div class="card"><p class="muted">Add a client first.</p></div>`; return; }
+  const st = { org_id: orgs[0].id, device_id: null, cands: [], peers: null, peer: null, read: null, name: "", psk: "", busy: false };
+  const dev = () => st.cands.find((d) => d.id === st.device_id);
+  const say = (m, ok) => { const s = $("ipiSay"); if (s) { s.textContent = m; s.className = `status ${ok ? "ok" : "err"}`; } };
+  const loadCands = async () => { st.cands = (await api(`/api/ipsec-candidates?org_id=${st.org_id}`)).candidates; };
+  await loadCands();
+
+  const reviewCard = () => {
+    const r = st.read;
+    const row = (k, v) => `<div class="kv"><span>${esc(k)}</span><span>${v}</span></div>`;
+    const subs = (a) => (a || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—";
+    return `<div class="card"><h2>Import "${esc(st.peer)}"</h2>
+      <p class="small muted">Read live from ${esc((dev() || {}).name || "the router")}. Adopting tags this tunnel in place; it isn't restarted or changed.</p>
+      <label class="field">Name <input id="ipiName" maxlength="80" value="${esc(st.name)}" placeholder="e.g. Connection to Pepsi"></label>
+      <div class="grid2"><div>${row("Remote", `<span class="mono">${esc(r.remote_addr)}</span>`)}${row("IKE", r.ike === "ike2" ? "IKEv2" : "IKEv1")}
+          ${row("Phase 1", `${esc(r.p1.enc)} / ${esc(r.p1.hash)} / ${esc(r.p1.dh)}${r.p1.life ? ` / ${esc(r.p1.life)}` : ""}`)}${row("Local subnets", subs(r.local_subnets))}</div>
+        <div>${row("Phase 2", `${esc(r.p2.enc)} / ${esc(r.p2.auth)}${r.p2.life ? ` / ${esc(r.p2.life)}` : ""}`)}${row("PFS", r.p2.pfs === "none" ? "off" : esc(r.p2.pfs))}
+          ${row("Remote subnets", subs(r.remote_subnets))}${(r.my_id_type && r.my_id_type !== "auto") ? row("My ID", `${esc(r.my_id_type)}: ${esc(r.my_id)}`) : ""}</div></div>
+      ${r.has_nat ? `<p class="small status warn">This router has 1:1 NAT (netmap) rules. The mapped ranges are captured as the local subnets; the real-LAN mapping isn't read back — add it under Edit if you later fully manage this tunnel.</p>` : ""}
+      <h3>Pre-shared key <span class="small muted">— optional now</span></h3>
+      <div class="ip-psk"><input id="ipiPsk" class="field" maxlength="128" value="${esc(st.psk)}" placeholder="leave blank — enter it later to re-apply"></div>
+      <p class="small muted">TikManager can't read the key off the router. Adopting works without it (view, disable, delete). Enter it here, or later under Edit, to re-apply or fully manage the tunnel.</p>
+      <div class="actions"><button class="btn primary" type="button" id="ipiAdopt" ${st.busy ? "disabled" : ""}>Import tunnel</button><span class="status" id="ipiSay2"></span></div></div>`;
+  };
+
+  const draw = () => {
+    $("main").innerHTML = `<p><a href="#ipsec">← IPsec Tunnel</a></p>
+      <div class="row"><h1>Import an IPsec tunnel</h1></div>
+      <p class="muted">Bring an IPsec tunnel that's already on a router into the wizard. TikManager reads its settings live and tags it in
+        place — the running tunnel isn't changed or restarted. The pre-shared key can't be read back, so re-applying an imported tunnel is
+        blocked until you enter the key.</p>
+      <div class="card"><h2>Local router</h2>
+        <label class="field">Client <select id="ipiOrg">${orgs.map((o) => `<option value="${o.id}" ${o.id === st.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>
+        <div class="table-wrap"><table><thead><tr><th>Use</th><th>Router</th></tr></thead><tbody>
+          ${st.cands.length ? st.cands.map((d) => `<tr><td><input type="radio" name="ipiDev" value="${d.id}" ${st.device_id === d.id ? "checked" : ""} ${d.online ? "" : "disabled"} aria-label="${esc(d.name)}"></td>
+            <td><b>${esc(d.name)}</b> <span class="dot ${d.online ? "on" : "off"}"></span><div class="small muted">${esc(d.model || "")}${d.online ? "" : " · offline"}</div></td></tr>`).join("")
+            : `<tr><td colspan="2" class="muted">This client has no approved routers.</td></tr>`}
+        </tbody></table></div>
+        <div class="actions"><button class="btn primary" type="button" id="ipiFind" ${st.device_id ? "" : "disabled"}>Find IPsec tunnels</button><span class="status" id="ipiSay"></span></div></div>
+      ${st.peers ? `<div class="card"><h2>Tunnels on ${esc((dev() || {}).name || "")}</h2>
+        ${st.peers.length ? `<div class="table-wrap"><table><thead><tr><th>Use</th><th>Peer</th><th>Remote</th><th>Policies</th></tr></thead><tbody>
+          ${st.peers.map((p) => `<tr><td><input type="radio" name="ipiPeer" value="${esc(p.name)}" ${st.peer === p.name ? "checked" : ""}></td>
+            <td><b>${esc(p.name || "")}</b></td><td class="mono small">${esc(p.remote)}</td><td>${p.policies}</td></tr>`).join("")}
+        </tbody></table></div><div class="actions"><button class="btn" type="button" id="ipiRead" ${st.peer ? "" : "disabled"}>Read settings</button></div>`
+          : `<p class="muted">No importable IPsec tunnels on this router (wizard-built tunnels and remote-access responders are hidden).</p>`}</div>` : ""}
+      ${st.read ? reviewCard() : ""}`;
+    wire();
+  };
+
+  const wire = () => {
+    $("ipiOrg")?.addEventListener("change", async (e) => { st.org_id = +e.target.value; st.device_id = null; st.peers = null; st.peer = null; st.read = null; await loadCands(); draw(); });
+    document.querySelectorAll('[name="ipiDev"]').forEach((r) => r.addEventListener("change", () => { st.device_id = +r.value; st.peers = null; st.peer = null; st.read = null; draw(); }));
+    $("ipiFind")?.addEventListener("click", async () => {
+      say("Reading the router…", true);
+      try { st.peers = (await api(`/api/devices/${st.device_id}/ipsec-adoptable`)).peers; st.peer = null; st.read = null; draw(); }
+      catch (e) { say(e.message); }
+    });
+    document.querySelectorAll('[name="ipiPeer"]').forEach((r) => r.addEventListener("change", () => { st.peer = r.value; st.read = null; draw(); }));
+    $("ipiRead")?.addEventListener("click", async () => {
+      try { st.read = (await api(`/api/ipsec-adopt-read?device_id=${st.device_id}&peer=${encodeURIComponent(st.peer)}`)).read; st.name = st.name || `IPsec: ${st.peer}`; draw(); }
+      catch (e) { say(e.message); }
+    });
+    $("ipiName")?.addEventListener("input", (e) => { st.name = e.target.value; });
+    $("ipiPsk")?.addEventListener("input", (e) => { st.psk = e.target.value.trim(); });
+    $("ipiAdopt")?.addEventListener("click", async () => {
+      const s2 = (m, ok) => { const el = $("ipiSay2"); if (el) { el.textContent = m; el.className = `status ${ok ? "ok" : "err"}`; } };
+      st.busy = true; s2("Importing…", true);
+      try { const { id } = await post("/api/ipsec-builds/adopt", { org_id: st.org_id, device_id: st.device_id, peer_name: st.peer, name: st.name, psk: st.psk }); go("ipsec", String(id)); }
+      catch (e) { st.busy = false; s2(e.message); }
+    });
+  };
+  draw();
+}
+
+// ---- Import (adopt) an existing WireGuard tunnel into the wizard ----------------------------------------------------
+async function wgbImport() {
+  const orgs = await api("/api/orgs").catch(() => []);
+  if (!orgs.length) { $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p><div class="card"><p class="muted">Add a client first.</p></div>`; return; }
+  // each end: { org_id, cands, device_id, ifaces (null until loaded), iface }
+  const end = (o) => ({ org_id: o, cands: [], device_id: null, ifaces: null, iface: "" });
+  const st = { hub: end(orgs[0].id), client: end(orgs[0].id), name: "", preview: null, busy: false };
+  const loadCands = async (e) => { e.cands = (await api(`/api/wg-build-candidates?org_id=${e.org_id}`)).candidates; };
+  const devName = (e) => (e.cands.find((d) => d.id === e.device_id) || {}).name || "";
+  await loadCands(st.hub); st.client.cands = st.hub.cands;
+  const say = (m, ok) => { const s = $("wgiSay"); if (s) { s.textContent = m; s.className = `status ${ok ? "ok" : "err"}`; } };
+
+  const endCard = (key, title) => {
+    const e = st[key];
+    return `<div class="card"><h2>${title}</h2>
+      <label class="field">Client <select data-wgiorg="${key}">${orgs.map((o) => `<option value="${o.id}" ${o.id === e.org_id ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>
+      <div class="table-wrap"><table><thead><tr><th>Use</th><th>Router</th></tr></thead><tbody>
+        ${e.cands.length ? e.cands.map((d) => `<tr><td><input type="radio" name="wgidev-${key}" value="${d.id}" ${e.device_id === d.id ? "checked" : ""} ${d.online ? "" : "disabled"}></td>
+          <td><b>${esc(d.name)}</b> <span class="dot ${d.online ? "on" : "off"}"></span><div class="small muted">${esc(d.model || "")}${d.online ? "" : " · offline"}</div></td></tr>`).join("")
+          : `<tr><td colspan="2" class="muted">This client has no approved routers.</td></tr>`}
+      </tbody></table></div>
+      ${e.device_id ? (e.ifaces ? `<label class="field">WireGuard interface <select data-wgiiface="${key}">
+          <option value="">— pick an interface —</option>${e.ifaces.map((w) => `<option value="${esc(w.name)}" ${e.iface === w.name ? "selected" : ""}>${esc(w.name)} — ${esc((w.addresses || []).join(", ") || "no address")} · ${w.peers} peer(s)</option>`).join("")}</select></label>
+          ${e.ifaces.length ? "" : `<p class="small muted">No importable WireGuard interfaces on ${esc(devName(e))}.</p>`}`
+        : `<div class="actions"><button class="btn" type="button" data-wgiload="${key}">List interfaces</button></div>`) : ""}</div>`;
+  };
+
+  const draw = () => {
+    const ready = st.hub.device_id && st.hub.iface && st.client.device_id && st.client.iface && st.hub.device_id !== st.client.device_id;
+    $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p>
+      <div class="row"><h1>Import a WireGuard tunnel</h1></div>
+      <p class="muted">Adopt a WireGuard tunnel that's already running between two of your routers. Pick the interface on each end — they must be
+        peered with each other. TikManager reads both ends live and tags the peers and routes in place; the interfaces are left alone and the
+        tunnel isn't restarted.</p>
+      ${endCard("hub", "Hub end")}
+      ${endCard("client", "Client end")}
+      <div class="card"><div class="actions"><button class="btn primary" type="button" id="wgiPrev" ${ready ? "" : "disabled"}>Preview</button><span class="status" id="wgiSay"></span></div>
+        ${st.preview ? `<h2>Reconstructed tunnel</h2>
+          <label class="field">Name <input id="wgiName" maxlength="80" value="${esc(st.name)}" placeholder="e.g. HQ ↔ Branch"></label>
+          <div class="grid2"><div><div class="kv"><span>Hub</span><span>${esc(st.preview.hub)} <span class="mono small">${esc(st.preview.hub_iface)}</span></span></div>
+              <div class="kv"><span>Hub tunnel IP</span><span class="mono">${esc(st.preview.hub_tunnel_ip)}</span></div>
+              <div class="kv"><span>Hub advertises</span><span>${(st.preview.hub_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div></div>
+            <div><div class="kv"><span>Client</span><span>${esc(st.preview.client)} <span class="mono small">${esc(st.preview.client_iface)}</span></span></div>
+              <div class="kv"><span>Client tunnel IP</span><span class="mono">${esc(st.preview.client_tunnel_ip)}</span></div>
+              <div class="kv"><span>Client advertises</span><span>${(st.preview.client_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div></div></div>
+          <div class="kv"><span>Public endpoint</span><span class="mono">${esc(st.preview.endpoint || "—")}:${st.preview.port}</span></div>
+          <div class="actions"><button class="btn primary" type="button" id="wgiAdopt" ${st.busy ? "disabled" : ""}>Import tunnel</button><span class="status" id="wgiSay2"></span></div>` : ""}</div>`;
+    wire();
+  };
+
+  const wire = () => {
+    document.querySelectorAll("[data-wgiorg]").forEach((s) => s.addEventListener("change", async (e) => {
+      const k = s.dataset.wgiorg, en = st[k]; en.org_id = +e.target.value; en.device_id = null; en.ifaces = null; en.iface = ""; st.preview = null;
+      try { await loadCands(en); } catch (err) { say(err.message); } draw();
+    }));
+    ["hub", "client"].forEach((k) => document.querySelectorAll(`[name="wgidev-${k}"]`).forEach((r) => r.addEventListener("change", () => {
+      st[k].device_id = +r.value; st[k].ifaces = null; st[k].iface = ""; st.preview = null; draw();
+    })));
+    document.querySelectorAll("[data-wgiload]").forEach((b) => b.addEventListener("click", async () => {
+      const k = b.dataset.wgiload, en = st[k];
+      say("Reading the router…", true);
+      try { en.ifaces = (await api(`/api/devices/${en.device_id}/wg-adoptable`)).interfaces; draw(); } catch (e) { say(e.message); }
+    }));
+    document.querySelectorAll("[data-wgiiface]").forEach((s) => s.addEventListener("change", (e) => { st[s.dataset.wgiiface].iface = e.target.value; st.preview = null; draw(); }));
+    $("wgiName")?.addEventListener("input", (e) => { st.name = e.target.value; });
+    $("wgiPrev")?.addEventListener("click", async () => {
+      say("Reading both ends…", true);
+      try {
+        st.preview = (await api(`/api/wg-adopt-preview?hub_device_id=${st.hub.device_id}&hub_iface=${encodeURIComponent(st.hub.iface)}&client_device_id=${st.client.device_id}&client_iface=${encodeURIComponent(st.client.iface)}`)).preview;
+        say("", true); draw();
+      } catch (e) { say(e.message); }
+    });
+    $("wgiAdopt")?.addEventListener("click", async () => {
+      const s2 = (m, ok) => { const el = $("wgiSay2"); if (el) { el.textContent = m; el.className = `status ${ok ? "ok" : "err"}`; } };
+      st.busy = true; s2("Importing…", true);
+      try { const { id } = await post("/api/wg-builds/adopt", { name: st.name, hub_device_id: st.hub.device_id, hub_iface: st.hub.iface, client_device_id: st.client.device_id, client_iface: st.client.iface }); go("wgbuild", String(id)); }
+      catch (e) { st.busy = false; s2(e.message); }
+    });
+  };
+  draw();
 }
 
 const NAV_ICONS = {

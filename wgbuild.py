@@ -186,6 +186,91 @@ class WgBuilds:
                               bgp_type, hub_as, client_as, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                            (*fields, user, now, now))
 
+    # --- importing an existing tunnel (adopt in place) --------------------------------------------------------
+    def _adopted_subs(self, allowed, tunnel_net):
+        """The LAN subnets a peer's allowed-address advertises: everything except the tunnel network itself and host
+        addresses inside it (10.80.0.2/32), which are the tunnel plumbing, not routed LANs."""
+        out = []
+        for a in allowed:
+            try:
+                n = ipaddress.ip_network(str(a).strip(), strict=False)
+            except ValueError:
+                continue
+            if n.prefixlen == 0 or (n.version == tunnel_net.version and tunnel_net.supernet_of(n)):
+                continue
+            out.append(str(n))
+        return list(dict.fromkeys(out))
+
+    def _reconstruct(self, b):
+        """Read both ends of an existing WireGuard tunnel live and rebuild the wizard's view of it. The two interfaces are
+        matched by public key (each end's peer must point at the other's interface). Returns the build fields plus the
+        object .ids to tag on each router. Nothing is changed here."""
+        hub = self._dev(b.get("hub_device_id"), None, "hub")
+        client = self._dev(b.get("client_device_id"), None, "client router")
+        if hub["id"] == client["id"]:
+            raise WgError("The hub and the client must be two different routers.")
+        for d in (hub, client):
+            if not d["online"]:
+                raise WgError(f"{d['name']} is offline - importing needs to read the tunnel from both routers.")
+        hub_iface = (b.get("hub_iface") or "").strip()
+        client_iface = (b.get("client_iface") or "").strip()
+        if not hub_iface or not client_iface:
+            raise WgError("Pick the WireGuard interface on each end.")
+        hr = self.client_for(hub).wg_adopt_read(hub_iface)
+        cr = self.client_for(client).wg_adopt_read(client_iface)
+        if not hr.get("address") or not cr.get("address"):
+            raise WgError("Both WireGuard interfaces need an IP address before they can be imported.")
+        hub_ip, prefix, tunnel_net = iface_addr(hr["address"])
+        client_ip, _, cnet = iface_addr(cr["address"])
+        if cnet != tunnel_net:
+            raise WgError(f"These two interfaces aren't on the same tunnel subnet ({tunnel_net} vs {cnet}) - they may not be peered with each other.")
+        hub_peer = next((p for p in hr["peers"] if p["public_key"] and p["public_key"] == cr["public_key"]), None)
+        client_peer = next((p for p in cr["peers"] if p["public_key"] and p["public_key"] == hr["public_key"]), None)
+        if not hub_peer or not client_peer:
+            raise WgError(f"{hub['name']}'s \"{hub_iface}\" and {client['name']}'s \"{client_iface}\" aren't peered with each other "
+                          "(their public keys don't line up). Pick the two ends of the same tunnel.")
+        endpoint = (client_peer.get("endpoint") or "").strip() or (hub["wan_ip"] or "")
+        return {"hub": hub, "client": client, "hub_iface": hub_iface, "client_iface": client_iface,
+                "hub_ip": str(hub_ip), "client_ip": str(client_ip), "prefix": prefix, "tunnel_net": str(tunnel_net),
+                "port": int(hr["listen_port"] or 13232), "endpoint": endpoint,
+                "hub_subnets": self._adopted_subs(client_peer["allowed"], tunnel_net),   # the hub advertises what the client lets back
+                "client_subnets": self._adopted_subs(hub_peer["allowed"], tunnel_net),
+                "hub_pubkey": hr["public_key"], "client_pubkey": cr["public_key"],
+                "hub_ids": [{"menu": "/interface/wireguard/peers", "id": hub_peer["id"]}] + [{"menu": "/ip/route", "id": r["id"]} for r in hr["routes"]],
+                "client_ids": [{"menu": "/interface/wireguard/peers", "id": client_peer["id"]}] + [{"menu": "/ip/route", "id": r["id"]} for r in cr["routes"]]}
+
+    def adopt_preview(self, b):
+        """The reconstructed build for the import review step (no changes made)."""
+        r = self._reconstruct(b)
+        return {"hub": r["hub"]["name"], "client": r["client"]["name"], "hub_iface": r["hub_iface"], "client_iface": r["client_iface"],
+                "hub_tunnel_ip": r["hub_ip"], "client_tunnel_ip": r["client_ip"], "tunnel_net": r["tunnel_net"], "prefix": r["prefix"],
+                "port": r["port"], "endpoint": r["endpoint"], "hub_subnets": r["hub_subnets"], "client_subnets": r["client_subnets"]}
+
+    def adopt(self, b, user):
+        """Import the tunnel: insert a managed row (adopted, active), then tag the peers and routes on both routers so the
+        tunnel shows in the wizard and can be disabled/deleted. The interfaces and addresses are left in place."""
+        r = self._reconstruct(b)
+        now = time.time()
+        name = (b.get("name") or f"WireGuard: {r['hub']['name']} ↔ {r['client']['name']}").strip()[:80]
+        bid = self.db.run("""INSERT INTO wg_builds (org_id, name, hub_device_id, hub_iface, hub_iface_existing, hub_tunnel_ip, hub_pubkey,
+                             client_device_id, client_iface, client_tunnel_ip, tunnel_net, endpoint, port, hub_subnets, client_subnets, routing,
+                             client_pubkey, status, adopted, created_by, created_at, updated_at, last_applied)
+                             VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,'static',?,'active',1,?,?,?,?)""",
+                          (r["hub"]["org_id"], name, r["hub"]["id"], r["hub_iface"], r["hub_ip"], r["hub_pubkey"],
+                           r["client"]["id"], r["client_iface"], r["client_ip"], r["tunnel_net"], r["endpoint"], r["port"],
+                           json.dumps(r["hub_subnets"]), json.dumps(r["client_subnets"]), r["client_pubkey"], user, now, now, now))
+        errs = []
+        for d, ids in ((r["hub"], r["hub_ids"]), (r["client"], r["client_ids"])):
+            try:
+                self.client_for(d).tag_objects(ids, tag_for(bid))
+            except RouterError as e:
+                errs.append(f"{d['name']}: {e}")
+        if errs:
+            self.db.run("UPDATE wg_builds SET status='failed', last_error=? WHERE id=?", ("Imported, but tagging it failed: " + "; ".join(errs)[:460], bid))
+        self.db.event(r["hub"]["id"], r["hub"]["org_id"], "wg build imported", f"{name} (hub {r['hub_iface']})")
+        self.db.audit(user, "wg build imported", name, org_id=r["hub"]["org_id"])
+        return bid
+
     # --- applying ---------------------------------------------------------------------------------------------
     def apply(self, build_id, user):
         with self.lock:
@@ -268,7 +353,8 @@ class WgBuilds:
                 "peer": {"public-key": hub_pub, "name": hub["name"], "allowed": [v["tunnel_net"]] + v["hub_subs"], "endpoint": v["endpoint"], "port": v["port"]},
                 "routes": v["hub_subs"], "open_port": False, "bgp": client_bgp}, tag, create_iface=True)
 
-            self.db.run("UPDATE wg_builds SET status='active', last_error=NULL, hub_pubkey=?, client_pubkey=?, last_applied=? WHERE id=?",
+            # a successful apply writes everything under the build's tag - an imported tunnel is now fully managed
+            self.db.run("UPDATE wg_builds SET status='active', last_error=NULL, adopted=0, hub_pubkey=?, client_pubkey=?, last_applied=? WHERE id=?",
                         (hub_pub, client_pub, time.time(), build_id))
             self.db.event(hub["id"], hub["org_id"], "wg build applied", f"{row['name']} (hub {v['hub_name']})")
             self.db.event(client["id"], client["org_id"], "wg build applied", f"{row['name']} (client {v['client_name']})")
@@ -295,9 +381,10 @@ class WgBuilds:
             row = self.db.one("SELECT * FROM wg_builds WHERE id=?", (build_id,))
             tag = tag_for(build_id)
             failures = []
+            adopted = row["adopted"]   # an imported tunnel never created the interfaces, so never remove them
             try:
-                for side, dev_id, iface, created in (("hub", row["hub_device_id"], row["hub_iface"], not row["hub_iface_existing"]),
-                                                     ("client", row["client_device_id"], row["client_iface"], True)):
+                for side, dev_id, iface, created in (("hub", row["hub_device_id"], row["hub_iface"], not adopted and not row["hub_iface_existing"]),
+                                                     ("client", row["client_device_id"], row["client_iface"], not adopted)):
                     d = self.db.one("SELECT * FROM devices WHERE id=?", (dev_id,)) if dev_id else None
                     if not d:
                         continue

@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "3.1.0"    # the release these slides describe (its betas included)
-SINCE = "3.0.0"      # the full release before it
+RELEASE = "3.2.0"    # the release these slides describe (its betas included)
+SINCE = "3.1.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -137,13 +137,23 @@ SLIDES_3_1 = [
              "pfSense...). TikManager sets up the MikroTik end and gives you a copyable settings sheet - with the pre-shared key - "
              "to configure the other box."},
 ]
-SLIDES = SLIDES_3_1
+SLIDES_3_2 = [
+    {"id": "wizard-import", "title": "Import existing tunnels", "img": None, "view": "wizards", "who": "tech",
+     "text": "Both Router Wizards now have an Import existing button: adopt a WireGuard or IPsec tunnel that's already on your routers so "
+             "it shows in the wizard and can be disabled or deleted - without re-applying, re-keying or restarting the running tunnel. "
+             "TikManager reads the tunnel live and tags it in place."},
+    {"id": "import-ipsec", "title": "Imported tunnels, step by step", "img": None, "view": "ipsec", "who": "tech",
+     "text": "IPsec: pick the router, review the settings read from it, and import - the pre-shared key isn't read, so re-applying is "
+             "blocked until you enter it. WireGuard: pick the interface on each end and TikManager reconstructs the tunnel. Imported "
+             "tunnels carry an \"imported\" pill; editing and re-applying graduates them to fully managed."},
+]
+SLIDES = SLIDES_3_2
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1}, "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0},
-         "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
+TOURS = {"3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+         "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")
 

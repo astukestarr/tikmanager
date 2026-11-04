@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS wg_builds (               -- WireGuard Builder wizard
   routing TEXT NOT NULL DEFAULT 'static',            -- static / bgp
   bgp_type TEXT, hub_as INTEGER, client_as INTEGER, bgp_state TEXT,   -- BGP routing: ebgp / ibgp, the AS on each side, live session state
   status TEXT NOT NULL DEFAULT 'draft',              -- draft / applying / active / failed / disabled
+  adopted INTEGER NOT NULL DEFAULT 0,                -- imported from an existing tunnel (tagged in place; interfaces are left alone)
   last_error TEXT, hub_hs INTEGER, client_hs INTEGER, ping_ms REAL, checked_at REAL,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL, last_applied REAL
 );
@@ -149,6 +150,7 @@ CREATE TABLE IF NOT EXISTS ipsec_builds (            -- IPsec Tunnel wizard: a M
   my_id_type TEXT, my_id TEXT, remote_id_type TEXT, remote_id TEXT,   -- IKE identities (My ID / Remote ID) - needed when behind NAT
   psk_blob BLOB, psk_alg TEXT,                      -- the pre-shared key, sealed by vault.py; never stored or listed in plain text
   status TEXT NOT NULL DEFAULT 'draft',             -- draft / applying / active / failed / disabled
+  adopted INTEGER NOT NULL DEFAULT 0,               -- imported from an existing tunnel (peer/identity/policies tagged in place; PSK not captured)
   last_error TEXT, peer_state TEXT, checked_at REAL,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL, last_applied REAL
 );
@@ -349,13 +351,15 @@ class DB:
             c.execute("ALTER TABLE sessions ADD COLUMN as_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
         if "wg_builds" in tables:
             wcols = {r[1] for r in c.execute("PRAGMA table_info(wg_builds)")}
-            for col, ddl in (("bgp_type", "TEXT"), ("hub_as", "INTEGER"), ("client_as", "INTEGER"), ("bgp_state", "TEXT")):
+            for col, ddl in (("bgp_type", "TEXT"), ("hub_as", "INTEGER"), ("client_as", "INTEGER"), ("bgp_state", "TEXT"),
+                             ("adopted", "INTEGER NOT NULL DEFAULT 0")):
                 if col not in wcols:
                     c.execute(f"ALTER TABLE wg_builds ADD COLUMN {col} {ddl}")
         if "ipsec_builds" in tables:
             icols = {r[1] for r in c.execute("PRAGMA table_info(ipsec_builds)")}
             for col, ddl in (("p1_life", "TEXT"), ("p2_life", "TEXT"), ("local_nat", "TEXT NOT NULL DEFAULT '[]'"),
-                             ("my_id_type", "TEXT"), ("my_id", "TEXT"), ("remote_id_type", "TEXT"), ("remote_id", "TEXT")):
+                             ("my_id_type", "TEXT"), ("my_id", "TEXT"), ("remote_id_type", "TEXT"), ("remote_id", "TEXT"),
+                             ("adopted", "INTEGER NOT NULL DEFAULT 0")):
                 if col not in icols:
                     c.execute(f"ALTER TABLE ipsec_builds ADD COLUMN {col} {ddl}")
         if "upgrades" in tables:

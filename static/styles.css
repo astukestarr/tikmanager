@@ -130,6 +130,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px s
 label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 label.field input, label.field select { color: var(--text); }
 .table-wrap { overflow-x: auto; }
+.table-wrap.scroll-y { overflow-y: auto; max-height: 460px; }   /* long lists (e.g. upgrade jobs) scroll inside the card instead of running off the page */
+.table-wrap.scroll-y thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -296,6 +298,8 @@ fieldset.up-when { border: 1px solid var(--border); border-radius: 10px; padding
 .wiz-ico svg { width: 30px; height: 30px; }
 .wiz-name { font-size: 15px; font-weight: 600; }
 .wiz-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.wiz-note { border-left: 3px solid var(--accent); }   /* "imported tunnel" explainer callout on a wizard status page */
+.wiz-note p { margin: 0; }
 .tabs + #vpnBody { margin-top: 12px; }
 .cw-types { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0; }
 

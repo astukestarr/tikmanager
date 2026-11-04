@@ -413,6 +413,7 @@ class Handler(BaseHTTPRequestHandler):
         b["local_nat"] = json.loads(b.get("local_nat") or "[]")
         b["up"] = b["status"] == "active" and b.get("peer_state") == "established"
         b["busy"] = b["id"] in ipsecbuilds.busy
+        b["has_psk"] = bool(b.get("psk_blob"))   # an imported tunnel has no key until the tech enters one (re-apply is blocked until then)
         b.pop("psk_blob", None)
         b.pop("psk_alg", None)
         return b
@@ -940,6 +941,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"as": poller.client(d).bgp_existing_as()})
             except RouterError:
                 return self.json({"as": None})
+        if m := re.fullmatch(r"/api/devices/(\d+)/wg-adoptable", path):   # existing (non-wizard) WireGuard interfaces to import
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline - can't read its WireGuard tunnels right now.")
+            try:
+                return self.json({"interfaces": poller.client(d).wg_adoptable()})
+            except RouterError as e:
+                raise HttpError(502, f"Couldn't read {d['name']}: {e}")
+        if path == "/api/wg-adopt-preview":   # reconstruct a build from the two chosen ends, for the import review (no changes made)
+            self.require(tech=True)
+            try:
+                return self.json({"preview": wgbuilds.adopt_preview(
+                    {"hub_device_id": int(q.get("hub_device_id") or 0), "hub_iface": q.get("hub_iface") or "",
+                     "client_device_id": int(q.get("client_device_id") or 0), "client_iface": q.get("client_iface") or ""})})
+            except (WgError, RouterError) as e:
+                raise HttpError(400, str(e))
         # --- Router Wizard > IPsec Tunnel (technicians) ---
         if path == "/api/ipsec-builds":
             self.require(tech=True)
@@ -956,6 +974,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ipsec-candidates":
             self.require(tech=True)
             return self.json({"candidates": self.vpn_candidates(int(q.get("org_id") or 0), None)})
+        if m := re.fullmatch(r"/api/devices/(\d+)/ipsec-adoptable", path):   # existing (non-wizard) IPsec peers to import
+            s = self.require(tech=True)
+            d = self.device_for(s, m.group(1))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline - can't read its IPsec tunnels right now.")
+            try:
+                return self.json({"peers": poller.client(d).ipsec_adoptable()})
+            except RouterError as e:
+                raise HttpError(502, f"Couldn't read {d['name']}: {e}")
+        if path == "/api/ipsec-adopt-read":   # the live read-back for one peer, for the import review (no changes made)
+            s = self.require(tech=True)
+            d = self.device_for(s, int(q.get("device_id") or 0))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline.")
+            try:
+                rd = poller.client(d).ipsec_adopt_read((q.get("peer") or "").strip())
+            except RouterError as e:
+                raise HttpError(502, f"Couldn't read {d['name']}: {e}")
+            rd.pop("ids", None)   # internal object ids never leave the server
+            return self.json({"read": rd})
         # --- scripts, groups, tasks (technicians) ---
         if path == "/api/scripts":
             self.require(tech=True)
@@ -2292,6 +2330,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(409, "This build is busy - wait for the current change to finish.")
             db.audit(s["email"], f"wg build {act} started", b["name"], self.client_ip(), org_id=b["org_id"])
             return self.json({"ok": True})
+        if path == "/api/wg-builds/adopt":   # import an existing WireGuard tunnel (adopt in place - tags the peers/routes)
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            try:
+                bid = wgbuilds.adopt({"name": str(b.get("name") or "").strip()[:80],
+                                      "hub_device_id": int(b.get("hub_device_id") or 0), "hub_iface": str(b.get("hub_iface") or "").strip()[:60],
+                                      "client_device_id": int(b.get("client_device_id") or 0), "client_iface": str(b.get("client_iface") or "").strip()[:60]},
+                                     s["email"])
+            except (WgError, RouterError, KeyError, TypeError, ValueError) as e:
+                raise HttpError(400, str(e) or "Couldn't import that tunnel.") from None
+            return self.json({"ok": True, "id": bid})
         # --- Router Wizard > IPsec Tunnel (technicians) ---
         if path == "/api/ipsec-builds":   # create / update; {apply: true} applies right away
             s = self.require(tech=True, write=True)
@@ -2312,7 +2361,20 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e) or "Invalid tunnel settings.") from None
             db.audit(s["email"], "ipsec tunnel saved", build["name"], self.client_ip(), org_id=build["org_id"])
             if b.get("apply"):
-                ipsecbuilds.apply(bid, s["email"])
+                try:
+                    ipsecbuilds.apply(bid, s["email"])
+                except IpsecError as e:   # e.g. an imported tunnel saved without its pre-shared key
+                    raise HttpError(400, str(e)) from None
+            return self.json({"ok": True, "id": bid})
+        if path == "/api/ipsec-builds/adopt":   # import an existing IPsec tunnel (adopt in place - tags peer/identity/policies)
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            try:
+                bid = ipsecbuilds.adopt({"org_id": int(b.get("org_id") or 0), "device_id": int(b.get("device_id") or 0),
+                                         "peer_name": str(b.get("peer_name") or "").strip()[:60], "name": str(b.get("name") or "").strip()[:80],
+                                         "psk": str(b.get("psk") or "").strip()[:128]}, s["email"])
+            except (IpsecError, RouterError, KeyError, TypeError, ValueError) as e:
+                raise HttpError(400, str(e) or "Couldn't import that tunnel.") from None
             return self.json({"ok": True, "id": bid})
         if m := re.fullmatch(r"/api/ipsec-builds/(\d+)/(apply|disable|delete)", path):
             s = self.require(tech=True, write=True)
@@ -2324,7 +2386,10 @@ class Handler(BaseHTTPRequestHandler):
                 db.run("DELETE FROM ipsec_builds WHERE id=?", (b["id"],))
                 db.audit(s["email"], "ipsec tunnel deleted", b["name"], self.client_ip(), org_id=b["org_id"])
                 return self.json({"ok": True, "deleted": True})
-            started = ipsecbuilds.apply(b["id"], s["email"]) if act == "apply" else ipsecbuilds.disable(b["id"], s["email"], delete=act == "delete")
+            try:
+                started = ipsecbuilds.apply(b["id"], s["email"]) if act == "apply" else ipsecbuilds.disable(b["id"], s["email"], delete=act == "delete")
+            except IpsecError as e:   # an imported tunnel can't be re-applied until its pre-shared key is entered
+                raise HttpError(400, str(e)) from None
             if not started:
                 raise HttpError(409, "This tunnel is busy - wait for the current change to finish.")
             db.audit(s["email"], f"ipsec tunnel {act} started", b["name"], self.client_ip(), org_id=b["org_id"])

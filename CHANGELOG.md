@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.2.0-beta.1 - 2026-11-03
+
+**New: import existing tunnels into the Router Wizard.** Both wizards gain an **Import existing** button that adopts a
+tunnel already configured on your routers (by hand or another tool) so it shows in the wizard and can be disabled or
+deleted - without re-applying, re-keying or restarting the running tunnel ("adopt in place").
+
+- **IPsec** - pick the local router, read its existing IPsec peers, review the settings TikManager reads live (crypto,
+  subnets, IKE identities), and import. The peer, its identity and its policies are tagged in place; the shared
+  profile/proposal and your own NAT/firewall are left alone. The **pre-shared key isn't read** - an imported tunnel is
+  view/disable/delete right away, and re-applying (to fully manage it) is blocked until you enter the key under Edit.
+- **WireGuard** - pick the interface on each end (they must be peered with each other); TikManager reads both routers
+  live, reconstructs the tunnel, and tags the peers and routes in place. The interfaces and addresses are left alone;
+  Disable/Delete removes only the peers and routes.
+- Imported tunnels carry an **"imported"** pill; editing and re-applying graduates them to fully managed.
+
+Also: the Upgrades page's **Upgrade jobs** table now scrolls within the card (with a sticky header) instead of running
+off the bottom of the page when there are many jobs.
+
 ## 3.1.0 - 2026-11-03
 
 **New: Router Wizard** - a sidebar section (just below Dashboard) of guided, step-by-step jobs on your routers. Two

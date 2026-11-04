@@ -933,6 +933,43 @@ class RouterOS:
                     return r["as"]
         return None
 
+    def tag_objects(self, items, tag):
+        """Stamp comment=tag onto a list of existing objects so a hand-made tunnel becomes a tracked wizard build (adopt in
+        place). items: [{menu, id}]. Only comment is changed - nothing about the running tunnel is touched."""
+        for it in items:
+            if it.get("menu") and it.get("id"):
+                self._req("PATCH", f"{it['menu']}/{it['id']}", {"comment": tag})
+
+    # --- adopting an existing tunnel into the wizard (import) ------------------------------------------------------------
+    def wg_adoptable(self):
+        """Existing WireGuard interfaces that could be imported: not already a wizard/VPN/remote-access interface.
+        [{name, addresses, listen_port, peers (count), comment}]."""
+        skip_tags = (WGB_TAG, VPN_TAG, RA_TAG)
+        out = []
+        for w in self.wg_list():
+            c = w.get("comment") or ""
+            if w["name"] in (VPN_IFACE, RA_IFACE) or any(c.startswith(t) for t in skip_tags):
+                continue
+            out.append({"name": w["name"], "addresses": w["addresses"], "listen_port": w["listen_port"],
+                        "peers": len(w["peer_allowed"]), "comment": c})
+        return out
+
+    def wg_adopt_read(self, iface):
+        """Live read of one WireGuard interface for adoption: its address/port/public key, its peers (with .id and
+        allowed-address/endpoint) and the static routes that point out of it. Never reads a private key."""
+        info = next((w for w in self.wg_list() if w["name"] == iface), None)
+        if not info:
+            raise RouterError(f"The WireGuard interface \"{iface}\" isn't on this router any more.")
+        peers = []
+        for p in self.optional(lambda: self.get(f"/interface/wireguard/peers?interface={urllib.parse.quote(iface)}"), []) or []:
+            peers.append({"public_key": p.get("public-key"), "id": p.get(".id"), "comment": p.get("comment") or "",
+                          "allowed": [x.strip() for x in str(p.get("allowed-address") or "").split(",") if x.strip()],
+                          "endpoint": p.get("endpoint-address") or "", "endpoint_port": p.get("endpoint-port") or ""})
+        routes = [{"id": r.get(".id"), "dst": r.get("dst-address")} for r in self.optional(lambda: self.get("/ip/route"), []) or []
+                  if r.get("gateway") == iface and r.get("dst-address") not in ("0.0.0.0/0", None)]
+        return {"name": iface, "address": info["addresses"][0] if info["addresses"] else None,
+                "listen_port": info["listen_port"], "public_key": info["public_key"], "peers": peers, "routes": routes}
+
     # --- IPsec Tunnel wizard (ipsecbuild.py) - policy-based site-to-site to any-brand far end; everything carries the per-build tag --
     def ipsec_apply(self, cfg, tag):
         """Configure the local MikroTik side of a policy-based IPsec tunnel. cfg: {name, remote_addr, remote_ip, exchange,
@@ -1011,6 +1048,56 @@ class RouterOS:
             if remote_ip and str(p.get("remote-address") or "").split("/")[0] == remote_ip:
                 return p.get("state") or ("established" if p.get("uptime") else None)
         return None
+
+    def ipsec_adoptable(self):
+        """Existing IPsec peers that could be imported (not already a wizard tunnel): [{name, remote, policies (count),
+        profile, comment}]. Remote-access responders (address 0.0.0.0/::) are skipped - this wizard is for site-to-site."""
+        policies = [p for p in self.optional(lambda: self.get("/ip/ipsec/policy"), []) or []
+                    if str(p.get("template")) != "true"]
+        out = []
+        for peer in self.optional(lambda: self.get("/ip/ipsec/peer"), []) or []:
+            if str(peer.get("comment") or "").startswith(IPSEC_TAG):
+                continue
+            remote = str(peer.get("address") or "").split("/")[0].split("[")[0]
+            if remote in ("0.0.0.0", "::", ""):   # a responder for roaming clients, not a site tunnel
+                continue
+            pols = [p for p in policies if p.get("peer") == peer.get("name")]
+            out.append({"name": peer.get("name"), "remote": remote, "policies": len(pols),
+                        "profile": peer.get("profile") or "default", "comment": peer.get("comment") or ""})
+        return out
+
+    def ipsec_adopt_read(self, peer_name):
+        """Live read of one IPsec peer for adoption: the crypto (from its profile and the proposal its policies use), the
+        local/remote subnets (from the policies), the IKE identities, and the .ids of the peer/identity/policies to tag.
+        The pre-shared key is never read. Returns the build params plus `ids` (what to stamp) - the profile and proposal
+        are left untagged (they're often shared, e.g. 'default')."""
+        peer = next((p for p in self.optional(lambda: self.get("/ip/ipsec/peer"), []) or [] if p.get("name") == peer_name), None)
+        if not peer:
+            raise RouterError(f"The IPsec peer \"{peer_name}\" isn't on this router any more.")
+        prof_name = peer.get("profile") or "default"
+        prof = next((x for x in self.optional(lambda: self.get("/ip/ipsec/profile"), []) or [] if x.get("name") == prof_name), {})
+        policies = [p for p in self.optional(lambda: self.get("/ip/ipsec/policy"), []) or []
+                    if p.get("peer") == peer_name and str(p.get("template")) != "true"]
+        prop_name = next((p.get("proposal") for p in policies if p.get("proposal")), "default")
+        prop = next((x for x in self.optional(lambda: self.get("/ip/ipsec/proposal"), []) or [] if x.get("name") == prop_name), {})
+        identities = [i for i in self.optional(lambda: self.get("/ip/ipsec/identity"), []) or [] if i.get("peer") == peer_name]
+        local = list(dict.fromkeys(p.get("src-address") for p in policies if p.get("src-address")))
+        remote = list(dict.fromkeys(p.get("dst-address") for p in policies if p.get("dst-address")))
+        mt, mv = _split_id(identities[0].get("my-id") if identities else "")
+        rt, rv = _split_id(identities[0].get("remote-id") if identities else "")
+        has_nat = any(str(r.get("action")) == "netmap" for r in self.optional(lambda: self.get("/ip/firewall/nat"), []) or [])
+        ids = [{"menu": "/ip/ipsec/peer", "id": peer.get(".id")}]
+        ids += [{"menu": "/ip/ipsec/identity", "id": i.get(".id")} for i in identities]
+        ids += [{"menu": "/ip/ipsec/policy", "id": p.get(".id")} for p in policies]
+        return {"name": peer.get("name"), "remote_addr": str(peer.get("address") or "").split("[")[0],
+                "ike": "ike2" if str(peer.get("exchange-mode")) in ("ike2", "") else "ike",
+                "p1": {"enc": prof.get("enc-algorithm") or "", "hash": prof.get("hash-algorithm") or "",
+                       "dh": prof.get("dh-group") or "", "life": _lifetime(prof.get("lifetime"))},
+                "p2": {"enc": prop.get("enc-algorithms") or "", "auth": prop.get("auth-algorithms") or "",
+                       "pfs": prop.get("pfs-group") or "none", "life": _lifetime(prop.get("lifetime"))},
+                "local_subnets": local, "remote_subnets": remote, "has_nat": has_nat,
+                "my_id_type": mt, "my_id": mv, "remote_id_type": rt, "remote_id": rv,
+                "profile": prof_name, "proposal": prop_name, "ids": ids}
 
     # --- remote access (remoteaccess.py) - everything carries RA_TAG, so it can be removed exactly -----------------------
     def ra_setup(self, name, cfg):
@@ -1387,6 +1474,30 @@ def _dur_s(t):
     unit = {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}
     total = sum(float(n) * unit[u] for n, u in re.findall(r"(\d+(?:\.\d+)?)(ms|[wdhms])", t) if u != "ms")
     return int(total)
+
+
+def _split_id(raw):
+    """A RouterOS IKE identity ('address:1.2.3.4', 'fqdn:vpn.example.com', '' for auto) -> (type, value) for the wizard.
+    Bare values (no 'type:' prefix) are treated as auto, since the type can't be told apart reliably."""
+    s = str(raw or "").strip()
+    if not s:
+        return "auto", ""
+    kind, _, val = s.partition(":")
+    kind = kind.strip().lower()
+    if kind in ("address", "fqdn", "user-fqdn", "key-id") and val.strip():
+        return kind, val.strip()
+    return "auto", ""
+
+
+def _lifetime(raw):
+    """A RouterOS lifetime ('1d', '08:00:00', '1d00:00:00') -> a wizard-friendly time string (e.g. '1d', '8h'); '' if none."""
+    secs = _dur_s(raw)
+    if not secs:
+        return ""
+    for unit, n in (("w", 604800), ("d", 86400), ("h", 3600), ("m", 60)):
+        if secs % n == 0:
+            return f"{secs // n}{unit}"
+    return f"{secs}s"
 
 
 def _int(v):
@@ -1838,6 +1949,33 @@ class SimRouter:
             if c.get("remote_ip") == remote_ip or c.get("remote_addr") == remote_ip:
                 return "established"
         return "established" if (self._sim().get("ipsec") and remote_ip) else None
+
+    def tag_objects(self, items, tag):
+        self._sim().setdefault("adopted_tags", []).append({"tag": tag, "items": items})
+
+    # one fake hand-made tunnel of each kind so the import/adopt flow runs in dev (real adoption needs hardware)
+    def wg_adoptable(self):
+        return [{"name": "wg-existing", "addresses": [f"10.90.0.{(self.id % 40) + 1}/24"], "listen_port": "13231", "peers": 1, "comment": ""}]
+
+    def wg_adopt_read(self, iface):
+        pub = "SIM-ADOPT-" + iface   # same on both ends (they both pick "wg-existing"), so the server's key match succeeds in dev
+        return {"name": iface, "address": f"10.90.0.{(self.id % 40) + 1}/24", "listen_port": "13231", "public_key": pub,
+                "peers": [{"public_key": pub, "id": "*AD1", "comment": "", "allowed": ["10.90.0.0/24", "192.168.90.0/24"],
+                           "endpoint": f"198.51.100.{(self.id % 40) + 1}", "endpoint_port": "13231"}],
+                "routes": [{"id": "*AD2", "dst": "192.168.90.0/24"}]}
+
+    def ipsec_adoptable(self):
+        return [{"name": "hq-existing", "remote": f"198.51.100.{(self.id % 40) + 50}", "policies": 1, "profile": "default", "comment": ""}]
+
+    def ipsec_adopt_read(self, peer_name):
+        return {"name": peer_name, "remote_addr": f"198.51.100.{(self.id % 40) + 50}", "ike": "ike2",
+                "p1": {"enc": "aes-256", "hash": "sha256", "dh": "modp2048", "life": "1d"},
+                "p2": {"enc": "aes-256-cbc", "auth": "sha256", "pfs": "modp2048", "life": "30m"},
+                "local_subnets": ["192.168.70.0/24"], "remote_subnets": ["10.20.0.0/24"], "has_nat": False,
+                "my_id_type": "auto", "my_id": "", "remote_id_type": "auto", "remote_id": "",
+                "profile": "default", "proposal": "default",
+                "ids": [{"menu": "/ip/ipsec/peer", "id": "*IP1"}, {"menu": "/ip/ipsec/identity", "id": "*IP2"},
+                        {"menu": "/ip/ipsec/policy", "id": "*IP3"}]}
 
     def ra_setup(self, name, cfg):
         time.sleep(0.3)

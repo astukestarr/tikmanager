@@ -196,8 +196,51 @@ class IpsecBuilds:
             return None
         return self.vault.open(row["psk_blob"], row["psk_alg"], f"ipsec:{build_id}").decode()
 
+    # --- importing an existing tunnel (adopt in place) --------------------------------------------------------
+    def adopt(self, b, user):
+        """Import an existing IPsec peer on a client's router into the wizard: read its config live, insert a managed row
+        (adopted, active), then tag the peer/identity/policies so it shows in the wizard and can be disabled/deleted. The
+        pre-shared key is not read - a re-apply (edit) is blocked until the tech enters it. Nothing on the router changes
+        except those objects' comments, so the running tunnel is untouched."""
+        d = self.db.one("SELECT * FROM devices WHERE id=?", (b.get("device_id"),))
+        if not d or d["org_id"] != b["org_id"] or d["state"] != "adopted":
+            raise IpsecError("The local router must be an approved router of this client.")
+        if not d["online"]:
+            raise IpsecError(f"{d['name']} is offline - importing needs to read the tunnel from the router.")
+        peer_name = (b.get("peer_name") or "").strip()
+        if not peer_name:
+            raise IpsecError("Pick an existing IPsec tunnel to import.")
+        rd = self.client_for(d).ipsec_adopt_read(peer_name)
+        if not rd.get("remote_subnets") or not rd.get("local_subnets"):
+            raise IpsecError("That tunnel has no usable IPsec policies to import.")
+        now = time.time()
+        name = (b.get("name") or f"IPsec: {peer_name}").strip()[:80]
+        psk = (b.get("psk") or "").strip()
+        bid = self.db.run("""INSERT INTO ipsec_builds (org_id, name, device_id, remote_addr, ike, p1_enc, p1_hash, p1_dh, p1_life,
+                             p2_enc, p2_auth, pfs, p2_life, local_subnets, remote_subnets, local_nat,
+                             my_id_type, my_id, remote_id_type, remote_id, status, adopted, created_by, created_at, updated_at, last_applied)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',1,?,?,?,?)""",
+                          (b["org_id"], name, d["id"], rd["remote_addr"], rd["ike"],
+                           rd["p1"]["enc"], rd["p1"]["hash"], rd["p1"]["dh"], rd["p1"]["life"],
+                           rd["p2"]["enc"], rd["p2"]["auth"], rd["p2"]["pfs"], rd["p2"]["life"],
+                           json.dumps(rd["local_subnets"]), json.dumps(rd["remote_subnets"]), "[]",
+                           rd["my_id_type"], rd["my_id"], rd["remote_id_type"], rd["remote_id"], user, now, now, now))
+        if psk:
+            self._seal_psk(bid, psk)
+        try:
+            self.client_for(d).tag_objects(rd["ids"], tag_for(bid))
+        except RouterError as e:
+            self.db.run("UPDATE ipsec_builds SET status='failed', last_error=? WHERE id=?", (f"Imported, but tagging it failed: {e}"[:500], bid))
+        self.db.event(d["id"], d["org_id"], "ipsec tunnel imported", f"{name} <- {peer_name}")
+        self.db.audit(user, "ipsec tunnel imported", name, org_id=b["org_id"], detail=f"peer {peer_name}")
+        return bid
+
     # --- applying ---------------------------------------------------------------------------------------------
     def apply(self, build_id, user):
+        row = self.db.one("SELECT adopted, psk_blob FROM ipsec_builds WHERE id=?", (build_id,))
+        if row and row["adopted"] and not row["psk_blob"]:
+            raise IpsecError("This tunnel was imported, so TikManager doesn't have its pre-shared key. Edit it and enter "
+                             "the key first - re-applying rebuilds the tunnel under the wizard's own settings.")
         with self.lock:
             if build_id in self.busy:
                 return False
@@ -229,7 +272,8 @@ class IpsecBuilds:
                                  f"{row['remote_id_type']}:{row['remote_id']}" if row["remote_id_type"] and row["remote_id_type"] != "auto" and row["remote_id"] else ""),
                    "psk": self.reveal_psk(build_id) or ""}
             self.client_for(d).ipsec_apply(cfg, tag)
-            self.db.run("UPDATE ipsec_builds SET status='active', last_error=NULL, last_applied=? WHERE id=?", (time.time(), build_id))
+            # a successful apply rebuilds the tunnel under the wizard's own naming - an imported tunnel is now fully managed
+            self.db.run("UPDATE ipsec_builds SET status='active', last_error=NULL, adopted=0, last_applied=? WHERE id=?", (time.time(), build_id))
             self.db.event(d["id"], d["org_id"], "ipsec tunnel applied", f"{row['name']} -> {row['remote_addr']}")
             self.db.audit(user, "ipsec tunnel applied", row["name"], org_id=row["org_id"])
         except (IpsecError, RouterError) as e:
