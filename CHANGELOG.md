@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.8 - 2026-11-04
+
+**ConnectWise billing: "billed" detection is more forgiving.** A managed MikroTik now counts as billed if its
+configuration is set on an active agreement addition **or** the addition is named after the configuration / carries its
+serial number - so it's recognised however you structure the addition, not only when the config object is attached.
+
 ## 3.5.0-beta.7 - 2026-11-04
 
 **Packet Sniffer fix.** The capture set `memory-limit=10MiB`, a unit some RouterOS builds reject ("invalid trailing

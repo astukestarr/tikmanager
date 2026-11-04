@@ -305,11 +305,12 @@ class Integrations:
         return out
 
     def cw_billed(self, company_id):
-        """Configuration ids that sit on an active agreement addition (= being billed), each -> {agreement, addition}. The
-        billing model is one addition per managed unit with the configuration set on that addition."""
+        """Active agreement additions for a company, each as {agreement, name, config_ids}. billing_report decides which
+        managed MikroTik each addition bills - by the configuration set on the addition, or by the addition's name/serial
+        - so it works whether the config is attached to the addition or the addition is just named after it."""
         if self._demo("cw"):
             return self._demo_billed(int(company_id))
-        billed = {}
+        out = []
         ags = self._cw("/finance/agreements", {"conditions": f"company/id={int(company_id)} and cancelledFlag=false",
                        "fields": "id,name", "pageSize": 1000}) or []
         for ag in ags:
@@ -318,9 +319,9 @@ class Integrations:
             for a in adds:
                 if a.get("cancelledDate"):
                     continue
-                for cid in self._addition_config_ids(a):
-                    billed[cid] = {"agreement": ag.get("name", ""), "addition": a.get("invoiceDescription") or a.get("description") or ""}
-        return billed
+                out.append({"agreement": ag.get("name", ""), "name": a.get("invoiceDescription") or a.get("description") or "",
+                            "config_ids": self._addition_config_ids(a)})
+        return out
 
     @staticmethod
     def _addition_config_ids(a):
@@ -370,11 +371,11 @@ class Integrations:
         return out
 
     def _demo_billed(self, company_id):
-        billed = {}
+        out = []
         for i, c in enumerate(self._demo_configs(company_id)):
             if i % 2 == 0:   # bill every other one, so some routers show as missed billing
-                billed[c["id"]] = {"agreement": "Managed Services - Monthly", "addition": c["name"]}
-        return billed
+                out.append({"agreement": "Managed Services - Monthly", "name": c["name"], "config_ids": [c["id"]]})
+        return out
 
     # --- IT Glue ----------------------------------------------------------------------------------------------
     def _itg(self, method, path, params=None, body=None):

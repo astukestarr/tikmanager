@@ -517,6 +517,24 @@ class Handler(BaseHTTPRequestHandler):
         return re.sub(r"[^A-Za-z0-9]", "", str(s or "")).upper()
 
     @staticmethod
+    def _norm_name(s):
+        """Names for matching an addition to a config: lower-case, letters/digits only."""
+        return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+    def _config_billed(self, cfg, bill_by_id, additions):
+        """The active agreement addition that bills this configuration, or None. Matched by the configuration set on the
+        addition, or (fallback) by the addition being named after the config or carrying its serial number."""
+        a = bill_by_id.get(cfg["id"])
+        if a:
+            return a
+        cn, cs = self._norm_name(cfg.get("name")), self._norm_serial(cfg.get("serial"))
+        for a in additions:
+            an = self._norm_name(a.get("name"))
+            if an and ((cn and an == cn) or (cs and cs in self._norm_serial(a.get("name")))):
+                return a
+        return None
+
+    @staticmethod
     def _cw_perm_hint(msg, needed):
         """A ConnectWise 403 only says 'no permission' - add which security-role option the API member is missing."""
         m = str(msg)
@@ -533,7 +551,11 @@ class Handler(BaseHTTPRequestHandler):
         type_id = int(tid) if str(tid or "").isdigit() else None
         cid = org["cw_id"]
         configs = integ.cw_configurations(cid, type_id)
-        billed = integ.cw_billed(cid)
+        additions = integ.cw_billed(cid)   # [{agreement, name, config_ids}] on active agreements
+        bill_by_id = {}
+        for a in additions:
+            for acid in a.get("config_ids") or []:
+                bill_by_id.setdefault(acid, a)
         by_serial, by_id = {}, {}
         for c in configs:
             by_id[c["id"]] = c
@@ -550,9 +572,10 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = by_serial.get(n) if n else None
             if cfg:
                 used.add(cfg["id"])
-            b = billed.get(cfg["id"]) if cfg else None
+            a = self._config_billed(cfg, bill_by_id, additions) if cfg else None
+            billed_on = {"agreement": a["agreement"], "addition": a["name"]} if a else None
             rows.append({"device_id": d["id"], "name": d["name"], "serial": d["serial"] or "", "model": d["model"] or "",
-                         "site": d["site"] or "", "config": cfg, "billed": bool(b), "billed_on": b,
+                         "site": d["site"] or "", "config": cfg, "billed": bool(a), "billed_on": billed_on,
                          "override": override, "manual": bool(override and cfg)})
         orphans = [c for c in configs if c["id"] not in used]   # CW configs of this type with no managed router here
         return {"org": org["name"], "org_id": org["id"], "cw_id": cid, "type_id": type_id,
