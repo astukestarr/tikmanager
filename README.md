@@ -26,7 +26,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
 - Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
-  [Site-to-site VPN](#site-to-site-vpn) · [Router Wizard](#router-wizard-wireguard-and-ipsec-tunnels) · [Remote access](#remote-access-wireguard-for-windows) · [Router health](#router-health-dashboard) · [Diagnostics](#diagnostics-traffic-watch-speed-test-link-test) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
+  [Site-to-site VPN](#site-to-site-vpn) · [Router Wizard](#router-wizard-wireguard-and-ipsec-tunnels) · [Remote access](#remote-access-wireguard-for-windows) · [Router health](#router-health-dashboard) · [Diagnostics](#diagnostics-traffic-watch-packet-sniffer-link-test) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
 - Running it: [Keeping it secure](#keeping-it-secure) · [Where things live](#where-things-live-on-the-server) ·
   [Troubleshooting adoption](#if-a-router-registers-but-never-comes-online)
@@ -678,21 +678,24 @@ inventory (a field whitelist: no passwords, keys or SNMP community names are rea
 
 Findings that aren't a problem on a router can be **accepted** with a reason (see [Compliance](#compliance)).
 
-## Diagnostics (Traffic Watch, Speed Test, Link test)
+## Diagnostics (Traffic Watch, Packet Sniffer, Link test)
 
 **Diagnostics** (sidebar, technicians) runs on-demand tests against a router, each saving a report you can revisit, email or
 download as CSV.
 
 - **Traffic Watch** - watch a router's live traffic for a set number of minutes and see who's using the connection: top
-  talkers, destinations, services, connections and throughput over time, with an optional filter to one address. It reads
-  the router's connection tracking, so it needs no extra router permission.
-- **Speed Test** - a quick internet reachability, latency and jitter check from the router itself (with a rough download
-  figure - a health check, not a line-rate speed test). The router runs `/tool fetch`, so its user needs the `ftp` policy;
-  newly adopted routers get it, and on existing routers grant it once with
-  `/user group set [find name=tikmanager] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp`.
+  talkers, destinations, services, connections and throughput over time, with an optional filter to one interface or
+  address. It uses the router's `/tool torch`, so its user needs the `sniff` policy (newly adopted routers get it; on
+  existing routers add it once, below).
+- **Packet Sniffer** - capture packets on a chosen interface for a set number of seconds and see a summary (protocols, top
+  talkers, conversations). It uses `/tool sniffer` with a memory limit, so nothing is written to flash. Also needs the
+  `sniff` policy.
 - **Link test** - real throughput between two of your routers (RAM-to-RAM, multiple TCP streams), which *can* show gigabit
   over a LAN, WAN or site-to-site path. It briefly turns on the target's bandwidth-test server and restores it after, and
   measures the path between the two routers - not the public internet.
+
+Traffic Watch and the Packet Sniffer need the `sniff` policy; grant it once on an existing router with
+`/user group set [find name=tikmanager] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp,sniff`.
 
 Each router's page also has an **Uptime** bar (1M / 14d / 7d / 3d / 1d, with the overall uptime %, from its online/offline
 history) and a **Console** tab that runs a RouterOS command and shows the output - a command runner (use Winbox for a full

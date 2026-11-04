@@ -584,6 +584,32 @@ class Handler(BaseHTTPRequestHandler):
                 "missed": sum(1 for r in rows if not r["billed"]), "rows": rows, "orphans": orphans,
                 "configs": [{"id": c["id"], "name": c["name"], "serial": c["serial"]} for c in configs]}
 
+    def billing_all(self):
+        """Reconcile every client linked to ConnectWise at once: aggregate tiles + every managed router with its client,
+        so the billing page opens on the whole fleet. Per-client failures (a 403, etc.) are collected, not fatal."""
+        cw = integ.config("cw")
+        tid = cw.get("mikrotik_type_id")
+        type_id = int(tid) if str(tid or "").isdigit() else None
+        rows, orphans, errors, clients = [], [], [], []
+        managed = matched = billed = missed = 0
+        for org in db.q("SELECT id, name, cw_id FROM orgs WHERE cw_id IS NOT NULL AND cw_id!='' AND active=1 ORDER BY name"):
+            try:
+                r = self.billing_report(org)
+            except IntegrationError as e:
+                errors.append({"org": org["name"], "error": self._cw_perm_hint(str(e), "Companies > Configurations: Inquire")})
+                continue
+            clients.append({"org": org["name"], "org_id": org["id"], "managed": r["managed"],
+                            "matched": r["matched"], "billed": r["billed"], "missed": r["missed"]})
+            managed += r["managed"]; matched += r["matched"]; billed += r["billed"]; missed += r["missed"]
+            for x in r["rows"]:
+                x = dict(x); x["org"] = r["org"]; x["org_id"] = r["org_id"]; rows.append(x)
+            for c in r["orphans"]:
+                c = dict(c); c["org"] = r["org"]; orphans.append(c)
+        rows.sort(key=lambda x: (x["org"].lower(), x["name"].lower()))
+        return {"all": True, "type_id": type_id, "type_name": cw.get("mikrotik_type_name") or "",
+                "has_type": bool(type_id), "managed": managed, "matched": matched, "billed": billed,
+                "missed": missed, "rows": rows, "orphans": orphans, "clients": clients, "errors": errors}
+
     UPTIME_RANGES = {"1d": 86400, "3d": 3 * 86400, "7d": 7 * 86400, "14d": 14 * 86400, "1M": 30 * 86400}
 
     def uptime_report(self, d, rng):
@@ -1150,6 +1176,17 @@ class Handler(BaseHTTPRequestHandler):
                            LEFT JOIN devices d ON d.org_id=o.id AND d.state='adopted'
                            WHERE o.cw_id IS NOT NULL AND o.active=1 GROUP BY o.id, o.name, o.cw_id ORDER BY o.name""")
             return self.json({"configured": integ.configured("cw"), "orgs": [dict(r) for r in rows]})
+        if path == "/api/billing/all":   # reconcile every linked client at once (the page's default view)
+            self.require(tech=True)
+            if not integ.configured("cw"):
+                raise HttpError(400, "ConnectWise PSA isn't set up yet (Admin > Integrations).")
+            try:
+                if q.get("refresh"):
+                    integ._cache.pop("billing_all", None)
+                return self.json(integ._cached("billing_all", self.billing_all, 120))
+            except IntegrationError as e:
+                raise HttpError(502, self._cw_perm_hint(str(e), "Companies > Configurations: Inquire and Finance > Agreements: Inquire "
+                                                               "(and System > Table Setup: Inquire to read the Configuration Type)"))
         if path == "/api/billing":   # reconcile one client
             self.require(tech=True)
             if not integ.configured("cw"):
@@ -2867,7 +2904,8 @@ class Handler(BaseHTTPRequestHandler):
                 hours = max(1, min(720, int(b.get("every_hours") or 24)))
             except (TypeError, ValueError):
                 raise HttpError(400, "Invalid time.") from None
-            opts = {"channel": b.get("channel") if b.get("channel") in UPGRADE_CHANNELS else "", "firmware": bool(b.get("firmware", True))}
+            opts = {"channel": b.get("channel") if b.get("channel") in UPGRADE_CHANNELS else "", "firmware": bool(b.get("firmware", True)),
+                    "cw_ticket": bool(b.get("cw_ticket")) and action == "upgrade"}
             row = {"kind": kind, "run_at": run_at, "at_time": at_time, "days": json.dumps(days), "every_hours": hours,
                    "tz": str(b.get("tz") or "")[:60], "last_run": None}
             values = (name, action, script_id, json.dumps(opts), json.dumps(targets), kind, run_at, at_time, json.dumps(days), hours, row["tz"],

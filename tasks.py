@@ -170,7 +170,8 @@ class Tasks:
         if not ros and not fw:
             return self._finish_result(res["id"], "skipped", f"Up to date (RouterOS {(d.get('version') or '').split(' ')[0]}"
                                                              f"{', newest ' + d['ros_latest'] if d.get('ros_latest') else ', not checked yet'}).")
-        created, skipped = self.upgrades.schedule([d], time.time(), opts.get("channel") or "", firmware, run["by_user"] or "task")
+        created, skipped = self.upgrades.schedule([d], time.time(), opts.get("channel") or "", firmware, run["by_user"] or "task",
+                                                  cw_ticket=bool(opts.get("cw_ticket")))
         if created:
             self._finish_result(res["id"], "ok", f"Upgrade started (job {created[0]}): RouterOS {(d.get('version') or '').split(' ')[0]}"
                                                  f"{' -> ' + d['ros_latest'] if ros else ''}{', RouterBOARD firmware' if fw else ''}. "

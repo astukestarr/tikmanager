@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "3.4.0"    # the release these slides describe (its betas included)
-SINCE = "3.2.0"      # the full release before it (3.3.0 was never released on its own)
+RELEASE = "3.5.0"    # the release these slides describe (its betas included)
+SINCE = "3.4.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -178,12 +178,30 @@ SLIDES_3_4 = [
              "(needs a multi-tenant app registration), then invite a client user with the Microsoft sign-in option - they use their own "
              "Microsoft, or a guest account in your tenant, matched to their email and locked to its domain. Your staff sign-in is unchanged."},
 ]
-SLIDES = SLIDES_3_3 + SLIDES_3_4   # 3.4.0 ships the 3.3.0 Diagnostics work too (3.3.0 was never released on its own)
+SLIDES_3_5 = [
+    {"id": "cw-billing", "title": "ConnectWise billing", "img": None, "view": "billing", "who": "tech",
+     "text": "A new ConnectWise billing page (Clients & users) finds managed MikroTiks that aren't on a ConnectWise agreement - the ones "
+             "you may be missing billing for. It matches each router to a configuration by serial number, shows whether that configuration "
+             "is on an active agreement, and lists the gaps. Create a missing configuration in ConnectWise, or match one by hand, right there."},
+    {"id": "upgrade-ticket", "title": "Upgrade → ConnectWise ticket", "img": None, "view": "upgrades", "who": "tech",
+     "text": "When you upgrade a router, tick “Open a ConnectWise ticket” to open a ticket on the client's company, attach the "
+             "pre-upgrade backup, and close it when the upgrade finishes (or flag it if it fails). Set the board and the three statuses once "
+             "under the Upgrades page's ConnectWise ticket settings."},
+    {"id": "alert-channels", "title": "Alerts: a channel per event", "img": None, "view": "alerts", "who": "tech",
+     "text": "Alert settings are now their own tab, and “What to alert on” is a table: tick ConnectWise ticket, Email and/or Teams "
+             "for each event - so a router going offline can open a ticket while a new-RouterOS notice only emails. Tick a column header to "
+             "set a whole column at once."},
+    {"id": "packet-sniffer", "title": "Packet Sniffer + per-interface Traffic Watch", "img": None, "view": "diag", "who": "tech",
+     "text": "Diagnostics gains a Packet Sniffer - capture packet metadata (who's talking, which protocols and ports) in the router's memory "
+             "for a few seconds - and Traffic Watch can now watch a single interface. Both use the router's 'sniff' permission, granted when "
+             "the router is adopted (grant it once on routers adopted earlier). The old fetch-based Speed Test is gone; use the Link test."},
+]
+SLIDES = SLIDES_3_5   # 3.5.0's own slides (3.4.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")

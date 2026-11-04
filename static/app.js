@@ -2632,6 +2632,7 @@ async function tasksView() {
       `<button type="button" role="tab" data-ttab="${k}" class="${k === taskTab ? "active" : ""}">${l}</button>`).join("")}</div><div id="tkBody" class="tk-body"></div>`;
   document.querySelectorAll("[data-ttab]").forEach((b) => b.addEventListener("click", () => { taskTab = b.dataset.ttab; tasksView(); }));
   const ref = await api("/api/groups");
+  try { const ut = await api("/api/upgrades/ticket-settings"); ref.upTicket = !!(ut.cw_configured && ut.settings && ut.settings.board_id); } catch (e) { ref.upTicket = false; }
   const scripts = await api("/api/scripts");
   $("tkNew")?.addEventListener("click", () => (taskTab === "scripts" ? scriptEditor(null, scripts) : taskTab === "groups" ? groupEditor(null, ref) : taskEditor(null, ref, scripts)));
   if (taskTab === "scripts") return scriptsTab(scripts, ref);
@@ -2690,6 +2691,7 @@ function taskEditor(t, ref, scripts, preset = {}) {
     <div id="tScriptBox" class="grid2"><label class="field">Script <select id="tScript">${scripts.scripts.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></label></div>
     <div id="tUpBox" class="grid2"><label class="field">Update channel <select id="tChan"><option value="">Router's current channel</option><option value="stable">stable</option><option value="long-term">long-term</option></select></label>
       <label class="chk"><input type="checkbox" id="tFw" ${o.firmware !== false ? "checked" : ""}> Also RouterBOARD firmware</label></div>
+    ${ref.upTicket ? `<label class="chk" id="tTicketBox"><input type="checkbox" id="tTicket" ${o.cw_ticket ? "checked" : ""}> Open a ConnectWise ticket for each upgrade - attach the backup, and close it when the upgrade finishes</label>` : ""}
     <h3>Runs on</h3>
     <label class="chk"><input type="checkbox" id="tAll" ${tg.all ? "checked" : ""}> All routers</label>
     <div id="tPick"><div class="grid2"><label class="field">Clients <select id="tOrgs" multiple size="4">${ref.orgs.map((x) => `<option value="${x.id}" ${(tg.orgs || []).includes(x.id) ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
@@ -2718,6 +2720,7 @@ function taskEditor(t, ref, scripts, preset = {}) {
   const sync = () => {
     const up = $("tAction").value === "upgrade", k = $("tKind").value;
     $("tScriptBox").classList.toggle("hidden", up); $("tUpBox").classList.toggle("hidden", !up); $("tBackupBox").classList.toggle("hidden", up);
+    $("tTicketBox")?.classList.toggle("hidden", !up);
     $("tPick").classList.toggle("hidden", $("tAll").checked);
     $("tOnce").classList.toggle("hidden", k !== "once"); $("tTime").classList.toggle("hidden", k !== "daily" && k !== "weekly");
     $("tDays").classList.toggle("hidden", k !== "weekly"); $("tHours").classList.toggle("hidden", k !== "hourly");
@@ -2729,7 +2732,7 @@ function taskEditor(t, ref, scripts, preset = {}) {
   sync();
   $("tSave").addEventListener("click", async () => {
     const k = $("tKind").value, onceAt = document.querySelector("[name=tOnceWhen]:checked").value === "at";
-    const body = { id: t?.id, name: $("tName").value, action: $("tAction").value, script_id: $("tScript").value, channel: $("tChan").value, firmware: $("tFw").checked,
+    const body = { id: t?.id, name: $("tName").value, action: $("tAction").value, script_id: $("tScript").value, channel: $("tChan").value, firmware: $("tFw").checked, cw_ticket: $("tTicket")?.checked || false,
       targets: { all: $("tAll").checked, orgs: [...$("tOrgs").selectedOptions].map((x) => +x.value), groups: [...$("tGroups").selectedOptions].map((x) => +x.value), tags: $("tTags") ? [...$("tTags").selectedOptions].map((x) => x.value) : [], devices: pick() },
       kind: k, run_at: k === "once" && onceAt ? new Date($("tAt").value).getTime() / 1000 : null, at_time: $("tHHMM").value,
       days: [...document.querySelectorAll("#tDays input:checked")].map((x) => +x.value), every_hours: $("tEvery").value,
@@ -6956,53 +6959,62 @@ async function billingPage() {
       <p class="small muted">The ConnectWise Configuration Type a managed MikroTik is - used to match routers and to create configurations.${info.type_id ? "" : " Set this first for accurate results."}</p>
       <p class="small status" id="bTypeMsg"></p>
     </div>
-    ${orgs.length ? `<div class="card"><label class="field">Client <select id="bOrg"><option value="">— pick a client —</option>${orgs.map((o) =>
+    ${orgs.length ? `<div class="card"><label class="field">Client <select id="bOrg"><option value="all">All clients</option>${orgs.map((o) =>
         `<option value="${o.id}">${esc(o.name)} (${o.routers} router${o.routers === 1 ? "" : "s"})</option>`).join("")}</select></label></div>`
       : `<div class="card"><p class="muted">No clients are linked to a ConnectWise company yet. Link them in <a href="#clients">Clients</a>.</p></div>`}
     <div id="bReport"></div>`;
   if (isAdmin) $("bTypeSave")?.addEventListener("click", async () => {
     const sel = $("bType"), id = sel.value, name = sel.selectedOptions[0]?.textContent || "";
     $("bTypeMsg").textContent = "Saving…"; $("bTypeMsg").className = "small status";
-    try { await post("/api/billing/type", { type_id: id, type_name: id ? name : "" }); $("bTypeMsg").textContent = "Saved."; $("bTypeMsg").className = "small status ok"; if ($("bOrg")?.value) billingReport(+$("bOrg").value); }
+    try { await post("/api/billing/type", { type_id: id, type_name: id ? name : "" }); $("bTypeMsg").textContent = "Saved."; $("bTypeMsg").className = "small status ok"; if ($("bOrg")) billingReport($("bOrg").value, true); }
     catch (e) { $("bTypeMsg").textContent = e.message; $("bTypeMsg").className = "small status err"; }
   });
-  $("bOrg")?.addEventListener("change", () => billingReport(+$("bOrg").value));
+  $("bOrg")?.addEventListener("change", () => billingReport($("bOrg").value));
+  if (orgs.length) billingReport("all");   // default to the whole fleet
 }
-async function billingReport(orgId) {
+async function billingReport(orgId, refresh) {
   const box = $("bReport"); if (!box) return;
-  if (!orgId) { box.innerHTML = ""; return; }
-  box.innerHTML = `<div class="card"><p class="muted">Loading from ConnectWise…</p></div>`;
+  const all = !orgId || orgId === "all";
+  box.innerHTML = `<div class="card"><p class="muted">Loading from ConnectWise…${all ? " (all clients - this can take a moment)" : ""}</p></div>`;
   let r;
-  try { r = await api(`/api/billing?org_id=${orgId}`); } catch (e) { box.innerHTML = `<div class="card"><p class="status err">${esc(e.message)}</p></div>`; return; }
+  try { r = await api(all ? `/api/billing/all${refresh ? "?refresh=1" : ""}` : `/api/billing?org_id=${orgId}`); }
+  catch (e) { box.innerHTML = `<div class="card"><p class="status err">${esc(e.message)}</p></div>`; return; }
   const pill = (ok, yes, no) => ok ? `<span class="pill up-done">${yes}</span>` : `<span class="pill up-run">${no}</span>`;
   const cfgOpt = (selId) => `<option value="">Auto (by serial)</option>` + (r.configs || []).map((c) =>
     `<option value="${c.id}" ${String(c.id) === String(selId) ? "selected" : ""}>${esc(c.name)}${c.serial ? ` — ${esc(c.serial)}` : ""}</option>`).join("");
   const rows = r.rows.map((x) => `<tr>
+    ${all ? `<td class="small">${esc(x.org || "")}</td>` : ""}
     <td><b>${esc(x.name)}</b></td><td class="small mono">${esc(x.serial || "—")}</td><td class="small">${esc(x.model || "")}</td>
     <td class="small">${x.config ? `${esc(x.config.name)}${x.manual ? ` <span class="pill" title="Matched by hand, not by serial">manual</span>` : ""}` : `<span class="status err">not in ConnectWise</span>`}</td>
     <td>${x.config ? pill(x.billed, "billed", "not billed") : pill(false, "", "not billed")}${x.billed_on ? `<div class="small muted">${esc(x.billed_on.agreement)}</div>` : ""}</td>
-    <td class="small"><select class="bmatch" data-match="${x.device_id}" aria-label="Match ${esc(x.name)} to a ConnectWise configuration">${cfgOpt(x.override)}</select>
+    <td class="small">${all ? "" : `<select class="bmatch" data-match="${x.device_id}" aria-label="Match ${esc(x.name)} to a ConnectWise configuration">${cfgOpt(x.override)}</select>`}
       ${x.config ? "" : ` <button class="btn small" type="button" data-create="${x.device_id}" ${r.has_type ? "" : "disabled"}>Create in ConnectWise</button>`}</td>
   </tr>`).join("");
+  const headCols = `${all ? "<th>Client</th>" : ""}<th>Router</th><th>Serial</th><th>Model</th><th>ConnectWise config</th><th>Billing</th><th>Match</th>`;
+  const errBox = all && r.errors && r.errors.length ? `<div class="card"><p class="small status err">Couldn't reconcile ${r.errors.length} client${r.errors.length === 1 ? "" : "s"}:</p>
+      <ul class="small muted">${r.errors.map((e) => `<li><b>${esc(e.org)}</b>: ${esc(e.error)}</li>`).join("")}</ul></div>` : "";
   box.innerHTML = `<div class="tiles">${diagKpi(r.managed, "Managed")}${diagKpi(r.matched, "In ConnectWise")}${diagKpi(r.billed, "Billed")}${diagKpi(`<span class="${r.missed ? "status err" : ""}">${r.missed}</span>`, "Missed billing")}</div>
+    ${all ? `<div class="row"><p class="small muted grow">${r.clients ? r.clients.length : 0} client${(r.clients || []).length === 1 ? "" : "s"} linked to ConnectWise. Pick one above to match or create configs.</p><button class="btn small" type="button" id="bRefresh">Refresh</button></div>` : ""}
     ${r.has_type ? "" : `<div class="card"><p class="small status err">No configuration type is set, so this matched across every configuration type. Set the MikroTik type above for accurate results.</p></div>`}
-    <div class="card"><h2>${esc(r.org)} — managed MikroTiks</h2>
-      ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Serial</th><th>Model</th><th>ConnectWise config</th><th>Billing</th><th>Match</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">No managed routers for this client.</p>`}
+    ${errBox}
+    <div class="card"><h2>${all ? "All managed MikroTiks" : `${esc(r.org)} — managed MikroTiks`}</h2>
+      ${r.rows.length ? `<div class="table-wrap"><table><thead><tr>${headCols}</tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">No managed routers${all ? "" : " for this client"}.</p>`}
       <p class="small status" id="bRepMsg"></p></div>
     ${r.orphans.length ? `<div class="card"><h2>ConnectWise configs with no managed router (${r.orphans.length})</h2>
       <p class="small muted">Configurations of this type in ConnectWise that don't match any managed MikroTik here - possibly decommissioned, a serial mismatch, or managed elsewhere.</p>
-      <div class="table-wrap"><table><thead><tr><th>Config</th><th>Serial</th><th>Model</th><th>Site</th></tr></thead><tbody>
-        ${r.orphans.map((c) => `<tr><td class="small">${esc(c.name)}</td><td class="small mono">${esc(c.serial || "—")}</td><td class="small">${esc(c.model || "")}</td><td class="small">${esc(c.site || "")}</td></tr>`).join("")}</tbody></table></div></div>` : ""}`;
+      <div class="table-wrap"><table><thead><tr>${all ? "<th>Client</th>" : ""}<th>Config</th><th>Serial</th><th>Model</th><th>Site</th></tr></thead><tbody>
+        ${r.orphans.map((c) => `<tr>${all ? `<td class="small">${esc(c.org || "")}</td>` : ""}<td class="small">${esc(c.name)}</td><td class="small mono">${esc(c.serial || "—")}</td><td class="small">${esc(c.model || "")}</td><td class="small">${esc(c.site || "")}</td></tr>`).join("")}</tbody></table></div></div>` : ""}`;
+  $("bRefresh")?.addEventListener("click", () => billingReport("all", true));
   box.querySelectorAll("[data-create]").forEach((b) => b.addEventListener("click", async () => {
     b.disabled = true; b.textContent = "Creating…";
     const msg = $("bRepMsg"); if (msg) { msg.textContent = ""; msg.className = "small status"; }
-    try { await post("/api/billing/create", { device_id: +b.dataset.create }); billingReport(orgId); }
+    try { await post("/api/billing/create", { device_id: +b.dataset.create }); billingReport(orgId, true); }
     catch (e) { b.disabled = false; b.textContent = "Create in ConnectWise"; if (msg) { msg.textContent = e.message; msg.className = "small status err"; } }
   }));
   box.querySelectorAll(".bmatch").forEach((sel) => sel.addEventListener("change", async () => {
     const msg = $("bRepMsg"); if (msg) { msg.textContent = ""; msg.className = "small status"; }
     sel.disabled = true;
-    try { await post("/api/billing/match", { device_id: +sel.dataset.match, config_id: sel.value }); billingReport(orgId); }
+    try { await post("/api/billing/match", { device_id: +sel.dataset.match, config_id: sel.value }); billingReport(orgId, true); }
     catch (e) { sel.disabled = false; if (msg) { msg.textContent = e.message; msg.className = "small status err"; } }
   }));
 }

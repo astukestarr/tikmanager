@@ -3,6 +3,28 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0 - 2026-11-04
+
+**ConnectWise interoperability, plus per-event alert channels.** The stable release of everything in the 3.5.0 betas:
+
+- **ConnectWise billing (Clients & users).** Finds managed MikroTiks that aren't billed. Each router is matched to a
+  ConnectWise configuration by serial (or matched by hand), and "billed" means that configuration is on an active
+  agreement. The page **opens on all clients at once** - aggregate tiles (managed / in ConnectWise / billed / missed
+  billing) and every managed router with its client - then you can pick one client to create a missing configuration in
+  ConnectWise or override a match. Read-only against your ConnectWise; the configuration type is an admin setting.
+- **Upgrade → ConnectWise ticket.** A firmware upgrade (one-off, or a scheduled **Task**) can open a ConnectWise ticket,
+  attach the pre-upgrade backup, and close it when the upgrade finishes - boards, statuses and priorities are pulled from
+  ConnectWise. The task editor has the same **Open a ConnectWise ticket for each upgrade** option as the Upgrades dialog.
+  If a ticket can't be opened or the backup can't attach, the reason is recorded on the router's Events.
+- **Alerts: choose channels per event.** "What to alert on" is a table with a **CW Ticket**, **Email** and **Teams**
+  checkbox per event (with a select-all box per column), so each event routes to only the channels you want. Settings is
+  its own tab. Existing setups are migrated.
+- **Diagnostics:** Traffic Watch and the Packet Sniffer are out of "Experimental"; the unreliable fetch-based Speed Test
+  was removed (use the Link test for throughput).
+
+Each ConnectWise feature names the exact security-role option in its error if the API member lacks permission; the full
+list is in the README "Integrations" section.
+
 ## 3.5.0-beta.17 - 2026-11-04
 
 **Upgrade ticket: attach the backup as `.txt` so ConnectWise accepts it.** ConnectWise rejects file extensions that
