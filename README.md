@@ -1,9 +1,10 @@
 # TikManager
 
-A self-hosted MikroTik RouterOS controller for MSPs and IT teams: adopt routers with one command, monitor them, back up
-their configuration nightly, upgrade firmware on a schedule, push scripts, build site-to-site VPNs, and give each client
-a read-only view of their own routers. It installs on an Ubuntu server with one command and updates itself from the web
-page with one click.
+A self-hosted MikroTik RouterOS controller for MSPs and IT teams: adopt routers with one command, monitor them (health,
+uptime, ISPs, packet loss), back up their configuration nightly, upgrade firmware safely on a schedule, push scripts and
+run commands, build WireGuard and IPsec tunnels with guided wizards, run on-demand diagnostics (live traffic, speed and
+link tests), keep them secure and compliant, give people remote access, and give each client a read-only view of their
+own routers. It installs on an Ubuntu server with one command and updates itself from the web page with one click.
 
 Python 3 standard library only on the server (plus Ubuntu's `python3-cryptography` for encrypting stored configs),
 SQLite, WireGuard and Caddy. No build step, no package manager.
@@ -25,7 +26,7 @@ MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report i
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
 - Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
-  [Site-to-site VPN](#site-to-site-vpn) · [Remote access](#remote-access-wireguard-for-windows) · [Router health](#router-health-dashboard) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
+  [Site-to-site VPN](#site-to-site-vpn) · [Router Wizard](#router-wizard-wireguard-and-ipsec-tunnels) · [Remote access](#remote-access-wireguard-for-windows) · [Router health](#router-health-dashboard) · [Diagnostics](#diagnostics-traffic-watch-speed-test-link-test) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
 - Running it: [Keeping it secure](#keeping-it-secure) · [Where things live](#where-things-live-on-the-server) ·
   [Troubleshooting adoption](#if-a-router-registers-but-never-comes-online)
@@ -84,11 +85,19 @@ Entra admin center > App registrations > New registration:
 
 Enter the Directory (tenant) ID, Application (client) ID and secret on **Admin > Settings** - no restart needed.
 - Anyone from your staff email domains becomes a technician at first sign-in; the administrator emails become admins.
-- Only accounts from your own organization can sign in - guest accounts invited into your tenant are refused.
+- Only members of your own organization can be **technicians** - guest or other-tenant accounts can't (they can only be
+  client users, see below).
 - Each technician is tied to their Microsoft account at first sign-in, so a renamed or reused email address doesn't
   inherit someone else's TikManager account. If you replace someone's Microsoft account, use **Reset sign-in** for
   them on Admin > Technicians.
 - The first administrator's password account keeps working as a way in if Microsoft sign-in is ever broken.
+
+**Client (customer) users can sign in with Microsoft too** (optional, off by default - clients otherwise use a password +
+authenticator). On **Admin > Settings** pick a mode: *Guests in our tenant* (B2B-invite them into your Azure AD; they sign
+in through your tenant, so your Conditional Access and access reviews apply - a single-tenant app is fine) or *Their own
+Microsoft* (they sign in from their own tenant - set the app registration to *Accounts in any organizational directory*).
+Either way, first invite the client user on the **Users** tab with the **Microsoft sign-in** option: they're matched by
+email, locked to that domain, and set no password/TOTP (Microsoft handles MFA). Your staff sign-in is unchanged.
 
 ### What is configured where
 
@@ -588,6 +597,22 @@ is the one TikManager's connection runs over. Only a tunnel found in that router
 tunnel, never anything else), by technicians with write access or client admins with site-to-site VPNs turned on, for
 their own routers. Every reconnect is audit-logged and recorded in the router's events.
 
+## Router Wizard (WireGuard and IPsec tunnels)
+
+**Router Wizard** (sidebar, technicians) is a set of guided, step-by-step jobs for building tunnels. Each tunnel is tracked,
+both routers are backed up first, and everything it writes is tagged so it removes cleanly.
+
+- **WireGuard Builder** - a point-to-point WireGuard tunnel between two of a client's routers (the client end can even be a
+  different client). Attach to a hub's existing WireGuard interface or create a new one; choose the tunnel addresses and the
+  subnets each side advertises (including downstream subnets). Routing is static routes or **BGP** (eBGP or iBGP), reusing a
+  router's existing AS. Live handshake/BGP status; Disable/Delete removes exactly what it added.
+- **IPsec Tunnel** - a policy-based IKEv2 tunnel from a MikroTik to an **any-brand** firewall (Fortinet, Cisco, pfSense...).
+  TikManager configures the MikroTik end and gives you a copyable far-end settings sheet, including the pre-shared key
+  (sealed on the server, shown only on an explicit Reveal). Advanced editor for every phase-1/2 value and IKEv1; optional
+  1:1 NAT (netmap) for overlapping subnets; IKE identities for a router behind NAT.
+- **Import existing** - adopt a WireGuard or IPsec tunnel already on your routers so it shows in the wizard and can be
+  managed, without re-applying or re-keying the running tunnel. Removing an imported tunnel just un-tags it.
+
 ## UniFi and UISP
 
 TikManager can show your Ubiquiti networks next to the MikroTiks: **Admin > Integrations > UniFi & UISP** holds any number
@@ -651,6 +676,26 @@ The service, firewall, DNS / UPnP / proxy, SSH, NTP, user-name and cipher settin
 inventory (a field whitelist: no passwords, keys or SNMP community names are read).
 
 Findings that aren't a problem on a router can be **accepted** with a reason (see [Compliance](#compliance)).
+
+## Diagnostics (Traffic Watch, Speed Test, Link test)
+
+**Diagnostics** (sidebar, technicians) runs on-demand tests against a router, each saving a report you can revisit, email or
+download as CSV.
+
+- **Traffic Watch** - watch a router's live traffic for a set number of minutes and see who's using the connection: top
+  talkers, destinations, services, connections and throughput over time, with an optional filter to one address. It reads
+  the router's connection tracking, so it needs no extra router permission.
+- **Speed Test** - a quick internet reachability, latency and jitter check from the router itself (with a rough download
+  figure - a health check, not a line-rate speed test). The router runs `/tool fetch`, so its user needs the `ftp` policy;
+  newly adopted routers get it, and on existing routers grant it once with
+  `/user group set [find name=tikmanager] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp`.
+- **Link test** - real throughput between two of your routers (RAM-to-RAM, multiple TCP streams), which *can* show gigabit
+  over a LAN, WAN or site-to-site path. It briefly turns on the target's bandwidth-test server and restores it after, and
+  measures the path between the two routers - not the public internet.
+
+Each router's page also has an **Uptime** bar (1M / 14d / 7d / 3d / 1d, with the overall uptime %, from its online/offline
+history) and a **Console** tab that runs a RouterOS command and shows the output - a command runner (use Winbox for a full
+interactive session).
 
 ## What's new tour
 

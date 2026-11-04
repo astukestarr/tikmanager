@@ -3,6 +3,38 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.4.0 - 2026-11-04
+
+Everything since 3.2.0, tested and released together.
+
+**Diagnostics** - a new sidebar section of on-demand tests, each saving a report you can revisit, email or download as CSV:
+- **Traffic Watch** - watch a router's live traffic for a set time and see who's using the connection (top talkers,
+  destinations, services, connections, throughput over time). Reads the router's connection tracking, so no extra router
+  permission is needed. Filter to one address to zero in on an issue.
+- **Speed Test** - a quick internet reachability/latency/jitter check from the router (rough download figure - not a
+  line-rate test). Needs the TikManager router user to have the `ftp` policy (new routers get it; grant it once on existing
+  routers: `/user group set [find name=tikmanager] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp`).
+- **Link test** - real throughput between two of your routers (RAM-to-RAM, 20 TCP streams) - can show gigabit over a LAN,
+  WAN or site-to-site path. Briefly enables the target's bandwidth-test server and restores it after.
+
+**Router page**
+- **Uptime history bar** - 1M / 14d / 7d / 3d / 1d, with the overall uptime %, from each router's online/offline history.
+- **Console** - run a RouterOS command and see the output in the browser (common commands as one-click chips, Up/Down
+  history). A command runner, not an interactive shell - use Winbox for that. Needs the Winbox permission.
+- **Per-router latency target** (Settings tab) - override the global ping target for a router that can't reach it.
+
+**Reliability & fixes**
+- Scheduled upgrades: one flaky router (or a TikManager restart mid-batch) no longer holds or fails the whole batch.
+- The Upgrades page no longer jumps to the top every 20 seconds, and keeps the "checking for updates" note.
+- Switches / internal routers with no default route no longer show a false 100% packet loss.
+
+**People**
+- **Delete users** (not just disable) on the Users and Technicians pages, with guards and a confirmation.
+- **A QR code** on the two-step sign-in setup screen (the typed key stays as a fallback).
+- **Microsoft sign-in for client users** (optional, **off by default**): invite a client user with the Microsoft option,
+  then let them sign in either as a guest in your tenant (your Conditional Access applies) or from their own Microsoft
+  (multi-tenant app) - matched by email, locked to its domain, no password/TOTP. Staff sign-in is unchanged.
+
 ## 3.4.0-beta.5 - 2026-11-04
 
 - **Client Microsoft sign-in is now a choice of mode** (Admin > Settings), not just on/off:

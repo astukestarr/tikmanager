@@ -13,7 +13,7 @@ from pathlib import Path
 from version import __version__
 
 RELEASE = "3.4.0"    # the release these slides describe (its betas included)
-SINCE = "3.3.0"      # the full release before it
+SINCE = "3.2.0"      # the full release before it (3.3.0 was never released on its own)
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -178,12 +178,12 @@ SLIDES_3_4 = [
              "(needs a multi-tenant app registration), then invite a client user with the Microsoft sign-in option - they use their own "
              "Microsoft, or a guest account in your tenant, matched to their email and locked to its domain. Your staff sign-in is unchanged."},
 ]
-SLIDES = SLIDES_3_4
+SLIDES = SLIDES_3_3 + SLIDES_3_4   # 3.4.0 ships the 3.3.0 Diagnostics work too (3.3.0 was never released on its own)
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.4.0": {"since": "3.3.0", "slides": SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")
