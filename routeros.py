@@ -500,6 +500,46 @@ class RouterOS:
         return {"ok": bool(ok), "bytes": size_bytes if ok else 0, "secs": round(secs, 2),
                 "mbps": round(size_bytes * 8 / secs / 1_000_000, 1) if ok else None, "status": status or "no result"}
 
+    def sniff_summary(self, duration=10, iface=None, ip=None, port=None):
+        """Run the packet sniffer to MEMORY (no capture file to flash, no payloads kept) for `duration` seconds, with
+        optional interface / IP / port filters, then read its host and protocol aggregation tables. Returns
+        {ok, status, packets, bytes, hosts:[{address,packets,bytes}], protocols:[{proto,port,packets,bytes}]}. Needs the
+        'sniff' policy. Only metadata (who talked to whom, how much, which protocol/port) - not packet contents."""
+        fset = ['file-name=""', 'memory-limit=10MiB', 'streaming-enabled=no', 'only-headers=yes']
+        if iface:
+            fset.append(f"filter-interface={iface}")
+        if ip:
+            fset.append(f"filter-ip-address={ip}")
+        if port:
+            fset.append(f"filter-port={int(port)}")
+        script = "\n".join([
+            ':local st "ok";',
+            ':onerror e in={',
+            '  /tool sniffer stop;',
+            "  /tool sniffer set " + " ".join(fset) + ";",
+            '  /tool sniffer start;',
+            f'  :delay {int(duration)}s;',
+            '  /tool sniffer stop;',
+            '} do={ :set st ("error: " . $e); }',
+            ':put $st;'])
+        out = (self.run_script(script, timeout=int(duration) + 40) or "").strip()
+        status = out.splitlines()[-1].strip() if out else ""
+        if status != "ok":
+            return {"ok": False, "status": status or "no result", "packets": 0, "bytes": 0, "hosts": [], "protocols": []}
+        hosts = self.optional(lambda: self.get("/tool/sniffer/host"), []) or []
+        protos = self.optional(lambda: self.get("/tool/sniffer/protocol"), []) or []
+        H = [{"address": h.get("address") or "", "packets": _num(h.get("packets")) or 0, "bytes": _num(h.get("bytes")) or 0}
+             for h in hosts if isinstance(h, dict) and (h.get("address") or "")]
+        P = []
+        for p in protos if isinstance(protos, list) else []:
+            if not isinstance(p, dict):
+                continue
+            proto = str(p.get("ip-protocol") or p.get("protocol") or "").lower()
+            if proto in ("", "ip", "ipv6"):   # the roll-up rows; keep the specific protocols
+                continue
+            P.append({"proto": proto, "port": str(p.get("port") or ""), "packets": _num(p.get("packets")) or 0, "bytes": _num(p.get("bytes")) or 0})
+        return {"ok": True, "status": "done", "packets": sum(h["packets"] for h in H), "bytes": sum(h["bytes"] for h in H), "hosts": H, "protocols": P}
+
     # --- Link test (router-to-router bandwidth-test) ----------------------------------------------------------
     def btest_server_get(self):
         """Current /tool/bandwidth-server state, so the Link test can restore it after."""
@@ -2266,6 +2306,26 @@ class SimRouter:
             out.append({"src": f"{lan3}.{10 + i * 7}", "dst": d, "proto": proto, "port": port,
                         "orig_bytes": int(secs * rate * 0.12), "repl_bytes": int(secs * rate)})
         return out
+
+    def sniff_summary(self, duration=10, iface=None, ip=None, port=None):
+        time.sleep(min(3, max(0.5, duration * 0.2)))
+        rr = random.Random(self.id * 59 + int(time.time() // 60))
+        nets = self.networks()
+        lan3 = (nets[0]["network"].rsplit(".", 1)[0] if nets else "192.168.88")
+        dests = [("142.250.80.46", "tcp", "443"), ("1.1.1.1", "udp", "53"), ("13.107.42.14", "tcp", "443"),
+                 ("104.16.85.20", "tcp", "443"), ("151.101.1.69", "tcp", "80"), ("140.82.113.4", "tcp", "22")]
+        hosts, protos = [], {}
+        for i in range(rr.randint(5, 9)):
+            addr = f"{lan3}.{10 + i * 5}" if i % 2 == 0 else rr.choice(dests)[0]
+            pk = rr.randint(200, 9000)
+            by = pk * rr.randint(80, 1400)
+            hosts.append({"address": addr, "packets": pk, "bytes": by})
+        for d, proto, prt in dests:
+            pk = rr.randint(100, 6000)
+            protos[(proto, prt)] = {"proto": proto, "port": prt, "packets": pk, "bytes": pk * rr.randint(80, 1400)}
+        P = list(protos.values())
+        return {"ok": True, "status": "done", "packets": sum(h["packets"] for h in hosts),
+                "bytes": sum(h["bytes"] for h in hosts), "hosts": hosts, "protocols": P}
 
     def btest_server_get(self):
         return dict(self._sim().get("btest_srv") or {"enabled": False, "authenticate": True})

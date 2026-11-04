@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.2 - 2026-11-04
+
+**New Diagnostics test: Packet Sniffer.** Capture packet metadata on a router for a few seconds and see who's talking,
+and which protocols and ports are in use - top hosts and a protocol/port breakdown, with a downloadable/emailable report.
+
+- Runs in the router's **memory** - no capture file is written to flash, and only metadata is kept (addresses, counts,
+  protocol/port), never packet contents.
+- Optional filters: one interface, one IP/subnet, one port. Captures are short (5-60s) to stay gentle on the router.
+- Uses the RouterOS `sniff` permission (granted at adoption as of beta.1). Shown and runnable only to technicians with
+  the **Winbox** permission; every capture is audited.
+
 ## 3.5.0-beta.1 - 2026-11-04
 
 **Traffic Watch can watch one interface again.** The test now has a "Watch" choice:

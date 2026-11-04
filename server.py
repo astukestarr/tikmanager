@@ -454,6 +454,13 @@ class Handler(BaseHTTPRequestHandler):
                          ("streams", res.get("streams")), ("seconds", res.get("secs"))):
                 w.writerow([k, v])
             fname = f"link-test-{run['id']}.csv"
+        elif run["kind"] == "sniff":
+            w.writerow(["row", "address", "protocol", "port", "service", "packets", "bytes"])
+            for h in res.get("hosts", []):
+                w.writerow(["host", h.get("address"), "", "", "", h.get("packets"), h.get("bytes")])
+            for p in res.get("protocols", []):
+                w.writerow(["protocol", "", p.get("proto"), p.get("port"), p.get("service"), p.get("packets"), p.get("bytes")])
+            fname = f"packet-sniffer-{run['id']}.csv"
         else:
             lat = res.get("latency") or {}
             w.writerow(["metric", "value"])
@@ -486,6 +493,13 @@ class Handler(BaseHTTPRequestHandler):
                      f"Direction: {res.get('direction')}    Streams: {res.get('streams')}    Duration: {res.get('secs')}s",
                      f"Download: {res.get('down_mbps')} Mbps    Upload: {res.get('up_mbps')} Mbps",
                      "", "Router-to-router throughput over the path between these two routers (not the public internet)."]
+        elif run["kind"] == "sniff":
+            subject = f"Packet Sniffer report - {dev}"
+            lines = [f"Packet Sniffer on {dev} ({run.get('org') or ''})",
+                     f"Scope: {res.get('scope')}    Duration: {res.get('duration_s')}s",
+                     f"Packets: {res.get('packets')}    Captured: {mb(res.get('bytes'))}    Hosts: {res.get('hosts_seen')}",
+                     "", "Top hosts:"]
+            lines += [f"  {(h.get('address') or ''):<18} {mb(h.get('bytes'))}  ({h.get('packets')} pkts)" for h in res.get("hosts", [])]
         else:
             lat = res.get("latency") or {}
             subject = f"Speed Test report - {dev}"
@@ -2519,6 +2533,22 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "Enter the target router's address (an IP or host name the initiating router can reach).")
             rid = diag.start_link(init, tgt, addr, str(b.get("direction") or "receive"), s["email"])
             db.audit(s["email"], "diagnostics link test", f"{init['name']} -> {tgt['name']}", self.client_ip(), org_id=init["org_id"])
+            return self.json({"ok": True, "id": rid})
+        if path == "/api/diag/sniff":   # start a Packet Sniffer capture (metadata only, to router memory) - sensitive
+            s = self.require(tech=True, perm="winbox")
+            b = self.body()
+            d = self.device_for(s, int(b.get("device_id") or 0))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline.")
+            ip = str(b.get("ip") or "").strip()
+            if ip and not re.fullmatch(r"[0-9A-Fa-f.:/]{1,49}", ip):   # IP or subnet, script-safe
+                raise HttpError(400, "Enter a single IP or subnet to filter on (e.g. 192.168.1.50 or 192.168.1.0/24).")
+            port = str(b.get("port") or "").strip()
+            if port and not re.fullmatch(r"\d{1,5}", port):
+                raise HttpError(400, "Port must be a number.")
+            rid = diag.start_sniff(d, str(b.get("iface") or "").strip()[:40], ip, port, int(b.get("seconds") or 10), s["email"])
+            db.audit(s["email"], "diagnostics packet sniffer", d["name"], self.client_ip(), org_id=d["org_id"],
+                     detail=" ".join(x for x in [b.get("iface"), ip, ("port " + port) if port else ""] if x)[:200])
             return self.json({"ok": True, "id": rid})
         if m := re.fullmatch(r"/api/devices/(\d+)/console", path):   # run a RouterOS command and return its output
             s = self.require(tech=True, perm="winbox")

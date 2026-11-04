@@ -6625,10 +6625,12 @@ const DIAG_TESTS = [
     desc: "Check a router's internet reachability, latency and jitter (rough download) - run from the site itself." },
   { kind: "link", title: "Link test", icon: "vpns",
     desc: "Measure real throughput between two of your routers (RAM-to-RAM, 20 TCP streams) over the LAN, WAN or a tunnel - can show gigabit." },
+  { kind: "sniff", title: "Packet Sniffer", icon: "diag", perm: "winbox",
+    desc: "Capture packet metadata for a few seconds (who talked to whom, protocols and ports) - in the router's memory, no contents saved. Needs the Winbox permission." },
 ];
 const fmtBytes = (b) => { b = Math.max(0, b || 0); const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
 const fmtBps = (b) => { b = Math.max(0, b || 0); const u = ["bps", "Kbps", "Mbps", "Gbps"]; let i = 0; while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
-const diagKind = (r) => r.kind === "torch" ? "Traffic Watch" : r.kind === "link" ? "Link test" : "Speed Test";
+const diagKind = (r) => r.kind === "torch" ? "Traffic Watch" : r.kind === "link" ? "Link test" : r.kind === "sniff" ? "Packet Sniffer" : "Speed Test";
 const diagStatus = (r) => r.status === "running" ? `<span class="pill up-run">running${r.progress ? ` ${Math.round(r.progress * 100)}%` : ""}</span>`
   : r.status === "done" ? `<span class="pill up-done">done</span>` : r.status === "cancelled" ? `<span class="pill">stopped</span>` : `<span class="status err">failed</span>`;
 function diagSummary(r) {
@@ -6636,12 +6638,14 @@ function diagSummary(r) {
   if (!x) return r.status === "failed" ? `<span class="status err">${esc(r.error || "failed")}</span>` : "—";
   if (r.kind === "torch") return `${fmtBytes(x.total)} · peak ${fmtBps(x.peak_bps)} · ${x.hosts_seen} hosts`;
   if (r.kind === "link") return `${x.down_mbps ?? "—"}↓ / ${x.up_mbps ?? "—"}↑ Mbps → ${esc(x.target || "")}`;
+  if (r.kind === "sniff") return `${(x.packets || 0).toLocaleString()} packets · ${fmtBytes(x.bytes)} · ${x.hosts_seen} hosts`;
   return `${x.down_mbps} Mbps down${x.latency && x.latency.avg != null ? ` · ${x.latency.avg} ms` : ""}`;
 }
 
 async function diagView(arg) {
   if (arg === "traffic" || arg === "speed") return diagForm(arg);
   if (arg === "link") return diagLinkForm();
+  if (arg === "sniff") return diagSniffForm();
   if (/^\d+$/.test(arg || "")) return diagReport(arg);
   return diagLanding();
 }
@@ -6683,11 +6687,60 @@ function diagLinkReport(x) {
       <p class="small muted">${esc(x.note || "")}</p></div>`;
 }
 
+async function diagSniffForm() {
+  const { routers } = await api("/api/diag/candidates");
+  const online = routers.filter((r) => r.online);
+  $("main").innerHTML = `<p><a href="#diag">← Diagnostics</a></p><div class="row"><h1>Packet Sniffer</h1></div>
+    <p class="muted">Capture packet metadata on a router for a few seconds to see who's talking and which protocols and ports are in use.
+      It runs in the router's memory - no capture file is written to flash and no packet contents are kept, only metadata. Needs the router's 'sniff' permission.</p>
+    <div class="card">
+      <label class="field">Router <select id="dRouter">${online.map((r) => `<option value="${r.id}">${esc(r.name)}${r.org ? ` — ${esc(r.org)}` : ""}</option>`).join("")}</select></label>
+      ${online.length ? "" : `<p class="small status err">No routers are online right now.</p>`}
+      <label class="field">Interface <select id="dIface"><option value="">All interfaces</option></select></label>
+      <label class="field">Capture for <select id="dSec"><option value="10" selected>10 seconds</option><option value="20">20 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
+      <label class="field">Only this IP / subnet (optional) <input id="dIp" placeholder="e.g. 192.168.1.50 or 192.168.1.0/24" spellcheck="false"></label>
+      <label class="field">Only this port (optional) <input id="dPort" placeholder="e.g. 443" inputmode="numeric" spellcheck="false"></label>
+      <p class="small muted">Tip: filter to one device or port to keep the capture focused. Short captures are gentler on the router.</p>
+      <div class="actions"><button class="btn primary" type="button" id="dStart" ${online.length ? "" : "disabled"}>Start capture</button></div>
+      <p class="small status" id="dMsg"></p>
+    </div>`;
+  const loadIfaces = async () => {
+    const sel = $("dIface"); if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">All interfaces</option>`;
+    const id = +$("dRouter").value; if (!id) return;
+    try {
+      const { interfaces } = await api(`/api/diag/interfaces?device_id=${id}`);
+      for (const i of interfaces) sel.insertAdjacentHTML("beforeend",
+        `<option value="${esc(i.name)}">${esc(i.name)}${i.wan ? " (WAN)" : ""}${i.running ? "" : " — down"}</option>`);
+      if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    } catch (e) { /* All interfaces still works */ }
+  };
+  $("dRouter")?.addEventListener("change", loadIfaces);
+  loadIfaces();
+  $("dStart")?.addEventListener("click", async () => {
+    $("dStart").disabled = true; $("dMsg").textContent = "Starting…"; $("dMsg").className = "small status";
+    try {
+      const r = await post("/api/diag/sniff", { device_id: +$("dRouter").value, iface: $("dIface").value,
+        seconds: +$("dSec").value, ip: $("dIp").value.trim(), port: $("dPort").value.trim() });
+      go("diag", r.id);
+    } catch (e) { $("dMsg").textContent = e.message; $("dMsg").className = "small status err"; $("dStart").disabled = false; }
+  });
+}
+function diagSniffReport(x) {
+  const B = (r) => fmtBytes(r.bytes), PK = (r) => (r.packets || 0).toLocaleString();
+  return `<div class="tiles">${diagKpi((x.packets || 0).toLocaleString(), "Packets")}${diagKpi(fmtBytes(x.bytes), "Captured")}
+      ${diagKpi(x.hosts_seen ?? "—", "Hosts")}${diagKpi((x.duration_s ?? "—") + "s", "Duration")}</div>
+    <div class="card"><h2>Top hosts</h2>${diagTbl(x.hosts, [["address", "Address"], ["bytes", "Bytes", B], ["packets", "Packets", PK]], "No packets captured.")}</div>
+    <div class="card"><h2>By protocol / port</h2>${diagTbl(x.protocols, [["service", "Service"], ["proto", "Protocol"], ["port", "Port"], ["bytes", "Bytes", B], ["packets", "Packets", PK]], "—")}</div>
+    <div class="card"><p class="small muted">${esc(x.note || "")}</p></div>`;
+}
+
 async function diagLanding() {
   const runs = await api("/api/diag/runs");
   $("main").innerHTML = `<div class="row"><h1>Diagnostics</h1></div>
     <p class="muted">On-demand tests you run against a router - each one saves a report you can revisit, email or export.</p>
-    <div class="wiz-tiles">${DIAG_TESTS.map((t) => `<button type="button" class="wiz-tile" data-diag="${t.kind}">
+    <div class="wiz-tiles">${DIAG_TESTS.filter((t) => !t.perm || can(t.perm)).map((t) => `<button type="button" class="wiz-tile" data-diag="${t.kind}">
       <span class="exp-badge">Experimental</span>
       <span class="wiz-ico">${NAV_ICONS[t.icon] || NAV_ICONS_EXTRA[t.icon] || ""}</span>
       <span class="wiz-name">${esc(t.title)}</span><span class="wiz-desc">${esc(t.desc)}</span></button>`).join("")}</div>
@@ -6795,7 +6848,7 @@ async function diagReport(id) {
   let body;
   if (r.status === "failed") body = `<div class="card"><p class="status err">${esc(r.error || "The test failed.")}</p></div>`;
   else if (!x) body = `<div class="card"><p class="muted">Running… the report will fill in as data comes in.${r.progress ? ` (${Math.round(r.progress * 100)}%)` : ""}</p></div>`;
-  else body = r.kind === "torch" ? diagTorchReport(x, running, r.progress) : r.kind === "link" ? diagLinkReport(x) : diagSpeedReport(x);
+  else body = r.kind === "torch" ? diagTorchReport(x, running, r.progress) : r.kind === "link" ? diagLinkReport(x) : r.kind === "sniff" ? diagSniffReport(x) : diagSpeedReport(x);
   const cancel = running ? `<div class="actions"><button class="btn" type="button" id="dCancel">Stop test</button></div>` : "";
   const share = r.status === "done" ? `<div class="actions"><a class="btn" href="/api/diag/runs/${r.id}/csv">Download CSV</a>
       <button class="btn" type="button" id="dEmail">Email report</button></div>

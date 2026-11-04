@@ -30,6 +30,7 @@ def _in_net(ip, flt):
 
 SAMPLE_SECS = 3                 # torch sample window
 TORCH_MAX_MIN = 15              # cap on a Traffic Watch run
+SNIFF_MAX_SEC = 60             # cap on a Packet Sniffer capture (short: it captures to the router's RAM)
 SPEED_FLOOR = 3_000_000         # smallest test download (bytes) - for tiny-flash boards
 SPEED_CEIL = 90_000_000         # largest test download (bytes) - Cloudflare's __down rejects >= 100 MB with HTTP 403
 SPEED_DEFAULT_URL = "https://speed.cloudflare.com/__down?bytes={bytes}"   # {bytes} = the size to request
@@ -90,6 +91,16 @@ class Diagnostics:
                            time.time(), user, time.time()))
         self.db.event(initiator["id"], initiator["org_id"], "diagnostics", f"Link test to {target['name']} started by {user}")
         threading.Thread(target=self._run_link, args=(rid, initiator["id"], target["id"], target_addr, direction), daemon=True, name=f"diag-link-{rid}").start()
+        return rid
+
+    def start_sniff(self, device, iface, ip, port, seconds, user):
+        seconds = max(5, min(SNIFF_MAX_SEC, int(seconds or 10)))
+        rid = self.db.run("""INSERT INTO diag_runs (org_id, device_id, kind, iface, params, status, progress, started_at, created_by, created_at)
+                             VALUES (?,?,'sniff',?,?,'running',0,?,?,?)""",
+                          (device["org_id"], device["id"], iface or "",
+                           json.dumps({"seconds": seconds, "ip": ip or "", "port": port or ""}), time.time(), user, time.time()))
+        self.db.event(device["id"], device["org_id"], "diagnostics", f"Packet Sniffer started ({seconds}s) by {user}")
+        threading.Thread(target=self._run_sniff, args=(rid, device["id"], iface, ip, port, seconds), daemon=True, name=f"diag-sniff-{rid}").start()
         return rid
 
     def cancel(self, rid, user):
@@ -355,6 +366,65 @@ class Diagnostics:
                     traceback.print_exc()
             with self.lock:
                 self.running.discard(rid)
+
+    # --- Packet Sniffer (/tool/sniffer to memory, summary only) -----------------------------------------------
+    def _run_sniff(self, rid, device_id, iface, ip, port, seconds):
+        with self.lock:
+            self.running.add(rid)
+        try:
+            d = self.db.one("SELECT * FROM devices WHERE id=?", (device_id,))
+            if not d or not d["online"]:
+                return self._fail(rid, "The router is offline, so the packet capture couldn't run.")
+            if self._cancelled(rid):
+                return
+            cl = self.client_for(d)
+            try:
+                res = cl.sniff_summary(seconds, iface=iface or None, ip=ip or None, port=port or None)
+            except RouterError as e:
+                msg = str(e).lower()
+                if "permission" in msg or "not enough" in msg:
+                    return self._fail(rid, self._sniff_perm_hint(d["name"]))
+                return self._fail(rid, f"The packet capture couldn't run on {d['name']}: {e}")
+            if not res.get("ok"):
+                st = str(res.get("status") or "no result")
+                if "permission" in st.lower() or "not enough" in st.lower():
+                    return self._fail(rid, self._sniff_perm_hint(d["name"]))
+                return self._fail(rid, f"The packet capture didn't complete (sniffer status: {st}). Check that /tool sniffer is "
+                                       "allowed by the router's device-mode.")
+            if self._cancelled(rid):
+                return
+            report = self._sniff_report(res, iface, ip, port, seconds)
+            self.db.run("UPDATE diag_runs SET status='done', progress=1, result=?, finished_at=? WHERE id=? AND status='running'",
+                        (json.dumps(report), time.time(), rid))
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            self._fail(rid, f"Error: {e}")
+        finally:
+            with self.lock:
+                self.running.discard(rid)
+
+    def _sniff_perm_hint(self, name):
+        return (f"The packet capture needs the 'sniff' permission, which {name}'s TikManager user doesn't have yet. On the "
+                "router (as an admin) run: /user group set [find name=tikmanager] "
+                "policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp,sniff")
+
+    def _sniff_report(self, res, iface, ip, port, seconds):
+        hosts = sorted(res.get("hosts") or [], key=lambda h: h["bytes"], reverse=True)[:20]
+        protos = sorted(res.get("protocols") or [], key=lambda p: p["bytes"], reverse=True)[:20]
+        prow = [{"service": _service(p["proto"], p["port"]), "proto": p["proto"], "port": p["port"],
+                 "packets": p["packets"], "bytes": p["bytes"]} for p in protos]
+        flt = []
+        if iface:
+            flt.append(iface)
+        if ip:
+            flt.append(ip)
+        if port:
+            flt.append(f"port {port}")
+        return {"kind": "sniff", "scope": " · ".join(flt) or "all interfaces", "duration_s": seconds,
+                "packets": res.get("packets") or 0, "bytes": res.get("bytes") or 0, "hosts_seen": len(res.get("hosts") or []),
+                "hosts": hosts, "protocols": prow,
+                "note": "A packet-level capture run in the router's memory (no capture file written to flash). It records only "
+                        "metadata - who talked to whom, how much, and which protocol/port - not the contents of the packets."}
 
     # --- for the server: a run row decoded for the API --------------------------------------------------------
     def row(self, r):
