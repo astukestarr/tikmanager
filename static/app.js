@@ -3948,6 +3948,7 @@ const subnetsView = { org: "", q: "", problems: false };
 const ipNum = (ip) => ip.split(".").reduce((a, o) => a * 256 + Number(o), 0);
 
 // --- Alerts: problems TikManager noticed, sent as ConnectWise tickets / Teams messages (alerts.py) -------------------
+let alertTab = "active";
 async function alertsPage() {
   const a = await api("/api/alerts");
   const st = a.settings;
@@ -3960,11 +3961,13 @@ async function alertsPage() {
   $("main").innerHTML = `<h1>Alerts</h1>
     <p class="muted">Problems TikManager notices, ${channels.length ? `sent as ${channels.join(" and ")}` : "<b>not sent anywhere yet</b> - set up ConnectWise or Teams below"} -
       opened when a problem starts and closed when it clears.</p>
-    <div class="card"><h2>Open (${a.open.length})</h2>${a.open.length ? `<div class="table-wrap"><table><thead><tr><th>Since</th><th>Problem</th><th>Where</th><th>Status</th><th>Sent</th></tr></thead>
+    <div class="tabs" role="tablist">${[["active", "Active"]].concat(a.can_edit ? [["settings", "Settings"]] : []).map(([k, l]) =>
+      `<button type="button" role="tab" data-altab="${k}" class="${k === (a.can_edit ? alertTab : "active") ? "active" : ""}">${l}</button>`).join("")}</div>
+    <div id="alActiveTab"><div class="card"><h2>Open (${a.open.length})</h2>${a.open.length ? `<div class="table-wrap"><table><thead><tr><th>Since</th><th>Problem</th><th>Where</th><th>Status</th><th>Sent</th></tr></thead>
       <tbody>${a.open.map(row).join("")}</tbody></table></div>` : `<p class="muted">Nothing's wrong right now.</p>`}</div>
     <div class="card"><h2>Resolved in the last 7 days (${a.recent.length})</h2>${a.recent.length ? `<div class="table-wrap"><table><thead><tr><th>Started</th><th>Problem</th><th>Where</th><th>Status</th><th>Sent</th></tr></thead>
-      <tbody>${a.recent.map(row).join("")}</tbody></table></div>` : `<p class="muted">None.</p>`}</div>
-    ${a.can_edit ? `<div class="card" id="alSettings"><h2>Settings</h2>
+      <tbody>${a.recent.map(row).join("")}</tbody></table></div>` : `<p class="muted">None.</p>`}</div></div>
+    ${a.can_edit ? `<div id="alSettingsTab"><div class="card" id="alSettings"><h2>Settings</h2>
       <h3 class="al-h">What to alert on</h3><div class="al-kinds">${Object.entries(a.kinds).map(([k, m]) => `<label class="chk al-kind"><input type="checkbox" data-kind="${k}" ${st.kinds[k].on ? "checked" : ""}> ${esc(m.label)}
         ${m.threshold ? `<span class="small muted"> - ${m.threshold === "minutes" ? "after" : "above"} <input type="number" class="al-th" data-th="${k}" value="${esc(st.kinds[k][m.threshold])}" min="1" max="${{ percent: 100, celsius: 120 }[m.threshold] || 1440}"> ${{ percent: "%", celsius: "°C" }[m.threshold] || "minutes"}</span>` : ""}</label>`).join("")}</div>
       <h3 class="al-h">ConnectWise tickets</h3>
@@ -3988,8 +3991,16 @@ async function alertsPage() {
         ${a.cw_ready ? `<button class="btn" type="button" data-test="cw">Send a test ticket</button>` : ""}
         <button class="btn" type="button" data-test="teams" ${a.teams_ready ? "" : "disabled"}>Send a test to Teams</button>
         ${a.mail_ready ? `<button class="btn" type="button" data-test="email">Send a test email</button>` : ""}<span class="status" id="alStatus"></span></div></div>` : ""}
-    ${a.can_edit ? `<div class="card" id="whCard"><h2>Webhooks</h2><p class="muted small">Loading…</p></div>` : ""}`;
+    ${a.can_edit ? `<div class="card" id="whCard"><h2>Webhooks</h2><p class="muted small">Loading…</p></div></div>` : ""}`;
   $("main").querySelectorAll("[data-dev]").forEach((x) => x.addEventListener("click", (e) => { e.preventDefault(); go("router", x.dataset.dev); }));
+  const showAlTab = () => {
+    const t = a.can_edit ? alertTab : "active";
+    if ($("alActiveTab")) $("alActiveTab").hidden = t !== "active";
+    if ($("alSettingsTab")) $("alSettingsTab").hidden = t !== "settings";
+    document.querySelectorAll("[data-altab]").forEach((b) => b.classList.toggle("active", b.dataset.altab === t));
+  };
+  document.querySelectorAll("[data-altab]").forEach((b) => b.addEventListener("click", () => { alertTab = b.dataset.altab; showAlTab(); }));
+  showAlTab();
   if (!a.can_edit) return;
   const status = (m, c = "") => { $("alStatus").textContent = m; $("alStatus").className = `status ${c}`; };
   const cwFields = async (board) => {

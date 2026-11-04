@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.13 - 2026-11-04
+
+**Alerts page: Settings is now its own tab.** The alert settings (what to alert on, ConnectWise tickets, email, Teams,
+webhooks) used to sit below the open/resolved alert tables - you had to scroll past everything to reach them. The page
+now has **Active** and **Settings** tabs, so the configuration is one click away.
+
 ## 3.5.0-beta.12 - 2026-11-04
 
 **Alerts: the ConnectWise permissions note is now complete.** The Alerts > Settings page said the API member only needed
