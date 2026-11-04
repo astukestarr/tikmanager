@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.12 - 2026-11-04
+
+**Alerts: the ConnectWise permissions note is now complete.** The Alerts > Settings page said the API member only needed
+Service Tickets Add/Edit/Inquire; it now lists everything alert tickets use - Service Tickets (Add/Edit/Inquire), Close
+Service Tickets (Edit/Inquire) to close a ticket when the problem clears, Table Setup (Inquire) for the board/status/
+priority lists, and Company Maintenance (Inquire) - so closing tickets doesn't 403.
+
 ## 3.5.0-beta.11 - 2026-11-04
 
 **Diagnostics tidy-up.** Removed the fetch-based **Speed Test** (flash-write and single-stream limits made its number

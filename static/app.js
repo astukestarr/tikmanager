@@ -3971,7 +3971,9 @@ async function alertsPage() {
       ${a.cw_ready ? `<label class="chk"><input type="checkbox" id="alCwOn" ${st.cw.on ? "checked" : ""}> Open a ticket for each problem, and close it when it clears</label>
         <div class="grid2" id="alCwFields"><p class="small muted">Loading boards…</p></div>
         <p class="small muted">Tickets go to the client's linked ConnectWise company (Clients page); the default company is used for clients that aren't linked and for
-          TikManager / server problems. The ConnectWise API member needs <b>Service Desk > Service Tickets: Add, Edit and Inquire</b>.</p>`
+          TikManager / server problems. The ConnectWise API member's security role needs <b>Service Desk &gt; Service Tickets: Add, Edit, Inquire</b>,
+          <b>Service Desk &gt; Close Service Tickets: Edit, Inquire</b> (to close a ticket when the problem clears), <b>System &gt; Table Setup: Inquire</b>
+          (for the board / status / priority lists) and <b>Companies &gt; Company Maintenance: Inquire</b>. Set each Inquire to All. Full list in the README.</p>`
         : `<p class="small muted">Connect ConnectWise PSA on Admin > Integrations first.</p>`}
       <h3 class="al-h">Email</h3>
       ${a.mail_ready ? `<label class="chk"><input type="checkbox" id="alEmailOn" ${st.email.on ? "checked" : ""}> Email each problem (and when it clears) to</label>
