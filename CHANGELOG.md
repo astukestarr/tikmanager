@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.4.0-beta.2 - 2026-11-04
+
+- **Console: common command chips.** The Console page now has one-click chips for common read-only RouterOS commands
+  (resources, interfaces, addresses, routes, ARP, DHCP leases, firewall, connections, DNS, services, WireGuard peers,
+  BGP sessions, ping, recent logs) - click to run, or edit in the box first.
+
 ## 3.4.0-beta.1 - 2026-11-04
 
 Two additions to the router page:

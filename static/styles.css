@@ -213,6 +213,11 @@ input[type=color] { width: 56px; height: 34px; padding: 2px; }
 .console-out { background: #0b1020; color: #d7e0ee; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
   padding: 10px 12px; border-radius: 8px; height: 340px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0 0 10px; }
 .console-in { flex: 1; }
+.console-cmds { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.cmd-chip { all: unset; cursor: pointer; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--accent-soft); color: var(--accent); }
+.cmd-chip:hover { border-color: var(--accent); }
+.cmd-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .diag-chart { width: 100%; height: 120px; display: block; }
 .diag-chart .area { fill: var(--accent); opacity: .15; }
 .diag-chart .line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }

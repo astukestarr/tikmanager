@@ -532,6 +532,15 @@ async function loadUptime(d) {
     <div class="row small muted"><span>${rView.uprange} ago</span><span class="spacer"></span><b class="${cls}">${data.pct}% up</b><span class="spacer"></span><span>now</span></div>`;
   card.querySelectorAll("[data-uprange]").forEach((b) => b.addEventListener("click", () => { rView.uprange = b.dataset.uprange; loadUptime(d); }));
 }
+// Common, read-only RouterOS commands offered as one-click chips on the Console page.
+const CONSOLE_CMDS = [
+  ["Resources", "/system resource print"], ["RouterBOARD", "/system routerboard print"], ["Health", "/system health print"],
+  ["Interfaces", "/interface print"], ["Addresses", "/ip address print"], ["Routes", "/ip route print"],
+  ["ARP", "/ip arp print"], ["DHCP leases", "/ip dhcp-server lease print"], ["Neighbors", "/ip neighbor print"],
+  ["Firewall", "/ip firewall filter print"], ["NAT", "/ip firewall nat print"], ["Connections", "/ip firewall connection print"],
+  ["DNS", "/ip dns print"], ["Services", "/ip service print"], ["WireGuard peers", "/interface wireguard peers print"],
+  ["BGP sessions", "/routing bgp session print"], ["Ping 1.1.1.1", "/ping 1.1.1.1 count=4"], ["Recent logs", "/log print"],
+];
 function consoleTab(d) {
   const out = $("conOut"), cmd = $("conCmd"), form = $("conForm");
   if (!form) return;
@@ -545,6 +554,7 @@ function consoleTab(d) {
     catch (err) { out.textContent += "error: " + err.message + "\n\n"; }
     cmd.disabled = false; cmd.focus(); out.scrollTop = out.scrollHeight;
   });
+  document.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click", () => { cmd.value = b.dataset.cmd; form.requestSubmit(); }));
   cmd.focus();
 }
 async function router(id) {
@@ -705,6 +715,7 @@ async function router(id) {
         <p class="small muted">Removing it disconnects the tunnel. On the router you can then delete the <span class="mono">tikmanager</span> interface, user, logging action and firewall rule.</p></div>` : ""}
       ${adopted && tab === "console" ? `<div class="card" id="consoleCard"><h2>Console</h2>
         <p class="small muted">Runs one RouterOS command at a time through TikManager's limited router user and shows the output - it's a command runner, not an interactive shell (no prompts, Safe Mode or editors). Every command is logged. For a full interactive session use Winbox.</p>
+        <div class="console-cmds">${CONSOLE_CMDS.map((c) => `<button type="button" class="cmd-chip" data-cmd="${esc(c[1])}" title="${esc(c[1])}">${esc(c[0])}</button>`).join("")}</div>
         <pre class="console-out" id="conOut" aria-live="polite"></pre>
         <form id="conForm" class="row"><input id="conCmd" class="mono console-in" placeholder="/system resource print" spellcheck="false" autocomplete="off" autocapitalize="off">
           <button class="btn primary" type="submit">Run</button></form></div>` : ""}
