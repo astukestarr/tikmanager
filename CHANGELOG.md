@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.10 - 2026-11-04
+
+**ConnectWise billing fixes** (verified against the ConnectWise REST spec):
+- **"billed" now actually matches.** The agreement-configurations endpoint returns a list of configuration *references*
+  (each item's own `id` is the configuration id), not objects wrapped in a `configuration` field - beta.9 read the wrong
+  field, so everything still showed "not billed". A config attached to an active agreement now correctly counts as billed.
+- **Inactive configurations are hidden.** Configurations that are inactive/retired in ConnectWise (`activeFlag` false, or
+  an inactive status) no longer appear in the managed list or the "no managed router" list.
+
 ## 3.5.0-beta.9 - 2026-11-04
 
 **ConnectWise billing: count a MikroTik as billed when its configuration is attached to the agreement.** The most common

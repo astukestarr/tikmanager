@@ -295,10 +295,13 @@ class Integrations:
         out, page = [], 1
         while page < 50:
             batch = self._cw("/company/configurations", {"conditions": cond, "orderBy": "name", "pageSize": 1000, "page": page,
-                             "fields": "id,name,serialNumber,modelNumber,tagNumber,site/name,status/name,type/name"}) or []
-            out += [{"id": c["id"], "name": c.get("name", ""), "serial": c.get("serialNumber") or "", "model": c.get("modelNumber") or "",
-                     "site": (c.get("site") or {}).get("name", ""), "status": (c.get("status") or {}).get("name", ""),
-                     "type": (c.get("type") or {}).get("name", "")} for c in batch]
+                             "fields": "id,name,serialNumber,modelNumber,tagNumber,site/name,status/name,type/name,activeFlag"}) or []
+            for c in batch:
+                status = (c.get("status") or {}).get("name", "")
+                if c.get("activeFlag") is False or status.lower() in ("inactive", "archived", "disposed", "retired", "decommissioned"):
+                    continue   # skip inactive/retired configurations - only active ones should show up for billing
+                out.append({"id": c["id"], "name": c.get("name", ""), "serial": c.get("serialNumber") or "", "model": c.get("modelNumber") or "",
+                            "site": (c.get("site") or {}).get("name", ""), "status": status, "type": (c.get("type") or {}).get("name", "")})
             if len(batch) < 1000:
                 break
             page += 1
@@ -317,16 +320,15 @@ class Integrations:
         for ag in ags:
             name = ag.get("name", "")
             try:   # configurations attached to the agreement - the main way a managed unit is put on an agreement here
-                acfgs = self._cw(f"/finance/agreements/{int(ag['id'])}/configurations", {"fields": "id,configuration", "pageSize": 1000}) or []
-            except IntegrationError:
-                acfgs = []   # older ConnectWise or no access to that sub-list: fall back to additions only
-            cids = []
-            for ac in acfgs:
-                c = ac.get("configuration")
-                if isinstance(c, dict) and c.get("id"):
-                    cids.append(c["id"])
-                elif isinstance(ac.get("configurationId"), int):
-                    cids.append(ac["configurationId"])
+                # GET .../configurations returns a list of ConfigurationReference ({id, deviceIdentifier}) - each item's
+                # own id IS the configuration id (it is NOT wrapped in a "configuration" field).
+                acfgs = self._cw(f"/finance/agreements/{int(ag['id'])}/configurations", {"fields": "id,deviceIdentifier", "pageSize": 1000}) or []
+            except IntegrationError as e:
+                if "404" in str(e):
+                    acfgs = []   # older ConnectWise without that sub-list: fall back to additions only
+                else:
+                    raise   # e.g. a 403 - surface it so the user knows the API member needs access to agreement configurations
+            cids = [ac["id"] for ac in acfgs if isinstance(ac, dict) and ac.get("id")]
             if cids:
                 out.append({"agreement": name, "name": "", "config_ids": cids})
             adds = self._cw(f"/finance/agreements/{int(ag['id'])}/additions",
