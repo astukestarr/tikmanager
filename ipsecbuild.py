@@ -301,7 +301,10 @@ class IpsecBuilds:
                 d = self.db.one("SELECT * FROM devices WHERE id=?", (row["device_id"],)) if row["device_id"] else None
                 if d:
                     try:
-                        self.client_for(d).ipsec_clear(tag, f"tm-ipsec-{build_id}")
+                        if row["adopted"]:   # non-destructive: the peer/identity/policies were never ours, so just clear the wizard's label - the tunnel keeps running
+                            self.client_for(d).untag(tag, ["/ip/ipsec/policy", "/ip/ipsec/identity", "/ip/ipsec/peer"])
+                        else:
+                            self.client_for(d).ipsec_clear(tag, f"tm-ipsec-{build_id}")
                     except RouterError as e:
                         err = str(e)
                 if delete and not err:

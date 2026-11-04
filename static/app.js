@@ -6031,7 +6031,7 @@ async function wgbStatus(build, cands) {
   $("main").innerHTML = `<p><a href="#wgbuild">← WireGuard Builder</a></p>
     <div class="row"><h1>${esc(build.name)}</h1><span id="wgbPill">${vpnPill(build.status)}${build.adopted ? ` <span class="pill">imported</span>` : ""}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
     ${build.last_error ? `<div class="card"><p class="status err">${esc(build.last_error)}</p></div>` : ""}
-    ${build.adopted ? `<div class="card wiz-note"><p class="small"><b>Imported tunnel.</b> It was read live from both routers and tagged in place — the interfaces are left alone. It's tracked and can be disabled or deleted; Disable/Delete removes only the peers and routes, never the interfaces. Edit &amp; re-apply to bring it fully under the wizard.</p></div>` : ""}
+    ${build.adopted ? `<div class="card wiz-note"><p class="small"><b>Imported tunnel.</b> It was read live from both routers and tagged in place; nothing on the routers was changed. <b>Remove from wizard</b> just clears the wizard's label and forgets it — the peers, routes and interfaces are left exactly as they are, so the running tunnel is untouched. To change or tear it down, Edit &amp; re-apply first to bring it fully under the wizard.</p></div>` : ""}
     <div class="card"><h2>Tunnel</h2>
       <div class="grid2"><div><div class="kv"><span>Hub</span><span>${esc(build.hub || "")} <span class="mono small">${esc(build.hub_iface)}</span>${build.hub_iface_existing ? " (existing)" : ""}</span></div>
         <div class="kv"><span>Hub tunnel IP</span><span class="mono">${esc(build.hub_tunnel_ip || "")}</span></div>
@@ -6044,7 +6044,7 @@ async function wgbStatus(build, cands) {
       <div class="kv"><span>Hub advertises</span><span>${(build.hub_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
       <div class="kv"><span>Client advertises</span><span>${(build.client_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
       ${ro ? "" : `<div class="actions"><button class="btn primary" type="button" id="wgbEditBtn">Edit settings</button><button class="btn" type="button" id="wgbReapply">Re-apply</button>
-        ${build.status !== "disabled" ? `<button class="btn" type="button" id="wgbDisable">Disable</button>` : ""}<button class="btn danger" type="button" id="wgbDelete">Delete</button>
+        ${build.status !== "disabled" && !build.adopted ? `<button class="btn" type="button" id="wgbDisable">Disable</button>` : ""}<button class="btn danger" type="button" id="wgbDelete">${build.adopted ? "Remove from wizard" : "Delete"}</button>
         <span class="status" id="wgbSay"></span></div>`}</div>`;
   const say = (m, ok) => { $("wgbSay").textContent = m; $("wgbSay").className = `status ${ok ? "ok" : "err"}`; };
   $("wgbEditBtn")?.addEventListener("click", () => { wgbEdit = true; wgbWizard(false, build, cands, []); });
@@ -6327,8 +6327,8 @@ async function ipsecStatus(build, cands) {
   $("main").innerHTML = `<p><a href="#ipsec">← IPsec Tunnel</a></p>
     <div class="row"><h1>${esc(build.name)}</h1><span>${vpnPill(build.status)}${build.adopted ? ` <span class="pill">imported</span>` : ""}${build.up ? ` <span class="pill up-done">up</span>` : ""}</span></div>
     ${build.last_error ? `<div class="card"><p class="status err">${esc(build.last_error)}</p></div>` : ""}
-    ${build.adopted ? `<div class="card wiz-note"><p class="small"><b>Imported tunnel.</b> It's tracked and can be disabled or deleted, but TikManager didn't read its pre-shared key${build.has_psk ? "" : " (the Reveal button has nothing to show)"}.
-      To re-apply or fully manage it, Edit it and enter the key — re-applying rebuilds the tunnel under the wizard's own settings. The crypto below was read from the router${(build.local_nat || []).length === 0 ? "; if the tunnel uses 1:1 NAT, the mapped ranges were captured but not the real-LAN mapping" : ""}.</p></div>` : ""}
+    ${build.adopted ? `<div class="card wiz-note"><p class="small"><b>Imported tunnel.</b> It was tagged in place; nothing on the router was changed, and TikManager didn't read its pre-shared key${build.has_psk ? "" : " (the Reveal button has nothing to show)"}.
+      <b>Remove from wizard</b> just clears the wizard's label and forgets it — the peer, identity and policies are left exactly as they are, so the running tunnel is untouched. To re-apply or fully manage it, Edit it and enter the key; re-applying rebuilds the tunnel under the wizard's own settings. The crypto below was read from the router${(build.local_nat || []).length === 0 ? "; if the tunnel uses 1:1 NAT, the mapped ranges were captured but not the real-LAN mapping" : ""}.</p></div>` : ""}
     <div class="card"><h2>Tunnel</h2>
       <div class="grid2"><div><div class="kv"><span>Local router</span><span>${esc(build.device || "")}</span></div>
         <div class="kv"><span>Local subnets</span><span>${(build.local_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
@@ -6338,7 +6338,7 @@ async function ipsecStatus(build, cands) {
         <div class="kv"><span>Remote subnets</span><span>${(build.remote_subnets || []).map((x) => `<span class="mono small">${esc(x)}</span>`).join(" ") || "—"}</span></div>
         <div class="kv"><span>Encryption</span><span>${esc(build.ike === "ike2" ? "IKEv2" : "IKEv1")} · ${esc(build.p1_enc)}/${esc(build.p1_hash)}</span></div></div></div>
       ${ro ? "" : `<div class="actions"><button class="btn primary" type="button" id="ipEditBtn">Edit settings</button><button class="btn" type="button" id="ipReapply">Re-apply</button>
-        ${build.status !== "disabled" ? `<button class="btn" type="button" id="ipDisable">Disable</button>` : ""}<button class="btn danger" type="button" id="ipDelete">Delete</button><span class="status" id="ipSay"></span></div>`}</div>
+        ${build.status !== "disabled" && !build.adopted ? `<button class="btn" type="button" id="ipDisable">Disable</button>` : ""}<button class="btn danger" type="button" id="ipDelete">${build.adopted ? "Remove from wizard" : "Delete"}</button><span class="status" id="ipSay"></span></div>`}</div>
     <div class="card"><h2>Far-end settings</h2>
       <p class="small muted">Enter these on the other firewall (${esc(build.remote_addr || "the far end")}) to bring the tunnel up. Perspective is the far end's.</p>
       <div class="table-wrap"><table><tbody>${ipsecSheet(build).map(([k, v]) => `<tr><td class="small muted">${esc(k)}</td><td class="mono small">${esc(v)}</td></tr>`).join("")}

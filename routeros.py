@@ -935,10 +935,28 @@ class RouterOS:
 
     def tag_objects(self, items, tag):
         """Stamp comment=tag onto a list of existing objects so a hand-made tunnel becomes a tracked wizard build (adopt in
-        place). items: [{menu, id}]. Only comment is changed - nothing about the running tunnel is touched."""
+        place). items: [{menu, id}]. Only comment is changed - nothing about the running tunnel is touched. A route that
+        won't take a comment (a dynamic/connected one that slipped through) is skipped rather than failing the whole import;
+        a peer/identity/policy that can't be tagged is a real problem, so it's raised with the menu named."""
         for it in items:
-            if it.get("menu") and it.get("id"):
-                self._req("PATCH", f"{it['menu']}/{it['id']}", {"comment": tag})
+            menu, oid = it.get("menu"), it.get("id")
+            if not menu or not oid:
+                continue
+            try:
+                self._req("PATCH", f"{menu}/{oid}", {"comment": tag})
+            except RouterError as e:
+                if menu == "/ip/route":
+                    continue
+                raise RouterError(f"couldn't tag {menu}: {e}") from None
+
+    def untag(self, tag, menus):
+        """Reverse an adopt: clear the wizard's comment from the objects that carry it, across `menus`. The objects stay
+        exactly as they were (the running tunnel is left intact) - only the wizard's label is removed."""
+        q = urllib.parse.quote(tag)
+        for menu in menus:
+            for r in self.optional(lambda menu=menu: self.get(f"{menu}?comment={q}"), []) or []:
+                if r.get("comment") == tag and r.get(".id"):
+                    self._req("PATCH", f"{menu}/{r['.id']}", {"comment": ""})
 
     # --- adopting an existing tunnel into the wizard (import) ------------------------------------------------------------
     def wg_adoptable(self):
@@ -965,8 +983,11 @@ class RouterOS:
             peers.append({"public_key": p.get("public-key"), "id": p.get(".id"), "comment": p.get("comment") or "",
                           "allowed": [x.strip() for x in str(p.get("allowed-address") or "").split(",") if x.strip()],
                           "endpoint": p.get("endpoint-address") or "", "endpoint_port": p.get("endpoint-port") or ""})
+        # only static routes out of the interface - the dynamic "connected" route RouterOS makes for the tunnel subnet
+        # can't take a comment (PATCH 404s) and isn't ours to remove anyway
         routes = [{"id": r.get(".id"), "dst": r.get("dst-address")} for r in self.optional(lambda: self.get("/ip/route"), []) or []
-                  if r.get("gateway") == iface and r.get("dst-address") not in ("0.0.0.0/0", None)]
+                  if r.get("gateway") == iface and r.get("dst-address") not in ("0.0.0.0/0", None)
+                  and str(r.get("dynamic")).lower() != "true" and r.get(".id")]
         return {"name": iface, "address": info["addresses"][0] if info["addresses"] else None,
                 "listen_port": info["listen_port"], "public_key": info["public_key"], "peers": peers, "routes": routes}
 
@@ -1952,6 +1973,9 @@ class SimRouter:
 
     def tag_objects(self, items, tag):
         self._sim().setdefault("adopted_tags", []).append({"tag": tag, "items": items})
+
+    def untag(self, tag, menus):
+        self._sim()["adopted_tags"] = [t for t in (self._sim().get("adopted_tags") or []) if t.get("tag") != tag]
 
     # one fake hand-made tunnel of each kind so the import/adopt flow runs in dev (real adoption needs hardware)
     def wg_adoptable(self):

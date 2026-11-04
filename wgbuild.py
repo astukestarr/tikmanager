@@ -381,7 +381,7 @@ class WgBuilds:
             row = self.db.one("SELECT * FROM wg_builds WHERE id=?", (build_id,))
             tag = tag_for(build_id)
             failures = []
-            adopted = row["adopted"]   # an imported tunnel never created the interfaces, so never remove them
+            adopted = row["adopted"]   # an imported tunnel: the wizard only added a comment, so forgetting it only removes that comment
             try:
                 for side, dev_id, iface, created in (("hub", row["hub_device_id"], row["hub_iface"], not adopted and not row["hub_iface_existing"]),
                                                      ("client", row["client_device_id"], row["client_iface"], not adopted)):
@@ -390,8 +390,11 @@ class WgBuilds:
                         continue
                     try:
                         cl = self.client_for(d)
-                        cl.wgb_clear(tag, iface, remove_interface=created)
-                        cl.bgp_gc()   # drop the shared tikmanager-bgp instance if this was the last tunnel using it
+                        if adopted:   # non-destructive: the peer and routes were never ours, so just clear the wizard's label - the tunnel keeps running
+                            cl.untag(tag, ["/interface/wireguard/peers", "/ip/route"])
+                        else:
+                            cl.wgb_clear(tag, iface, remove_interface=created)
+                            cl.bgp_gc()   # drop the shared tikmanager-bgp instance if this was the last tunnel using it
                     except RouterError as e:
                         failures.append(f"{d['name']}: {e}")
                 if delete and not failures:

@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.2.0-beta.2 - 2026-11-03
+
+Fixes from importing on real hardware:
+
+- **WireGuard import no longer fails to tag.** It was trying to comment the dynamic "connected" route RouterOS creates
+  for the tunnel subnet, which can't take a comment (the router returned 404 and the import reported "tagging failed").
+  It now tags only static routes, and a route that won't take a comment is skipped rather than failing the import.
+- **Removing an imported tunnel is now non-destructive.** Since importing only *adds a comment* to objects the wizard
+  didn't create, "Remove from wizard" (and Disable) now just clears that comment and forgets the tunnel - the peers,
+  identities, policies, routes and interfaces are left exactly as they are, so the running tunnel keeps working. To
+  actually change or tear down an imported tunnel, Edit and re-apply first to bring it fully under the wizard.
+
 ## 3.2.0-beta.1 - 2026-11-03
 
 **New: import existing tunnels into the Router Wizard.** Both wizards gain an **Import existing** button that adopts a
