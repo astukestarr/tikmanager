@@ -2,7 +2,8 @@
 
 - Credentials are entered on Admin > Integrations and stored in the settings table encrypted with the vault (AES-256-GCM,
   bound to 'integration:<kind>'); secrets are never sent back to the browser - the page only learns whether one is saved.
-- ConnectWise PSA (read-only API member is enough): list companies, import them as TikManager clients or link existing ones.
+- ConnectWise PSA: list companies, import/link clients, reconcile billing, and open/close tickets. A read-only API member
+  covers the reports; the write features need more (see the security-role options in README.md "Integrations").
 - IT Glue: link clients to IT Glue organizations and keep each router documented as a configuration (name, model, serial,
   WAN IP, RouterOS version, link back to TikManager) - nightly when enabled, or on demand.
 In dev mode, the value "demo" (CW site / IT Glue API key) returns sample data instead of calling the real services.
@@ -157,7 +158,8 @@ class Integrations:
             url += "?" + urllib.parse.urlencode(params)
         return self._http(method, url, {"Authorization": f"Basic {token}", "clientId": c["client_id"], "Content-Type": "application/json"}, body)
 
-    # tickets for alerts (alerts.py): the API member needs Service Desk > Service Tickets add / edit / inquire
+    # tickets (alerts.py, upgrades.py): the API member needs Service Desk > Service Tickets add/edit/inquire, Close Service
+    # Tickets edit/inquire to close them, and Companies > Manage Documents add to attach a backup (see README "Integrations")
     def cw_boards(self):
         if self._demo("cw"):
             return [{"id": 1, "name": "Help Desk"}, {"id": 2, "name": "Network Alerts"}]

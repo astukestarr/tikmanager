@@ -478,7 +478,8 @@ discovery turned on (IP > Neighbors > Discovery Settings). **Adopt routers** on 
   from the server security check, the website grade dropping below A; optionally high CPU, high memory, a router running hot and new RouterOS versions.
 - **ConnectWise**: tickets go to the client's linked company (Clients page) or a default company you choose; pick the
   board, the status for new tickets, the status when it clears (or leave it open with a note) and the priority. The
-  API member needs Service Desk > Service Tickets: Add, Edit and Inquire.
+  API member needs Service Desk > Service Tickets: Add, Edit and Inquire, plus Close Service Tickets: Edit and Inquire to
+  close a ticket when the alert clears (full list of ConnectWise security-role options under **Integrations** below).
 - **Teams**: in the channel, **...** > **Workflows** > **Post to a channel when a webhook request is received**; paste
   the URL it gives you. It's stored encrypted like the other integration keys.
 - When more than 5 routers drop in the same minute you get one grouped alert, not a ticket each.
@@ -799,9 +800,22 @@ Admin > Integrations (administrators). Keys are typed on the page, stored encryp
 master key) and never shown again - the page only says a key is saved. The server needs outbound HTTPS to the PSA and
 IT Glue.
 
-- **ConnectWise PSA** - site, company ID, public/private key of an API member with a *read-only* security role, and
-  your client ID from developer.connectwise.com. Lists companies (filter by type/status) so you can import them as
-  clients or link existing clients; matching names are suggested.
+- **ConnectWise PSA** - site, company ID, the public/private key of a dedicated **API member**, and your client ID from
+  developer.connectwise.com. The API member needs a **security role** (System > Security Roles) with the options below.
+  Set every **Inquire** level to **All**, not My - an API member isn't assigned to records, so "My" would see nothing.
+
+  | What you use | Security role option(s) it needs |
+  |---|---|
+  | List / link companies (always) | Companies > Company Maintenance: **Inquire** |
+  | ConnectWise billing - match routers to configurations and agreements | Companies > Configurations: **Inquire** · Finance > Agreements: **Inquire** · System > Table Setup: **Inquire** (reads the Configuration Type) |
+  | ConnectWise billing - "Create in ConnectWise" button | Companies > Configurations: **Add** |
+  | Tickets from Alerts and from firmware upgrades (open + note + set status) | Service Desk > Service Tickets: **Add**, **Edit**, **Inquire** · System > Table Setup: **Inquire** (reads the boards, statuses and priorities) |
+  | Closing those tickets when the alert clears / the upgrade finishes | Service Desk > Close Service Tickets: **Edit** and **Inquire** |
+  | Attaching the pre-upgrade backup to the upgrade ticket | Companies > Manage Documents: **Add** |
+
+  If you only use the **reports** (no tickets and no "Create in ConnectWise"), a **read-only** role with just the three
+  billing **Inquire** options is enough. The integration lists companies (filter by type/status) so you can import them
+  as clients or link existing clients; matching names are suggested.
 - **IT Glue** - region and an API key (leave "Password access" off). Link each client to its IT Glue organization (name
   matches are suggested), pick the configuration type for routers, then **Sync now** or leave the nightly update on.
   Each router becomes/updates a configuration (name, hostname, WAN IP, serial, MAC, RouterOS version, link back to
