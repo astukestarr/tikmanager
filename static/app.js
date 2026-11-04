@@ -6538,6 +6538,154 @@ async function wgbImport() {
   draw();
 }
 
+// ===== Diagnostics (diagnostics.py) =================================================================================
+const DIAG_TESTS = [
+  { kind: "traffic", title: "Traffic Watch", icon: "monitor",
+    desc: "Watch live traffic on a router for a set time, then see who's using the connection - top talkers, connections and protocols." },
+  { kind: "speed", title: "Speed Test", icon: "network",
+    desc: "Measure a router's internet download speed, latency and jitter - run from the site itself, through the router." },
+];
+const fmtBytes = (b) => { b = Math.max(0, b || 0); const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
+const fmtBps = (b) => { b = Math.max(0, b || 0); const u = ["bps", "Kbps", "Mbps", "Gbps"]; let i = 0; while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
+const diagKind = (r) => r.kind === "torch" ? "Traffic Watch" : "Speed Test";
+const diagStatus = (r) => r.status === "running" ? `<span class="pill up-run">running${r.progress ? ` ${Math.round(r.progress * 100)}%` : ""}</span>`
+  : r.status === "done" ? `<span class="pill up-done">done</span>` : r.status === "cancelled" ? `<span class="pill">stopped</span>` : `<span class="status err">failed</span>`;
+function diagSummary(r) {
+  const x = r.result;
+  if (!x) return r.status === "failed" ? `<span class="status err">${esc(r.error || "failed")}</span>` : "—";
+  if (r.kind === "torch") return `${fmtBytes(x.total)} · peak ${fmtBps(x.peak_bps)} · ${x.hosts_seen} hosts`;
+  return `${x.down_mbps} Mbps down${x.latency && x.latency.avg != null ? ` · ${x.latency.avg} ms` : ""}`;
+}
+
+async function diagView(arg) {
+  if (arg === "traffic" || arg === "speed") return diagForm(arg);
+  if (/^\d+$/.test(arg || "")) return diagReport(arg);
+  return diagLanding();
+}
+
+async function diagLanding() {
+  const runs = await api("/api/diag/runs");
+  $("main").innerHTML = `<div class="row"><h1>Diagnostics</h1></div>
+    <p class="muted">On-demand tests you run against a router - each one saves a report you can revisit, email or export.</p>
+    <div class="wiz-tiles">${DIAG_TESTS.map((t) => `<button type="button" class="wiz-tile" data-diag="${t.kind}">
+      <span class="wiz-ico">${NAV_ICONS[t.icon] || NAV_ICONS_EXTRA[t.icon] || ""}</span>
+      <span class="wiz-name">${esc(t.title)}</span><span class="wiz-desc">${esc(t.desc)}</span></button>`).join("")}</div>
+    <div class="card"><h2>Recent tests</h2>${runs.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Router</th><th>Client</th><th>Result</th><th>Status</th><th>When</th></tr></thead><tbody>
+      ${runs.map((r) => `<tr class="click" data-run="${r.id}"><td><b>${diagKind(r)}</b></td><td>${esc(r.device || "—")}</td>
+        <td class="small">${esc(r.org || "")}</td><td class="small">${diagSummary(r)}</td><td>${diagStatus(r)}</td><td class="small">${ago(r.created_at)}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">No tests yet. Pick one above to start.</p>`}</div>`;
+  document.querySelectorAll("[data-diag]").forEach((b) => b.addEventListener("click", () => go("diag", b.dataset.diag)));
+  document.querySelectorAll("[data-run]").forEach((r) => r.addEventListener("click", () => go("diag", r.dataset.run)));
+  clearTimeout(window._diagLT);
+  if (runs.some((r) => r.status === "running")) window._diagLT = setTimeout(() => { if (location.hash === "#diag") diagLanding(); }, 4000);
+}
+
+async function diagForm(kind) {
+  const { routers } = await api("/api/diag/candidates");
+  const online = routers.filter((r) => r.online);
+  const title = kind === "traffic" ? "Traffic Watch" : "Speed Test";
+  $("main").innerHTML = `<p><a href="#diag">← Diagnostics</a></p><div class="row"><h1>${title}</h1></div>
+    <p class="muted">${kind === "traffic"
+      ? "Watch live traffic on a router's interface for a set time to catch an issue as it happens, then get a report of who's using the connection."
+      : "Measure a router's internet download speed, latency and jitter - run from the site itself, through the router."}</p>
+    <div class="card">
+      <label class="field">Router <select id="dRouter">${online.map((r) => `<option value="${r.id}">${esc(r.name)}${r.org ? ` — ${esc(r.org)}` : ""}</option>`).join("")}</select></label>
+      ${online.length ? "" : `<p class="small status err">No routers are online right now.</p>`}
+      ${kind === "traffic" ? `<label class="field">Interface <select id="dIface"><option>Loading…</option></select></label>
+      <label class="field">Watch for <select id="dMin"><option value="1">1 minute</option><option value="2" selected>2 minutes</option>
+        <option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option></select></label>
+      <label class="field">Only this address (optional) <input id="dFilter" placeholder="e.g. 192.168.1.50 or 192.168.1.0/24" spellcheck="false"></label>
+      <p class="small muted">Tip: filter to one device's address to zero in on the issue you're recreating.</p>`
+      : `<p class="small muted">Downloads a sample sized to the router's free storage from Cloudflare's speed service and pings 1.1.1.1 for latency. Download only.</p>`}
+      <div class="actions"><button class="btn primary" type="button" id="dStart" ${online.length ? "" : "disabled"}>Start test</button></div>
+      <p class="small status" id="dMsg"></p>
+    </div>`;
+  const loadIfaces = async () => {
+    if (kind !== "traffic") return;
+    const sel = $("dIface");
+    sel.innerHTML = `<option>Loading…</option>`;
+    try {
+      const { interfaces } = await api(`/api/diag/interfaces?device_id=${$("dRouter").value}`);
+      sel.innerHTML = interfaces.map((i) => `<option value="${esc(i.name)}" ${i.wan ? "selected" : ""}>${esc(i.name)}${i.wan ? " (WAN)" : ""}${i.running ? "" : " — down"}</option>`).join("") || `<option value="">(no interfaces found)</option>`;
+    } catch (e) { sel.innerHTML = `<option value="">${esc(e.message)}</option>`; }
+  };
+  $("dRouter")?.addEventListener("change", loadIfaces);
+  loadIfaces();
+  $("dStart")?.addEventListener("click", async () => {
+    $("dStart").disabled = true; $("dMsg").textContent = "Starting…"; $("dMsg").className = "small status";
+    try {
+      const body = { device_id: +$("dRouter").value };
+      let r;
+      if (kind === "traffic") { body.iface = $("dIface").value; body.minutes = +$("dMin").value; body.filter = $("dFilter").value.trim(); r = await post("/api/diag/traffic", body); }
+      else r = await post("/api/diag/speed", body);
+      go("diag", r.id);
+    } catch (e) { $("dMsg").textContent = e.message; $("dMsg").className = "small status err"; $("dStart").disabled = false; }
+  });
+}
+
+function diagChart(series) {
+  const pts = (series || []).filter((p) => p && typeof p.bps === "number");
+  if (pts.length < 2) return `<p class="small muted">Not enough samples to chart yet.</p>`;
+  const W = 800, H = 120, max = Math.max(1, ...pts.map((p) => p.bps));
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t || t0 + 1;
+  const x = (t) => (W * (t - t0)) / Math.max(1, t1 - t0), y = (v) => H - 4 - (H - 8) * (v / max);
+  const poly = pts.map((p) => `${x(p.t).toFixed(1)},${y(p.bps).toFixed(1)}`).join(" ");
+  return `<svg class="diag-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Throughput over time">
+    <polygon class="area" points="0,${H} ${poly} ${W},${H}"/><polyline class="line" points="${poly}"/></svg>
+    <div class="small muted">Peak ${fmtBps(max)} · ${pts.length} samples</div>`;
+}
+const diagTbl = (rows, cols, empty) => rows && rows.length ? `<div class="table-wrap"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}</tr></thead><tbody>
+  ${rows.map((r) => `<tr>${cols.map((c) => `<td class="small">${c[2] ? c[2](r) : esc(String(r[c[0]] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : `<p class="small muted">${empty}</p>`;
+const diagKpi = (v, l) => `<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+
+function diagTorchReport(x, running, progress) {
+  const B = (r) => fmtBytes(r.bytes), RX = (r) => fmtBytes(r.rx), TX = (r) => fmtBytes(r.tx);
+  return `${running ? `<p class="small muted">Running${progress ? ` — ${Math.round(progress * 100)}%` : ""}. The report updates as data comes in.</p>` : ""}
+    <div class="tiles">${diagKpi(fmtBytes(x.total), "Total data")}${diagKpi(fmtBytes(x.total_rx), "Downloaded")}${diagKpi(fmtBytes(x.total_tx), "Uploaded")}
+      ${diagKpi(fmtBps(x.peak_bps), "Peak throughput")}${diagKpi(x.hosts_seen ?? "—", "Hosts")}${diagKpi(x.connections_seen ?? "—", "Connections")}</div>
+    <div class="card"><h2>Throughput over time</h2>${diagChart(x.series)}</div>
+    <div class="card"><h2>Top talkers</h2>${diagTbl(x.top_hosts, [["key", "Host"], ["bytes", "Total", B], ["rx", "Down", RX], ["tx", "Up", TX]], "No traffic seen.")}</div>
+    <div class="card"><h2>Top destinations</h2>${diagTbl(x.top_dests, [["key", "Destination"], ["bytes", "Total", B]], "No traffic seen.")}</div>
+    <div class="card"><h2>By service</h2>${diagTbl(x.protocols, [["service", "Service"], ["bytes", "Total", B], ["rx", "Down", RX], ["tx", "Up", TX]], "—")}</div>
+    <div class="card"><h2>Top connections</h2>${diagTbl(x.connections, [["src", "From"], ["dst", "To"], ["service", "Service"], ["bytes", "Total", B], ["rx", "Down", RX], ["tx", "Up", TX]], "No connections seen.")}</div>`;
+}
+function diagSpeedReport(x) {
+  const lat = x.latency || {};
+  return `<div class="tiles">${diagKpi(`${x.down_mbps ?? "—"}<span class="small"> Mbps</span>`, "Download")}
+      ${diagKpi(lat.avg != null ? `${lat.avg}<span class="small"> ms</span>` : "—", "Latency")}
+      ${diagKpi(lat.jitter != null ? `${lat.jitter}<span class="small"> ms</span>` : "—", "Jitter")}
+      ${diagKpi(lat.loss != null ? `${lat.loss}%` : "—", "Packet loss")}</div>
+    <div class="card"><p class="small">Sample: ${x.size_mb} MB in ${x.secs}s from <span class="mono">${esc(x.source || "")}</span>.</p>
+      <p class="small muted">${esc(x.note || "")}</p></div>`;
+}
+
+async function diagReport(id) {
+  let r;
+  try { r = await api(`/api/diag/runs/${id}`); } catch { return go("diag"); }
+  const x = r.result, running = r.status === "running";
+  const head = `<p><a href="#diag">← Diagnostics</a></p><div class="row"><h1>${diagKind(r)}</h1><span class="spacer"></span>${diagStatus(r)}</div>
+    <p class="muted">${esc(r.device || "")}${r.org ? ` — ${esc(r.org)}` : ""}${x && x.iface ? ` · ${esc(x.iface)}` : ""} · started ${when(r.started_at || r.created_at)}</p>`;
+  let body;
+  if (r.status === "failed") body = `<div class="card"><p class="status err">${esc(r.error || "The test failed.")}</p></div>`;
+  else if (!x) body = `<div class="card"><p class="muted">Running… the report will fill in as data comes in.${r.progress ? ` (${Math.round(r.progress * 100)}%)` : ""}</p></div>`;
+  else body = r.kind === "torch" ? diagTorchReport(x, running, r.progress) : diagSpeedReport(x);
+  const cancel = running ? `<div class="actions"><button class="btn" type="button" id="dCancel">Stop test</button></div>` : "";
+  const share = r.status === "done" ? `<div class="actions"><a class="btn" href="/api/diag/runs/${r.id}/csv">Download CSV</a>
+      <button class="btn" type="button" id="dEmail">Email report</button></div>
+      <div id="dEmailBox" hidden><label class="field">Send to <input id="dTo" type="email" placeholder="name@example.com"></label>
+        <div class="actions"><button class="btn primary" type="button" id="dSend">Send</button></div><p class="small status" id="dSendMsg"></p></div>` : "";
+  $("main").innerHTML = head + body + cancel + share;
+  $("dCancel")?.addEventListener("click", async () => { $("dCancel").disabled = true; try { await post(`/api/diag/runs/${r.id}/cancel`); } catch (e) { } diagReport(r.id); });
+  $("dEmail")?.addEventListener("click", () => { const box = $("dEmailBox"); if (box) box.hidden = !box.hidden; });
+  $("dSend")?.addEventListener("click", async () => {
+    $("dSend").disabled = true; $("dSendMsg").textContent = "Sending…"; $("dSendMsg").className = "small status";
+    try { await post(`/api/diag/runs/${r.id}/email`, { to: $("dTo").value.trim() }); $("dSendMsg").textContent = "Sent."; $("dSendMsg").className = "small status ok"; }
+    catch (e) { $("dSendMsg").textContent = e.message; $("dSendMsg").className = "small status err"; $("dSend").disabled = false; }
+  });
+  clearTimeout(window._diagRT);
+  if (running) window._diagRT = setTimeout(() => { if (location.hash === `#diag/${r.id}`) diagReport(r.id); }, 3000);
+}
+
 const NAV_ICONS = {
 "dashboard": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"5\" rx=\"1.5\"/><rect x=\"14\" y=\"12\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"3\" y=\"16\" width=\"7\" height=\"5\" rx=\"1.5\"/></svg>",
 "routers": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"13\" width=\"19\" height=\"7\" rx=\"2\"/><path d=\"M6.5 16.5h.01M10 16.5h.01M8 13l-2-6M16 13l2-6M5 7.5a1.5 1.5 0 1 0 0-.01M19 7.5a1.5 1.5 0 1 0 0-.01\"/></svg>",
@@ -6561,12 +6709,14 @@ const NAV_ICONS_EXTRA = {
   monitor: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>',
   maint: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>',
   wizards: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 20 10-10M14 6l1.5 1.5"/><path d="M18 3v3M21 6h-3M5 4v2M6 5H4M18 15v2M19 16h-2"/></svg>',
+  diag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l2-5 3 10 2-7 1.5 4H21"/></svg>',
 };
 const CHEV = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
 // who sees what: "tech" = technicians, "admin" = technicians or client admins, "techadmin" = administrators
 const NAV = [
   { view: "dashboard", label: "Dashboard", icon: "dashboard" },
   { view: "wizards", label: "Router Wizard", icon: "wizards", who: "tech" },
+  { view: "diag", label: "Diagnostics", icon: "diag", who: "tech" },
   { group: "Devices", icon: "routers", count: "devices", items: [
     { view: "routers", label: "All devices", count: "devices" }, { view: "routers", arg: "ap", label: "Access points", count: "ap" },
     { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" },
@@ -6722,7 +6872,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, ipsec: ipsecView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, ipsec: ipsecView, diag: diagView, upgrades: upgradesView, backups: backupsView, clients, users, audit, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
@@ -6819,7 +6969,7 @@ async function init() {
   });
   const route = () => {
     const [h, arg] = location.hash.slice(1).split("/");
-    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if ((h === "wgbuild" || h === "ipsec") && arg) go(h, arg); else if ((h === "admin" || h === "routers" || h === "dashboard") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
+    if (h === "router" && arg) go("router", arg); else if (h === "vpn" && arg) go("vpn", arg); else if ((h === "wgbuild" || h === "ipsec" || h === "diag") && arg) go(h, arg); else if ((h === "admin" || h === "routers" || h === "dashboard") && arg) go(h, arg); else go(VIEWS[h] && h !== "vpn" ? h : "dashboard");
   };
   window.addEventListener("hashchange", route);   // links, typed URLs and Back (go() uses replaceState, which doesn't fire this)
   route();

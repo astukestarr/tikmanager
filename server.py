@@ -34,6 +34,7 @@ from routeros import RouterError
 from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from wgbuild import WgBuilds, WgError
+from diagnostics import Diagnostics
 from ipsecbuild import IpsecBuilds, IpsecError
 from firewall import Firewall, FirewallError
 from ports import Ports, PortsError
@@ -126,6 +127,7 @@ integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 wgbuilds = WgBuilds(db, poller.client, backups)   # Router Wizard > WireGuard Builder: point-to-point tunnel between two routers
 ipsecbuilds = IpsecBuilds(db, poller.client, backups, backups.vault)   # Router Wizard > IPsec Tunnel: MikroTik to any-brand far end
+diag = Diagnostics(db, poller.client, settings)   # Diagnostics: on-demand Traffic Watch (torch) and Speed Test (fetch) runs
 remote = RemoteAccess(db, poller.client, backups)   # Router page > Remote access (WireGuard for Windows into a router)
 remote.start()   # automatic revoke at each person's expiry date
 vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
@@ -428,6 +430,57 @@ class Handler(BaseHTTPRequestHandler):
         b.pop("hub_pubkey", None)
         b.pop("client_pubkey", None)
         return b
+
+    def diag_row(self, r):
+        """A diag_runs row decoded for the API (params/result JSON out), with a busy flag."""
+        out = diag.row(r)
+        out["busy"] = r["id"] in diag.running
+        return out
+
+    def diag_csv(self, run):
+        """Export a finished Diagnostics report as CSV."""
+        out = io.StringIO()
+        w = csv.writer(out)
+        res = run.get("result") or {}
+        if run["kind"] == "torch":
+            w.writerow(["src", "dst", "service", "protocol", "port", "download_bytes", "upload_bytes", "total_bytes"])
+            for c in res.get("connections", []):
+                w.writerow([c["src"], c["dst"], c["service"], c["proto"], c["port"], c["rx"], c["tx"], c["bytes"]])
+            fname = f"traffic-watch-{run['id']}.csv"
+        else:
+            lat = res.get("latency") or {}
+            w.writerow(["metric", "value"])
+            for k, v in (("download_mbps", res.get("down_mbps")), ("sample_mb", res.get("size_mb")), ("seconds", res.get("secs")),
+                         ("latency_avg_ms", lat.get("avg")), ("jitter_ms", lat.get("jitter")), ("loss_pct", lat.get("loss"))):
+                w.writerow([k, v])
+            fname = f"speed-test-{run['id']}.csv"
+        return self.send(200, out.getvalue().encode("utf-8-sig"), "text/csv; charset=utf-8",
+                         headers=[("Content-Disposition", f'attachment; filename="{fname}"')])
+
+    def diag_email(self, run, to):
+        """Email a finished Diagnostics report as plain text through the configured mailer."""
+        if not to:
+            raise MailError("Enter an email address to send the report to.")
+        res = run.get("result") or {}
+        dev = run.get("device") or "router"
+        mb = lambda b: f"{(b or 0) / 1e6:.1f} MB"
+        mbps = lambda b: f"{(b or 0) / 1e6:.1f} Mbps"
+        if run["kind"] == "torch":
+            subject = f"Traffic Watch report - {dev}"
+            lines = [f"Traffic Watch on {dev} ({run.get('org') or ''})",
+                     f"Interface: {res.get('iface')}    Duration: {res.get('duration_s')}s",
+                     f"Total: {mb(res.get('total'))}  (download {mb(res.get('total_rx'))}, upload {mb(res.get('total_tx'))})",
+                     f"Peak: {mbps(res.get('peak_bps'))}    Hosts: {res.get('hosts_seen')}    Connections: {res.get('connections_seen')}",
+                     "", "Top talkers:"]
+            lines += [f"  {h['key']:<18} {mb(h['bytes'])}  (down {mb(h['rx'])}, up {mb(h['tx'])})" for h in res.get("top_hosts", [])]
+        else:
+            lat = res.get("latency") or {}
+            subject = f"Speed Test report - {dev}"
+            lines = [f"Speed Test on {dev} ({run.get('org') or ''})",
+                     f"Download: {res.get('down_mbps')} Mbps   (sample {res.get('size_mb')} MB in {res.get('secs')}s)",
+                     f"Latency: {lat.get('avg')} ms    Jitter: {lat.get('jitter')} ms    Packet loss: {lat.get('loss')}%",
+                     f"Source: {res.get('source')}"]
+        mailer.send(to, subject, "\n".join(lines) + "\n\n- TikManager")
 
     def vpn_candidates(self, org_id, vpn_id):
         rows = db.q("""SELECT d.id, d.name, d.online, d.wan_ip, d.model, d.networks, d.thumb_slug, v.name AS other_vpn FROM devices d
@@ -905,6 +958,40 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require_vpn()
             org_id = s["org_id"] if s["kind"] == "client" else int(q.get("org_id") or 0)
             return self.json({"candidates": self.vpn_candidates(org_id, None)})
+        # --- Diagnostics (technicians) ---
+        if path == "/api/diag/candidates":   # routers to run a test against
+            self.require(tech=True)
+            return self.json({"routers": db.q("""SELECT d.id, d.name, o.name AS org, d.online, d.model FROM devices d
+                                                 LEFT JOIN orgs o ON o.id=d.org_id WHERE d.state='adopted' ORDER BY o.name, d.name""")})
+        if path == "/api/diag/interfaces":   # live interfaces for the Traffic Watch picker (the WAN is flagged)
+            s = self.require(tech=True)
+            d = self.device_for(s, int(q.get("device_id") or 0))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline - can't read its interfaces right now.")
+            try:
+                ifaces = poller.client(d).status().get("interfaces") or []
+            except RouterError as e:
+                raise HttpError(502, f"Couldn't read {d['name']}: {e}")
+            return self.json({"interfaces": [{"name": i["name"], "type": i.get("type"), "running": i.get("running"), "wan": bool(i.get("default_route"))}
+                                             for i in ifaces if not i.get("disabled")]})
+        if path == "/api/diag/runs":   # recent runs across all routers
+            self.require(tech=True)
+            rows = db.q("""SELECT r.*, d.name AS device, o.name AS org FROM diag_runs r LEFT JOIN devices d ON d.id=r.device_id
+                           LEFT JOIN orgs o ON o.id=r.org_id ORDER BY r.created_at DESC LIMIT 100""")
+            return self.json([self.diag_row(r) for r in rows])
+        if m := re.fullmatch(r"/api/diag/runs/(\d+)", path):
+            self.require(tech=True)
+            r = db.one("""SELECT r.*, d.name AS device, o.name AS org FROM diag_runs r LEFT JOIN devices d ON d.id=r.device_id
+                          LEFT JOIN orgs o ON o.id=r.org_id WHERE r.id=?""", (m.group(1),))
+            if not r:
+                raise HttpError(404, "Test not found.")
+            return self.json(self.diag_row(r))
+        if m := re.fullmatch(r"/api/diag/runs/(\d+)/csv", path):
+            self.require(tech=True)
+            r = db.one("SELECT * FROM diag_runs WHERE id=?", (m.group(1),))
+            if not r or not r["result"]:
+                raise HttpError(404, "No finished report to export.")
+            return self.diag_csv(diag.row(r))
         # --- Wizards > WireGuard Builder (technicians) ---
         if path == "/api/wg-builds":   # every build with its live-ish status
             self.require(tech=True)
@@ -2341,6 +2428,42 @@ class Handler(BaseHTTPRequestHandler):
             except (WgError, RouterError, KeyError, TypeError, ValueError) as e:
                 raise HttpError(400, str(e) or "Couldn't import that tunnel.") from None
             return self.json({"ok": True, "id": bid})
+        # --- Diagnostics (technicians) ---
+        if path == "/api/diag/traffic":   # start a Traffic Watch (torch) run
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            d = self.device_for(s, int(b.get("device_id") or 0))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline.")
+            rid = diag.start_torch(d, str(b.get("iface") or "").strip()[:40], int(b.get("minutes") or 2),
+                                   str(b.get("filter") or "").strip()[:60], s["email"])
+            db.audit(s["email"], "diagnostics traffic watch", d["name"], self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True, "id": rid})
+        if path == "/api/diag/speed":   # start a Speed Test run
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            d = self.device_for(s, int(b.get("device_id") or 0))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline.")
+            rid = diag.start_speed(d, str(b.get("iface") or "").strip()[:40], s["email"])
+            db.audit(s["email"], "diagnostics speed test", d["name"], self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True, "id": rid})
+        if m := re.fullmatch(r"/api/diag/runs/(\d+)/cancel", path):
+            s = self.require(tech=True, write=True)
+            diag.cancel(int(m.group(1)), s["email"])
+            return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/diag/runs/(\d+)/email", path):
+            s = self.require(tech=True, write=True)
+            run = db.one("""SELECT r.*, d.name AS device, o.name AS org FROM diag_runs r LEFT JOIN devices d ON d.id=r.device_id
+                            LEFT JOIN orgs o ON o.id=r.org_id WHERE r.id=?""", (m.group(1),))
+            if not run or not run["result"]:
+                raise HttpError(404, "No finished report to email.")
+            try:
+                self.diag_email(diag.row(run), str(self.body().get("to") or "").strip())
+            except MailError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "diagnostics report emailed", run["device"] or str(run["id"]), self.client_ip(), org_id=run["org_id"])
+            return self.json({"ok": True})
         # --- Router Wizard > IPsec Tunnel (technicians) ---
         if path == "/api/ipsec-builds":   # create / update; {apply: true} applies right away
             s = self.require(tech=True, write=True)
@@ -3356,6 +3479,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     wg.sync([(d["wg_pubkey"], d["tunnel_ip"]) for d in db.q("SELECT wg_pubkey, tunnel_ip FROM devices WHERE state='adopted' AND wg_pubkey IS NOT NULL")])
+    db.run("UPDATE diag_runs SET status='failed', error='TikManager restarted during this test.' WHERE status='running'")
     poller.start()
     backups.start()
     upgrades.start()

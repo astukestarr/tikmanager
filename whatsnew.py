@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "3.2.0"    # the release these slides describe (its betas included)
-SINCE = "3.1.0"      # the full release before it
+RELEASE = "3.3.0"    # the release these slides describe (its betas included)
+SINCE = "3.2.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -147,12 +147,24 @@ SLIDES_3_2 = [
              "blocked until you enter it. WireGuard: pick the interface on each end and TikManager reconstructs the tunnel. Imported "
              "tunnels carry an \"imported\" pill; editing and re-applying graduates them to fully managed."},
 ]
-SLIDES = SLIDES_3_2
+SLIDES_3_3 = [
+    {"id": "diagnostics", "title": "Diagnostics", "img": None, "view": "diag", "who": "tech",
+     "text": "A new Diagnostics section in the sidebar: on-demand tests you run against a router, each one saving a report you can "
+             "revisit, email or download as CSV."},
+    {"id": "traffic-watch", "title": "Traffic Watch", "img": None, "view": "diag", "who": "tech",
+     "text": "Pick a router and an interface (the WAN by default), watch its live traffic for a set number of minutes - long enough to "
+             "recreate the issue - and get a report of who's using the connection: top talkers, destinations, services and connections, "
+             "plus throughput over time. Filter to one address to zero in."},
+    {"id": "speed-test", "title": "Speed Test", "img": None, "view": "diag", "who": "tech",
+     "text": "Measure a site's internet download speed, latency and jitter from the router itself - it fetches a sample sized to the "
+             "router's free storage from Cloudflare and pings for latency. Works on every router, no app or container needed."},
+]
+SLIDES = SLIDES_3_3
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")

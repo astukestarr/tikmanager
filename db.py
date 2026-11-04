@@ -154,6 +154,18 @@ CREATE TABLE IF NOT EXISTS ipsec_builds (            -- IPsec Tunnel wizard: a M
   last_error TEXT, peer_state TEXT, checked_at REAL,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL, last_applied REAL
 );
+CREATE TABLE IF NOT EXISTS diag_runs (               -- Diagnostics: on-demand tests against one router, each with a saved report
+  id INTEGER PRIMARY KEY, org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL,
+  device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,                                 -- 'torch' (Traffic Watch) / 'speedtest' (Speed Test)
+  iface TEXT,                                         -- the interface watched/tested (blank = the router's WAN)
+  params TEXT NOT NULL DEFAULT '{}',                  -- what was asked for (minutes, filter, ...) as JSON
+  status TEXT NOT NULL DEFAULT 'running',             -- running / done / failed / cancelled
+  progress REAL,                                      -- 0..1 while a run is in progress
+  result TEXT,                                        -- the finished report (aggregates + time series) as JSON
+  error TEXT, started_at REAL, finished_at REAL,
+  created_by TEXT, created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ra_servers (               -- remote access (WireGuard for Windows ...) into one router
   device_id INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE, port INTEGER NOT NULL, pool TEXT NOT NULL,
   endpoint TEXT NOT NULL, split INTEGER NOT NULL DEFAULT 1, routes TEXT NOT NULL DEFAULT '[]', dns TEXT NOT NULL DEFAULT '',

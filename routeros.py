@@ -420,6 +420,62 @@ class RouterOS:
         r = self._req("POST", "/execute", {"script": body, "as-string": ""}, timeout=timeout)
         return (r or {}).get("ret", "") if isinstance(r, dict) else str(r or "")
 
+    # --- Diagnostics (diagnostics.py) ------------------------------------------------------------------------
+    def torch(self, interface, seconds=3, src=None):
+        """Run torch on one interface for `seconds` and return the live flows it saw, each with its current rates:
+        [{src, dst, proto, port, tx_bps, rx_bps}] - tx is traffic from src, rx is traffic to src, in bits/second.
+        Traffic Watch calls this repeatedly in short windows and integrates the rates into byte totals."""
+        body = {"interface": interface, "duration": str(max(1, int(seconds))), "src-address": src or "0.0.0.0/0",
+                "dst-address": "0.0.0.0/0", "ip-protocol": "any", "port": "any"}
+        rows = self._req("POST", "/tool/torch", body, timeout=int(seconds) + 12)
+
+        def ip_only(a):   # with the port column on, torch can fold the address into "ip:port"
+            a = str(a or "")
+            return a.rsplit(":", 1)[0] if (a.count(":") == 1 and "." in a) else a
+        out = []
+        for r in rows if isinstance(rows, list) else []:
+            out.append({"src": ip_only(r.get("src-address") or r.get("src-address6")),
+                        "dst": ip_only(r.get("dst-address") or r.get("dst-address6")),
+                        "proto": str(r.get("ip-protocol") or r.get("protocol") or "").lower(),
+                        "port": str(r.get("port") or r.get("dst-port") or r.get("src-port") or ""),
+                        "tx_bps": _num(r.get("tx")) or _num(r.get("tx-bits-per-second")) or 0,
+                        "rx_bps": _num(r.get("rx")) or _num(r.get("rx-bits-per-second")) or 0})
+        return out
+
+    def latency(self, target="1.1.1.1", count=10):
+        """Ping stats from the router itself: {avg, min, max, jitter, loss} (ms / %), or None if it didn't answer."""
+        r = self.optional(lambda: self._req("POST", "/ping", {"address": target, "count": str(count), "interval": "0.2"},
+                                             timeout=max(12, count)), []) or []
+        times, sent, received = [], 0, 0
+        for row in r if isinstance(r, list) else []:
+            if "sent" in row:
+                sent, received = int(row.get("sent") or 0), int(row.get("received") or 0)
+            ms = _duration_ms(str(row.get("time") or ""))
+            if ms is not None:
+                times.append(ms)
+        if not sent:
+            return None
+        jitter = round(sum(abs(times[i] - times[i - 1]) for i in range(1, len(times))) / (len(times) - 1), 1) if len(times) > 1 else 0.0
+        return {"avg": round(sum(times) / len(times), 1) if times else None, "min": round(min(times), 1) if times else None,
+                "max": round(max(times), 1) if times else None, "jitter": jitter,
+                "loss": round(100 * (sent - received) / sent, 1) if sent else None}
+
+    def speedtest(self, url, size_bytes, timeout=120):
+        """Download speed test: have the router fetch `url` (a CDN endpoint sized to `size_bytes`) to a temp file, timed,
+        then delete it. Returns {ok, bytes, secs, mbps, status}. Timed on this side; small transfers are less precise."""
+        tmp = "tm-speedtest.bin"
+        script = "\n".join([f':local u "{url}";',
+                            f':local r [/tool fetch url=$u mode=https http-method=get dst-path={tmp} as-value];',
+                            f':do {{ /file remove [find name="{tmp}"]; }} on-error={{}};',
+                            ':put ($r->"status");'])
+        t0 = time.time()
+        out = (self.run_script(script, timeout=timeout) or "").strip()
+        secs = time.time() - t0
+        status = out.splitlines()[-1].strip() if out else ""
+        ok = status == "finished" and secs > 0
+        return {"ok": bool(ok), "bytes": size_bytes if ok else 0, "secs": round(secs, 2),
+                "mbps": round(size_bytes * 8 / secs / 1_000_000, 1) if ok else None, "status": status or "no result"}
+
     def dhcp_leases(self):
         """DHCP leases with the server (and its interface) each came from. Read live when someone opens the router page."""
         servers = {s.get("name"): s.get("interface", "") for s in self.optional(lambda: self.get("/ip/dhcp-server"), []) or []}
@@ -2110,6 +2166,37 @@ class SimRouter:
         if ":error" in body:
             raise RouterError("HTTP 400: failure: " + body.split(":error", 1)[1].strip().strip('"')[:80])
         return "\n".join(f"(simulated) {line.strip()}" for line in body.splitlines() if line.strip() and not line.strip().startswith("#"))[:2000]
+
+    # --- Diagnostics (fake traffic / speed so the whole flow works in dev) -----------------------------------
+    def torch(self, interface="ether1", seconds=3, src=None):
+        time.sleep(min(2, max(0.3, seconds * 0.3)))
+        rr = random.Random(self.id * 101 + int(time.time() // 3))
+        nets = self.networks()
+        lan3 = (nets[0]["network"].rsplit(".", 1)[0] if nets else "192.168.88")
+        dests = [("142.250.80.46", "tcp", "443"), ("1.1.1.1", "udp", "53"), ("13.107.42.14", "tcp", "443"),
+                 ("104.16.85.20", "tcp", "443"), ("151.101.1.69", "tcp", "80"), ("9.9.9.9", "udp", "53"),
+                 ("17.253.144.10", "tcp", "443"), ("140.82.113.4", "tcp", "22")]
+        out = []
+        for _ in range(rr.randint(4, 7)):
+            d = rr.choice(dests)
+            rx = rr.randint(60_000, 28_000_000)
+            out.append({"src": f"{lan3}.{rr.randint(10, 60)}", "dst": d[0], "proto": d[1], "port": d[2],
+                        "tx_bps": int(rx * (0.03 + rr.random() * 0.2)), "rx_bps": rx})
+        return out
+
+    def latency(self, target="1.1.1.1", count=10):
+        rr = random.Random(self.id * 7 + int(time.time() // 30))
+        base = 6 + self.id % 25
+        times = [base + rr.gauss(0, 1.5) for _ in range(count)]
+        return {"avg": round(sum(times) / len(times), 1), "min": round(min(times), 1), "max": round(max(times), 1),
+                "jitter": round(sum(abs(times[i] - times[i - 1]) for i in range(1, count)) / (count - 1), 1),
+                "loss": 0.0 if rr.random() > 0.05 else 10.0}
+
+    def speedtest(self, url, size_bytes, timeout=120):
+        time.sleep(1.0)
+        rr = random.Random(self.id * 13 + int(time.time() // 60))
+        mbps = round(40 + (self.id % 8) * 30 + rr.random() * 60, 1)
+        return {"ok": True, "bytes": size_bytes, "secs": round(size_bytes * 8 / (mbps * 1_000_000), 2), "mbps": mbps, "status": "finished"}
 
     def topology(self):
         """Simulated network: a switch and an access point behind the router, phones, printers, PCs, a VM host."""

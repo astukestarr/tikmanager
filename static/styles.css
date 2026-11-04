@@ -203,6 +203,9 @@ input[type=color] { width: 56px; height: 34px; padding: 2px; }
 .thru { margin-top: 14px; } .thru div { font-size: 18px; font-weight: 700; }
 .thru .in, .legend .in { color: var(--info); } .thru .out { color: #8b5cf6; }
 .spark { width: 100%; height: 40px; display: block; margin: 6px 0 14px; }
+.diag-chart { width: 100%; height: 120px; display: block; }
+.diag-chart .area { fill: var(--accent); opacity: .15; }
+.diag-chart .line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .btn.wide { width: 100%; margin-top: 6px; }
 .chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; }
 .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }

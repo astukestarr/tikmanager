@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.1 - 2026-11-04
+
+**New: Diagnostics** - a sidebar section (just below Router Wizard) of on-demand tests you run against a router, each one
+saving a report you can revisit, email, or download as CSV. Two tests to start:
+
+- **Traffic Watch** - pick a router and an interface (the WAN by default), watch its live traffic for a set number of
+  minutes (1-15, long enough to recreate the issue), and get a report of who's using the connection: total data each way,
+  peak throughput, top talkers, top destinations, a service breakdown, the top connections, and throughput over time.
+  Filter to one address to zero in on a single device. It samples torch in short windows in the background, so the report
+  fills in as it runs and the test survives a slow link. (Verified in dev against simulated routers; the exact torch read
+  is confirmed against live hardware before this goes stable.)
+- **Speed Test** - measure a site's internet **download** speed, latency and jitter from the router itself. It fetches a
+  sample sized to the router's free storage from Cloudflare's speed service (so it works on every board, flash and all)
+  and pings for latency. Download only - RouterOS can't source a large upload from fetch.
+
+Reports can be **emailed** (using the configured mail setup) or **downloaded as CSV**. Tests are technician-only, and an
+in-flight test is marked failed if TikManager restarts (it can't resume).
+
 ## 3.2.1-beta.1 - 2026-11-04
 
 More reliable scheduled upgrades - a single flaky router (or a TikManager restart) no longer holds or fails a whole batch.
