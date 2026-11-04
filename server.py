@@ -18,6 +18,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -592,11 +593,20 @@ class Handler(BaseHTTPRequestHandler):
         type_id = int(tid) if str(tid or "").isdigit() else None
         rows, orphans, errors, clients = [], [], [], []
         managed = matched = billed = missed = 0
-        for org in db.q("SELECT id, name, cw_id FROM orgs WHERE cw_id IS NOT NULL AND cw_id!='' AND active=1 ORDER BY name"):
+        orgs = db.q("SELECT id, name, cw_id FROM orgs WHERE cw_id IS NOT NULL AND cw_id!='' AND active=1 ORDER BY name")
+
+        def one(org):   # reconcile a single client - each is independent ConnectWise I/O, so these run in parallel
             try:
-                r = self.billing_report(org)
+                return org, self.billing_report(org), None
             except IntegrationError as e:
-                errors.append({"org": org["name"], "error": self._cw_perm_hint(str(e), "Companies > Configurations: Inquire")})
+                return org, None, self._cw_perm_hint(str(e), "Companies > Configurations: Inquire")
+
+        # ConnectWise calls are I/O-bound; a small thread pool turns ~60 sequential clients into a handful of waves.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(one, orgs))
+        for org, r, err in results:   # fold results back in the orgs' (name) order, so the output is stable
+            if err is not None:
+                errors.append({"org": org["name"], "error": err})
                 continue
             clients.append({"org": org["name"], "org_id": org["id"], "managed": r["managed"],
                             "matched": r["matched"], "billed": r["billed"], "missed": r["missed"]})
@@ -1183,7 +1193,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if q.get("refresh"):
                     integ._cache.pop("billing_all", None)
-                return self.json(integ._cached("billing_all", self.billing_all, 120))
+                return self.json(integ._cached("billing_all", self.billing_all, 600))
             except IntegrationError as e:
                 raise HttpError(502, self._cw_perm_hint(str(e), "Companies > Configurations: Inquire and Finance > Agreements: Inquire "
                                                                "(and System > Table Setup: Inquire to read the Configuration Type)"))

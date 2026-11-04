@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.1 - 2026-11-04
+
+**ConnectWise billing: the "All clients" view loads fast.** Reconciling every linked client used to run one client's
+ConnectWise calls after another, so a large fleet could take long enough to time out behind a reverse proxy (the page
+seemed to never load). The clients are now reconciled in parallel (up to 8 at once), which turns ~60 sequential clients
+into a handful of waves, and the result is cached for 10 minutes (the **Refresh** button still forces a live re-read).
+
 ## 3.5.0 - 2026-11-04
 
 **ConnectWise interoperability, plus per-event alert channels.** The stable release of everything in the 3.5.0 betas:
