@@ -165,7 +165,10 @@ class Upgrades:
             try:
                 txt = self.backups.text_of(b.get("backup_id")) if b.get("backup_id") else None
                 if txt:
-                    self.integ.cw_attach(tid, f"{d['name']}-pre-upgrade.rsc", txt, title=f"{d['name']} pre-upgrade backup")
+                    # .txt, not .rsc: ConnectWise rejects file extensions that aren't in its Allowed File Types, and the
+                    # backup is a plain-text export script anyway. Sanitise the router name for the filename.
+                    safe = re.sub(r"[^A-Za-z0-9._-]", "_", d["name"])[:60] or "router"
+                    self.integ.cw_attach(tid, f"{safe}-pre-upgrade.txt", txt, title=f"{d['name']} pre-upgrade backup")
                     ev(f"Pre-upgrade backup attached to ticket #{tid}")
             except Exception as e:  # noqa: BLE001 - attachment is best-effort (needs Companies > Manage Attachments: Add)
                 traceback.print_exc()

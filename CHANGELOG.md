@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.17 - 2026-11-04
+
+**Upgrade ticket: attach the backup as `.txt` so ConnectWise accepts it.** ConnectWise rejects file extensions that
+aren't in its Allowed File Types, and `.rsc` isn't one - so the pre-upgrade backup wouldn't attach. It's a plain-text
+export, so it's now attached as `<router>-pre-upgrade.txt` (router name sanitised). If it still doesn't attach, the
+router's Events now show the exact reason (beta.15).
+
 ## 3.5.0-beta.16 - 2026-11-04
 
 **Alerts settings: select-all per channel, and a clearer "default company".** The CW&nbsp;Ticket / Email / Teams columns
