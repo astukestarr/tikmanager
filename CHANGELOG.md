@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.8 - 2026-11-04
+
+- **Link test fix.** The bandwidth-test used the wrong parameter name (`tcp-connection-count`); RouterOS calls it
+  `connection-count`, so the test failed with "bad parameter". Corrected.
+
 ## 3.3.0-beta.7 - 2026-11-04
 
 **New Diagnostics test: Link test** - measure real throughput **between two of your routers**, which (unlike the internet

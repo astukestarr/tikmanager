@@ -521,7 +521,7 @@ class RouterOS:
             ':local st "error"; :local tx 0; :local rx 0;',
             ':onerror e in={',
             f'  :local r [/tool bandwidth-test address={address} user={user} password="{pw}" direction={direction} '
-            f'protocol=tcp tcp-connection-count={int(streams)} duration={int(duration)}s as-value];',
+            f'protocol=tcp connection-count={int(streams)} duration={int(duration)}s as-value];',
             '  :set st ($r->"status"); :set tx ($r->"tx-total-average"); :set rx ($r->"rx-total-average");',
             '} do={ :set st ("error: " . $e); }',
             ':put ($st . "|" . $tx . "|" . $rx);'])
