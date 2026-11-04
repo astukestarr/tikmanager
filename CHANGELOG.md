@@ -3,19 +3,7 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
-## 3.2.0-beta.2 - 2026-11-03
-
-Fixes from importing on real hardware:
-
-- **WireGuard import no longer fails to tag.** It was trying to comment the dynamic "connected" route RouterOS creates
-  for the tunnel subnet, which can't take a comment (the router returned 404 and the import reported "tagging failed").
-  It now tags only static routes, and a route that won't take a comment is skipped rather than failing the import.
-- **Removing an imported tunnel is now non-destructive.** Since importing only *adds a comment* to objects the wizard
-  didn't create, "Remove from wizard" (and Disable) now just clears that comment and forgets the tunnel - the peers,
-  identities, policies, routes and interfaces are left exactly as they are, so the running tunnel keeps working. To
-  actually change or tear down an imported tunnel, Edit and re-apply first to bring it fully under the wizard.
-
-## 3.2.0-beta.1 - 2026-11-03
+## 3.2.0 - 2026-11-04
 
 **New: import existing tunnels into the Router Wizard.** Both wizards gain an **Import existing** button that adopts a
 tunnel already configured on your routers (by hand or another tool) so it shows in the wizard and can be disabled or
@@ -26,9 +14,13 @@ deleted - without re-applying, re-keying or restarting the running tunnel ("adop
   profile/proposal and your own NAT/firewall are left alone. The **pre-shared key isn't read** - an imported tunnel is
   view/disable/delete right away, and re-applying (to fully manage it) is blocked until you enter the key under Edit.
 - **WireGuard** - pick the interface on each end (they must be peered with each other); TikManager reads both routers
-  live, reconstructs the tunnel, and tags the peers and routes in place. The interfaces and addresses are left alone;
-  Disable/Delete removes only the peers and routes.
+  live, reconstructs the tunnel, and tags the peers and routes in place. The interfaces and addresses are left alone.
 - Imported tunnels carry an **"imported"** pill; editing and re-applying graduates them to fully managed.
+- **Removing an imported tunnel is non-destructive.** Since importing only *adds a comment* to objects the wizard didn't
+  create, "Remove from wizard" just clears that comment and forgets the tunnel - the peers, identities, policies, routes
+  and interfaces are left exactly as they are, so the running tunnel keeps working. (To change or tear one down, Edit and
+  re-apply first to bring it fully under the wizard.) Only static routes are tagged, so a router's dynamic "connected"
+  route for the tunnel subnet is left alone.
 
 Also: the Upgrades page's **Upgrade jobs** table now scrolls within the card (with a sticky header) instead of running
 off the bottom of the page when there are many jobs.
