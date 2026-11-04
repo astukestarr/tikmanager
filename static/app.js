@@ -6613,6 +6613,7 @@ async function diagLanding() {
   $("main").innerHTML = `<div class="row"><h1>Diagnostics</h1></div>
     <p class="muted">On-demand tests you run against a router - each one saves a report you can revisit, email or export.</p>
     <div class="wiz-tiles">${DIAG_TESTS.map((t) => `<button type="button" class="wiz-tile" data-diag="${t.kind}">
+      <span class="exp-badge">Experimental</span>
       <span class="wiz-ico">${NAV_ICONS[t.icon] || NAV_ICONS_EXTRA[t.icon] || ""}</span>
       <span class="wiz-name">${esc(t.title)}</span><span class="wiz-desc">${esc(t.desc)}</span></button>`).join("")}</div>
     <div class="card"><h2>Recent tests</h2>${runs.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Router</th><th>Client</th><th>Result</th><th>Status</th><th>When</th></tr></thead><tbody>
