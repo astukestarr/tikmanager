@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.2 - 2026-11-04
+
+Fixes from running Diagnostics on real hardware:
+
+- **Traffic Watch no longer needs the `sniff` permission.** Torch requires RouterOS's `sniff` policy, which TikManager's
+  least-privilege router user deliberately doesn't have - so it failed with "not enough permissions". Traffic Watch now
+  reads the router's **connection tracking** (`/ip/firewall/connection`) instead, which needs only `read`, and samples
+  the per-connection byte counters over the run. Same report (top talkers, destinations, services, connections,
+  throughput over time); it covers **all traffic through the router** (with an optional address filter) rather than one
+  interface. Best run on a router that routes traffic - a pure switch tracks little.
+- **Speed Test failures now say why.** When the test file won't download, the report shows the router's actual fetch
+  status so you can tell internet/DNS problems from a blocked `/tool fetch` (RouterOS device-mode) or no flash space.
+  (A router with no internet route - e.g. a core switch - can't run it.)
+
 ## 3.3.0-beta.1 - 2026-11-04
 
 **New: Diagnostics** - a sidebar section (just below Router Wizard) of on-demand tests you run against a router, each one

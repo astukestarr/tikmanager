@@ -468,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
         if run["kind"] == "torch":
             subject = f"Traffic Watch report - {dev}"
             lines = [f"Traffic Watch on {dev} ({run.get('org') or ''})",
-                     f"Interface: {res.get('iface')}    Duration: {res.get('duration_s')}s",
+                     f"Scope: {res.get('scope')}    Duration: {res.get('duration_s')}s",
                      f"Total: {mb(res.get('total'))}  (download {mb(res.get('total_rx'))}, upload {mb(res.get('total_tx'))})",
                      f"Peak: {mbps(res.get('peak_bps'))}    Hosts: {res.get('hosts_seen')}    Connections: {res.get('connections_seen')}",
                      "", "Top talkers:"]

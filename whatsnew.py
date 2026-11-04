@@ -152,9 +152,9 @@ SLIDES_3_3 = [
      "text": "A new Diagnostics section in the sidebar: on-demand tests you run against a router, each one saving a report you can "
              "revisit, email or download as CSV."},
     {"id": "traffic-watch", "title": "Traffic Watch", "img": None, "view": "diag", "who": "tech",
-     "text": "Pick a router and an interface (the WAN by default), watch its live traffic for a set number of minutes - long enough to "
-             "recreate the issue - and get a report of who's using the connection: top talkers, destinations, services and connections, "
-             "plus throughput over time. Filter to one address to zero in."},
+     "text": "Pick a router, watch its live traffic for a set number of minutes - long enough to recreate the issue - and get a report "
+             "of who's using the connection: top talkers, destinations, services and connections, plus throughput over time. Filter to "
+             "one address to zero in. It reads the router's connection tracking, so no extra router permissions are needed."},
     {"id": "speed-test", "title": "Speed Test", "img": None, "view": "diag", "who": "tech",
      "text": "Measure a site's internet download speed, latency and jitter from the router itself - it fetches a sample sized to the "
              "router's free storage from Cloudflare and pings for latency. Works on every router, no app or container needed."},

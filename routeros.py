@@ -421,10 +421,31 @@ class RouterOS:
         return (r or {}).get("ret", "") if isinstance(r, dict) else str(r or "")
 
     # --- Diagnostics (diagnostics.py) ------------------------------------------------------------------------
+    def connections(self, src=None):
+        """Live tracked connections from /ip/firewall/connection: [{src, dst, proto, port, orig_bytes, repl_bytes}].
+        orig_* is traffic from the initiator (upload), repl_* is the reply (download). Traffic Watch samples this and
+        takes byte deltas over the run. This needs only the 'read' permission - unlike torch, which needs 'sniff' that
+        TikManager's least-privilege router user is deliberately not granted (torch returns 'not enough permissions')."""
+        rows = self._req("GET", "/ip/firewall/connection?.proplist=src-address,dst-address,protocol,orig-bytes,repl-bytes", timeout=20)
+
+        def split(a):
+            a = str(a or "")
+            if a.count(":") == 1 and "." in a:   # ipv4:port
+                ip, _, p = a.rpartition(":")
+                return ip, p
+            return a, ""
+        out = []
+        for r in rows if isinstance(rows, list) else []:
+            s_ip, s_port = split(r.get("src-address"))
+            d_ip, d_port = split(r.get("dst-address"))
+            out.append({"src": s_ip, "dst": d_ip, "proto": str(r.get("protocol") or "").lower(),
+                        "port": d_port or s_port, "orig_bytes": _num(r.get("orig-bytes")) or 0, "repl_bytes": _num(r.get("repl-bytes")) or 0})
+        return out
+
     def torch(self, interface, seconds=3, src=None):
-        """Run torch on one interface for `seconds` and return the live flows it saw, each with its current rates:
-        [{src, dst, proto, port, tx_bps, rx_bps}] - tx is traffic from src, rx is traffic to src, in bits/second.
-        Traffic Watch calls this repeatedly in short windows and integrates the rates into byte totals."""
+        """Run torch on one interface for `seconds` (needs the 'sniff' permission, which TikManager's router user doesn't
+        have - Traffic Watch uses connections() instead; kept for if sniff is ever granted). [{src, dst, proto, port,
+        tx_bps, rx_bps}] - tx is traffic from src, rx is traffic to src, in bits/second."""
         body = {"interface": interface, "duration": str(max(1, int(seconds))), "src-address": src or "0.0.0.0/0",
                 "dst-address": "0.0.0.0/0", "ip-protocol": "any", "port": "any"}
         rows = self._req("POST", "/tool/torch", body, timeout=int(seconds) + 12)
@@ -464,10 +485,11 @@ class RouterOS:
         """Download speed test: have the router fetch `url` (a CDN endpoint sized to `size_bytes`) to a temp file, timed,
         then delete it. Returns {ok, bytes, secs, mbps, status}. Timed on this side; small transfers are less precise."""
         tmp = "tm-speedtest.bin"
-        script = "\n".join([f':local u "{url}";',
-                            f':local r [/tool fetch url=$u mode=https http-method=get dst-path={tmp} as-value];',
-                            f':do {{ /file remove [find name="{tmp}"]; }} on-error={{}};',
-                            ':put ($r->"status");'])
+        script = "\n".join([
+            f':local u "{url}"; :local st "error";',
+            f':do {{ :local r [/tool fetch url=$u mode=https http-method=get dst-path={tmp} as-value]; :set st ($r->"status"); }} on-error={{ :set st "error" }};',
+            f':do {{ /file remove [find name="{tmp}"]; }} on-error={{}};',
+            ':put $st;'])
         t0 = time.time()
         out = (self.run_script(script, timeout=timeout) or "").strip()
         secs = time.time() - t0
@@ -2197,6 +2219,19 @@ class SimRouter:
         rr = random.Random(self.id * 13 + int(time.time() // 60))
         mbps = round(40 + (self.id % 8) * 30 + rr.random() * 60, 1)
         return {"ok": True, "bytes": size_bytes, "secs": round(size_bytes * 8 / (mbps * 1_000_000), 2), "mbps": mbps, "status": "finished"}
+
+    def connections(self, src=None):
+        # A stable set of fake connections whose cumulative bytes grow with the clock, so Traffic Watch's byte deltas work.
+        nets = self.networks()
+        lan3 = (nets[0]["network"].rsplit(".", 1)[0] if nets else "192.168.88")
+        dests = [("142.250.80.46", "tcp", "443", 900000), ("1.1.1.1", "udp", "53", 40000), ("13.107.42.14", "tcp", "443", 700000),
+                 ("104.16.85.20", "tcp", "443", 1500000), ("151.101.1.69", "tcp", "80", 500000), ("140.82.113.4", "tcp", "22", 300000)]
+        secs = int(time.time()) % 86400
+        out = []
+        for i, (d, proto, port, rate) in enumerate(dests):
+            out.append({"src": f"{lan3}.{10 + i * 7}", "dst": d, "proto": proto, "port": port,
+                        "orig_bytes": int(secs * rate * 0.12), "repl_bytes": int(secs * rate)})
+        return out
 
     def topology(self):
         """Simulated network: a switch and an access point behind the router, phones, printers, PCs, a VM host."""

@@ -10,12 +10,21 @@
 Each run is a row in diag_runs and runs in its own background thread. Cancelling sets the row to 'cancelled' and the
 thread notices at its next sample.
 """
+import ipaddress
 import json
 import threading
 import time
 import traceback
 
 from routeros import RouterError
+
+
+def _in_net(ip, flt):
+    """Is `ip` inside the address/subnet filter `flt` (e.g. 192.168.1.50 or 192.168.1.0/24)?"""
+    try:
+        return ipaddress.ip_address(ip) in ipaddress.ip_network(flt, strict=False)
+    except ValueError:
+        return False
 
 SAMPLE_SECS = 3                 # torch sample window
 TORCH_MAX_MIN = 15              # cap on a Traffic Watch run
@@ -96,7 +105,7 @@ class Diagnostics:
             return wan
         return next((i["name"] for i in ifaces if i.get("running") and i.get("type") == "ether"), "")
 
-    # --- Traffic Watch (torch) --------------------------------------------------------------------------------
+    # --- Traffic Watch (connection tracking) ------------------------------------------------------------------
     def _run_torch(self, rid, device_id, iface, minutes, src_filter):
         with self.lock:
             self.running.add(rid)
@@ -105,45 +114,50 @@ class Diagnostics:
             if not d or not d["online"]:
                 return self._fail(rid, "The router is offline, so the traffic test couldn't run.")
             cl = self.client_for(d)
-            if not iface:
-                iface = self._wan_iface(cl)
-                if iface:
-                    self.db.run("UPDATE diag_runs SET iface=? WHERE id=?", (iface, rid))
-            if not iface:
-                return self._fail(rid, "Couldn't work out which interface to watch - pick one and try again.")
-            flows, series = {}, []
+            flt = (src_filter or "").strip()
+            flows, series = {}, []    # flows: key -> running totals with per-connection byte counters
             start = time.time()
             end = start + minutes * 60
-            n = 0
+            n, last_t = 0, None
             while time.time() < end:
                 if self._cancelled(rid):
                     return
                 t0 = time.time()
                 try:
-                    rows = cl.torch(iface, SAMPLE_SECS, src=src_filter or None)
+                    rows = cl.connections()
                 except RouterError as e:
-                    return self._fail(rid, f"Torch failed on {d['name']}: {e}")
-                window_bps = 0
+                    return self._fail(rid, f"Couldn't read the connection table on {d['name']}: {e}")
+                if flt:
+                    rows = [r for r in rows if _in_net(r["src"], flt) or _in_net(r["dst"], flt)]
+                window = 0.0
                 for r in rows:
                     key = (r["src"], r["dst"], r["proto"], r["port"])
+                    o, p = r["orig_bytes"], r["repl_bytes"]
                     f = flows.get(key)
-                    if not f:
-                        f = flows[key] = {"src": r["src"], "dst": r["dst"], "proto": r["proto"], "port": r["port"], "tx": 0.0, "rx": 0.0}
-                    f["tx"] += (r["tx_bps"] or 0) * SAMPLE_SECS / 8.0
-                    f["rx"] += (r["rx_bps"] or 0) * SAMPLE_SECS / 8.0
-                    window_bps += (r["tx_bps"] or 0) + (r["rx_bps"] or 0)
-                series.append({"t": int(t0), "bps": round(window_bps)})
+                    if not f:   # first sight: record the baseline, count only growth from here on
+                        flows[key] = {"src": r["src"], "dst": r["dst"], "proto": r["proto"], "port": r["port"],
+                                      "last_o": o, "last_r": p, "acc_o": 0.0, "acc_r": 0.0}
+                        continue
+                    do = o - f["last_o"] if o >= f["last_o"] else o   # a drop = the connection was replaced (counter reset)
+                    dr = p - f["last_r"] if p >= f["last_r"] else p
+                    f["acc_o"] += do
+                    f["acc_r"] += dr
+                    f["last_o"], f["last_r"] = o, p
+                    window += do + dr
+                dt = (t0 - last_t) if last_t else SAMPLE_SECS
+                series.append({"t": int(t0), "bps": round(window * 8 / max(1, dt))})
+                last_t = t0
                 n += 1
                 done = min(0.99, (time.time() - start) / (minutes * 60))
                 if n % 5 == 0:   # store a partial report so the open report page fills in live
                     self.db.run("UPDATE diag_runs SET progress=?, result=? WHERE id=? AND status='running'",
-                                (round(done, 3), json.dumps(self._torch_report(iface, flows, series, start)), rid))
+                                (round(done, 3), json.dumps(self._torch_report(flows, series, start, flt)), rid))
                 else:
                     self.db.run("UPDATE diag_runs SET progress=? WHERE id=? AND status='running'", (round(done, 3), rid))
                 time.sleep(max(0, SAMPLE_SECS - (time.time() - t0)))
             if self._cancelled(rid):
                 return
-            report = self._torch_report(iface, flows, series, start)
+            report = self._torch_report(flows, series, start, flt)
             self.db.run("UPDATE diag_runs SET status='done', progress=1, result=?, finished_at=? WHERE id=? AND status='running'",
                         (json.dumps(report), time.time(), rid))
         except Exception as e:  # noqa: BLE001
@@ -153,8 +167,10 @@ class Diagnostics:
             with self.lock:
                 self.running.discard(rid)
 
-    def _torch_report(self, iface, flows, series, start):
-        vals = list(flows.values())
+    def _torch_report(self, flows, series, start, flt=""):
+        vals = [{"src": f["src"], "dst": f["dst"], "proto": f["proto"], "port": f["port"],
+                 "tx": f.get("acc_o", f.get("tx", 0.0)), "rx": f.get("acc_r", f.get("rx", 0.0))} for f in flows.values()]
+        vals = [f for f in vals if f["tx"] or f["rx"]]
         total_tx = sum(f["tx"] for f in vals)
         total_rx = sum(f["rx"] for f in vals)
 
@@ -186,7 +202,7 @@ class Diagnostics:
             step = len(pts) // 180 + 1
             pts = [{"t": pts[i]["t"], "bps": round(sum(p["bps"] for p in pts[i:i + step]) / len(pts[i:i + step]))}
                    for i in range(0, len(pts), step)]
-        return {"kind": "torch", "iface": iface, "duration_s": round(time.time() - start), "samples": len(series),
+        return {"kind": "torch", "scope": flt or "all traffic through the router", "duration_s": round(time.time() - start), "samples": len(series),
                 "total_tx": round(total_tx), "total_rx": round(total_rx), "total": round(total_tx + total_rx),
                 "peak_bps": max((p["bps"] for p in series), default=0), "hosts_seen": len({f["src"] for f in vals}),
                 "connections_seen": len(vals), "top_hosts": hosts, "top_dests": dests, "protocols": protos,
@@ -209,19 +225,21 @@ class Diagnostics:
             size = int(max(SPEED_FLOOR, min(SPEED_CEIL, free * 0.4))) if free else 20_000_000
             url = self.speed_base().format(bytes=size)
             lat = cl.latency(SPEED_PING, count=10)
-            best = None
+            best, last = None, {}
             for _ in range(2):
                 if self._cancelled(rid):
                     return
                 try:
-                    r = cl.speedtest(url, size, timeout=max(60, size // 1_000_000 + 40))
+                    last = cl.speedtest(url, size, timeout=max(60, size // 1_000_000 + 40))
                 except RouterError as e:
                     return self._fail(rid, f"The download test couldn't run on {d['name']}: {e}")
-                if r.get("ok") and r.get("mbps"):
-                    best = r if (not best or r["mbps"] > best["mbps"]) else best
+                if last.get("ok") and last.get("mbps"):
+                    best = last if (not best or last["mbps"] > best["mbps"]) else best
             if not best:
-                return self._fail(rid, "The download test didn't complete - the router couldn't fetch the test file "
-                                       "(check its internet access, DNS and that HTTPS fetch is allowed).")
+                status = last.get("status") or "no result"
+                return self._fail(rid, f"The download test didn't complete (fetch status: {status}). Check the router's internet "
+                                       "access and DNS, that /tool fetch is allowed by its device-mode, and that it has room in flash. "
+                                       "A pure switch with no internet route won't be able to run it.")
             report = {"kind": "speedtest", "iface": iface or "", "down_mbps": best["mbps"], "bytes": best["bytes"],
                       "secs": best["secs"], "size_mb": round(size / 1_000_000, 1), "source": url.split("?")[0],
                       "latency": lat, "note": "Download only. Timed on the controller side, so small samples on a fast link read low."}
