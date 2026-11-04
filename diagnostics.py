@@ -246,7 +246,11 @@ class Diagnostics:
                                        "A pure switch with no internet route won't be able to run it.")
             report = {"kind": "speedtest", "iface": iface or "", "down_mbps": best["mbps"], "bytes": best["bytes"],
                       "secs": best["secs"], "size_mb": round(size / 1_000_000, 1), "source": url.split("?")[0],
-                      "latency": lat, "note": "Download only. Timed on the controller side, so small samples on a fast link read low."}
+                      "latency": lat, "note": "A rough internet reachability/latency check - NOT a line-rate speed test. It's a single "
+                      "stream saved to the router's storage, so flash-write speed and single-stream TCP cap the download well below a fast "
+                      "link's real rate (a gigabit link will read far lower). Trust the latency, jitter and loss; use the download only to tell "
+                      "'working' from 'badly degraded'. For true throughput use a browser speed test on a PC behind the router, or a "
+                      "router-to-router bandwidth test."}
             self.db.run("UPDATE diag_runs SET status='done', progress=1, result=?, finished_at=? WHERE id=? AND status='running'",
                         (json.dumps(report), time.time(), rid))
         except Exception as e:  # noqa: BLE001

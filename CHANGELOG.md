@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.6 - 2026-11-04
+
+- **Speed Test is labelled honestly.** Its download is a single stream saved to the router's storage, so flash-write
+  speed and single-stream TCP cap it well below a fast link's real rate (a gigabit link reads far lower). The result now
+  says so plainly and the figure is marked "Download (rough)" - it's an internet reachability/latency check (trust the
+  latency, jitter and loss), not a line-rate speed test. For true throughput, use a browser speed test on a PC behind the
+  router, or a router-to-router bandwidth test.
+
 ## 3.3.0-beta.5 - 2026-11-04
 
 Speed Test now works on real routers (two issues found running it live):

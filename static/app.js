@@ -6643,7 +6643,7 @@ function diagTorchReport(x, running, progress) {
 }
 function diagSpeedReport(x) {
   const lat = x.latency || {};
-  return `<div class="tiles">${diagKpi(`${x.down_mbps ?? "—"}<span class="small"> Mbps</span>`, "Download")}
+  return `<div class="tiles">${diagKpi(`${x.down_mbps ?? "—"}<span class="small"> Mbps</span>`, "Download (rough)")}
       ${diagKpi(lat.avg != null ? `${lat.avg}<span class="small"> ms</span>` : "—", "Latency")}
       ${diagKpi(lat.jitter != null ? `${lat.jitter}<span class="small"> ms</span>` : "—", "Jitter")}
       ${diagKpi(lat.loss != null ? `${lat.loss}%` : "—", "Packet loss")}</div>
