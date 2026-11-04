@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.10 - 2026-11-04
+
+- **Link test: clearer "can't connect" guidance.** When the bandwidth-test can't reach the target, the message now
+  explains the target must be on a path the initiator can actually reach (shared LAN/WAN/site-to-site, TCP 2000 open) -
+  two routers at different sites with no path between them can't be tested.
+
 ## 3.3.0-beta.9 - 2026-11-04
 
 - The Diagnostics tests now carry an **"Experimental"** badge, since they're new and still being proven on real hardware.

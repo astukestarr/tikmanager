@@ -307,7 +307,9 @@ class Diagnostics:
                 return self._fail(rid, f"The bandwidth test couldn't run on {init['name']}: {e}")
             if not r.get("ok"):
                 st = r.get("status") or "no result"
-                hint = " Check that the target address is reachable from the initiator and that nothing blocks TCP 2000 between them." if "error" in st else ""
+                hint = (" Make sure the target address is one the initiator can actually reach (a shared LAN, WAN or site-to-site path) "
+                        "and that nothing blocks TCP 2000 between them - two routers at different sites with no path between them can't be "
+                        "tested.") if ("error" in st or "connect" in st) else ""
                 return self._fail(rid, f"The link test didn't complete (bandwidth-test status: {st}).{hint}")
             report = {"kind": "link", "initiator": init["name"], "target": tgt["name"], "target_addr": target_addr,
                       "direction": direction, "down_mbps": round((r.get("rx_bps") or 0) / 1_000_000, 1),
