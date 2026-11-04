@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.4 - 2026-11-04
+
+- **Speed Test now reports the router's exact fetch error.** When `/tool fetch` fails it captures the router's actual
+  message (via `:onerror`) and shows it, so a blocked download can be pinpointed - a missing user policy, device-mode,
+  DNS, or no flash space - instead of a generic "error".
+
 ## 3.3.0-beta.3 - 2026-11-04
 
 - **Delete users.** The Users and Technicians pages now have a **Delete** next to Disable (administrators only, with a

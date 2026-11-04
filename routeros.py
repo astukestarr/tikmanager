@@ -487,7 +487,9 @@ class RouterOS:
         tmp = "tm-speedtest.bin"
         script = "\n".join([
             f':local u "{url}"; :local st "error";',
-            f':do {{ :local r [/tool fetch url=$u mode=https http-method=get dst-path={tmp} as-value]; :set st ($r->"status"); }} on-error={{ :set st "error" }};',
+            ':onerror e in={',
+            f'  :local r [/tool fetch url=$u mode=https http-method=get dst-path={tmp} as-value]; :set st ($r->"status");',
+            '} do={ :set st ("error: " . $e); }',
             f':do {{ /file remove [find name="{tmp}"]; }} on-error={{}};',
             ':put $st;'])
         t0 = time.time()
