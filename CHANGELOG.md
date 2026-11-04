@@ -3,6 +3,31 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.1.0 - 2026-11-03
+
+**New: Router Wizard** - a sidebar section (just below Dashboard) of guided, step-by-step jobs on your routers. Two
+wizards to start:
+
+- **WireGuard Builder** - connect two of a client's routers with a point-to-point WireGuard tunnel. Pick a hub (a new
+  interface, or attach to one that's already there), a client router (it can even be at a different client), the tunnel
+  addresses, and the subnets each end advertises - including downstream subnets. Routing is **static routes or BGP**
+  (eBGP or iBGP): BGP reuses a router's existing AS so a new tunnel slots into an existing fabric, the hub acts as a
+  route reflector for iBGP, and it advertises only your own subnets. Each tunnel is backed up first, tracked with live
+  handshake/BGP status, and everything it writes is tagged so Disable/Delete removes exactly what it added.
+
+- **IPsec Tunnel** - connect a MikroTik to an **any-brand** firewall (Fortinet, Cisco, SonicWall, pfSense...). TikManager
+  configures the MikroTik end and gives you a copyable **far-end settings sheet** - all the parameters and the pre-shared
+  key - to set up the other box. Policy-based IKEv2 by default with an Advanced editor for every phase-1/phase-2 value,
+  lifetimes, PFS (including off), and IKEv1. You can set the **pre-shared key** (Generate / Copy) and name the tunnel up
+  front, do **1:1 NAT (netmap)** for overlapping subnets (a whole mapped subnet, or specific host mappings), and set the
+  **IKE identities (My ID / Remote ID)** - needed when the router is behind NAT. The pre-shared key is sealed on the
+  server and only shown on an explicit Reveal.
+
+Both wizards return to their tunnel list after Apply/Delete (the list refreshes itself while a tunnel is applying), and a
+wizard-built tunnel shows a "wizard" link in "Existing VPNs on routers" to jump back to it.
+
+Also in this release: the "What's new" walkthrough appears again after upgrades (its pointer had fallen behind).
+
 ## 3.1.0-beta.11 - 2026-11-03
 
 - **IPsec wizard: set the IKE identities (My ID / Remote ID).** On the far-end step you can now set the local identity -
