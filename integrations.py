@@ -305,21 +305,36 @@ class Integrations:
         return out
 
     def cw_billed(self, company_id):
-        """Active agreement additions for a company, each as {agreement, name, config_ids}. billing_report decides which
-        managed MikroTik each addition bills - by the configuration set on the addition, or by the addition's name/serial
-        - so it works whether the config is attached to the addition or the addition is just named after it."""
+        """Billing markers for a company's active agreements, each as {agreement, name, config_ids}. The primary link is a
+        configuration attached to the agreement itself (the agreement's Configurations tab, /finance/agreements/{id}/
+        configurations); additions are also read as a fallback (a config set on an addition, or an addition named after
+        the config / carrying its serial). billing_report then decides which managed MikroTik each marker bills."""
         if self._demo("cw"):
             return self._demo_billed(int(company_id))
         out = []
         ags = self._cw("/finance/agreements", {"conditions": f"company/id={int(company_id)} and cancelledFlag=false",
                        "fields": "id,name", "pageSize": 1000}) or []
         for ag in ags:
+            name = ag.get("name", "")
+            try:   # configurations attached to the agreement - the main way a managed unit is put on an agreement here
+                acfgs = self._cw(f"/finance/agreements/{int(ag['id'])}/configurations", {"fields": "id,configuration", "pageSize": 1000}) or []
+            except IntegrationError:
+                acfgs = []   # older ConnectWise or no access to that sub-list: fall back to additions only
+            cids = []
+            for ac in acfgs:
+                c = ac.get("configuration")
+                if isinstance(c, dict) and c.get("id"):
+                    cids.append(c["id"])
+                elif isinstance(ac.get("configurationId"), int):
+                    cids.append(ac["configurationId"])
+            if cids:
+                out.append({"agreement": name, "name": "", "config_ids": cids})
             adds = self._cw(f"/finance/agreements/{int(ag['id'])}/additions",
                             {"fields": "id,invoiceDescription,description,quantity,cancelledDate,configuration,configurationId", "pageSize": 1000}) or []
             for a in adds:
                 if a.get("cancelledDate"):
                     continue
-                out.append({"agreement": ag.get("name", ""), "name": a.get("invoiceDescription") or a.get("description") or "",
+                out.append({"agreement": name, "name": a.get("invoiceDescription") or a.get("description") or "",
                             "config_ids": self._addition_config_ids(a)})
         return out
 

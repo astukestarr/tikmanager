@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.9 - 2026-11-04
+
+**ConnectWise billing: count a MikroTik as billed when its configuration is attached to the agreement.** The most common
+setup attaches the configuration to the **agreement itself** (the agreement's Configurations tab) and uses a generic
+product addition for the price - so a router was wrongly showing "not billed". Billing now reads each active agreement's
+attached configurations (`/finance/agreements/{id}/configurations`) as the primary "billed" signal, and still falls back
+to a configuration set on an addition, or an addition named after the config / carrying its serial.
+
 ## 3.5.0-beta.8 - 2026-11-04
 
 **ConnectWise billing: "billed" detection is more forgiving.** A managed MikroTik now counts as billed if its
