@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.15 - 2026-11-04
+
+**Upgrade → ConnectWise ticket: failures are now visible, and the backup-attach permission is named correctly.** When an
+upgrade can't open its ticket (e.g. the API member lost Service Tickets: Add) or can't attach the backup, it was logged
+silently - now it's recorded as a ConnectWise event on the router (Events / Logs) with the actual error, so you can see
+why. The attachment uses `/system/documents` (verified against the ConnectWise REST spec); the permission for it is
+**Companies > Manage Attachments: Add** (Manage Documents in older ConnectWise) - corrected in the README.
+
 ## 3.5.0-beta.14 - 2026-11-04
 
 **Alerts: choose channels per event.** "What to alert on" is now a table with a **CW Ticket**, **Email** and **Teams**

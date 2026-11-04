@@ -811,7 +811,7 @@ IT Glue.
   | ConnectWise billing - "Create in ConnectWise" button | Companies > Configurations: **Add** |
   | Tickets from Alerts and from firmware upgrades (open + note + set status) | Service Desk > Service Tickets: **Add**, **Edit**, **Inquire** · System > Table Setup: **Inquire** (reads the boards, statuses and priorities) |
   | Closing those tickets when the alert clears / the upgrade finishes | Service Desk > Close Service Tickets: **Edit** and **Inquire** |
-  | Attaching the pre-upgrade backup to the upgrade ticket | Companies > Manage Documents: **Add** |
+  | Attaching the pre-upgrade backup to the upgrade ticket | Companies > Manage Attachments: **Add** (called Manage Documents in older ConnectWise) |
 
   If you only use the **reports** (no tickets and no "Create in ConnectWise"), a **read-only** role with just the three
   billing **Inquire** options is enough. The integration lists companies (filter by type/status) so you can import them

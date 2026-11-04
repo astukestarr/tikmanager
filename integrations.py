@@ -159,7 +159,7 @@ class Integrations:
         return self._http(method, url, {"Authorization": f"Basic {token}", "clientId": c["client_id"], "Content-Type": "application/json"}, body)
 
     # tickets (alerts.py, upgrades.py): the API member needs Service Desk > Service Tickets add/edit/inquire, Close Service
-    # Tickets edit/inquire to close them, and Companies > Manage Documents add to attach a backup (see README "Integrations")
+    # Tickets edit/inquire to close them, and Companies > Manage Attachments add to attach a backup (see README "Integrations")
     def cw_boards(self):
         if self._demo("cw"):
             return [{"id": 1, "name": "Help Desk"}, {"id": 2, "name": "Network Alerts"}]

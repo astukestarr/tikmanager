@@ -137,28 +137,39 @@ class Upgrades:
 
     # --- ConnectWise ticket (optional, per job) ---------------------------------------------------------------
     def _open_ticket(self, j, d, b):
-        """Open a ConnectWise ticket for this upgrade and attach the pre-upgrade backup. Never breaks the upgrade."""
+        """Open a ConnectWise ticket for this upgrade and attach the pre-upgrade backup. Never breaks the upgrade; records
+        the outcome (and any error) as a device event so a failure is visible instead of silently swallowed."""
+        ev = lambda msg: self.db.event(d["id"], d.get("org_id"), "ConnectWise", msg[:400])
         try:
             if not (self.integ and self.integ.configured("cw")):
                 return
             cfg = self._ticket_cfg()
             org = self.db.one("SELECT cw_id FROM orgs WHERE id=?", (j["org_id"],)) if j.get("org_id") else None
-            if not cfg.get("board_id") or not org or not org["cw_id"]:
-                return
+            if not cfg.get("board_id"):
+                return ev("Upgrade ticket skipped: no ConnectWise board is set (Upgrades > ConnectWise ticket settings).")
+            if not org or not org["cw_id"]:
+                return ev("Upgrade ticket skipped: this router's client isn't linked to a ConnectWise company.")
             frm = (j.get("from_version") or d.get("version") or "").split(" ")[0]
             text = (f"TikManager is upgrading {d['name']} ({d.get('model') or ''}, serial {d.get('serial') or '?'}) from RouterOS {frm}. "
                     "A pre-upgrade configuration backup was taken and is attached.")
-            tid = self.integ.cw_ticket(org["cw_id"], int(cfg["board_id"]), f"RouterOS upgrade - {d['name']}", text,
-                                       cfg.get("status_updating") or None, cfg.get("priority_id") or None)
+            try:
+                tid = self.integ.cw_ticket(org["cw_id"], int(cfg["board_id"]), f"RouterOS upgrade - {d['name']}", text,
+                                           cfg.get("status_updating") or None, cfg.get("priority_id") or None)
+            except Exception as e:  # noqa: BLE001 - surface why no ticket (e.g. the API member lacks Service Tickets: Add)
+                traceback.print_exc()
+                return ev(f"Upgrade ticket NOT opened: {e}")
             if not tid:
-                return
+                return ev("Upgrade ticket NOT opened (ConnectWise returned no ticket id).")
             self.db.run("UPDATE upgrades SET cw_ticket=? WHERE id=?", (int(tid), j["id"]))
+            ev(f"Upgrade ticket #{tid} opened")
             try:
                 txt = self.backups.text_of(b.get("backup_id")) if b.get("backup_id") else None
                 if txt:
                     self.integ.cw_attach(tid, f"{d['name']}-pre-upgrade.rsc", txt, title=f"{d['name']} pre-upgrade backup")
-            except Exception:  # noqa: BLE001 - attachment is best-effort
+                    ev(f"Pre-upgrade backup attached to ticket #{tid}")
+            except Exception as e:  # noqa: BLE001 - attachment is best-effort (needs Companies > Manage Attachments: Add)
                 traceback.print_exc()
+                ev(f"Backup NOT attached to ticket #{tid} (the API member needs Companies > Manage Attachments: Add): {e}")
         except Exception:  # noqa: BLE001
             traceback.print_exc()
 
