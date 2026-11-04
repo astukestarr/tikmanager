@@ -525,25 +525,32 @@ class Handler(BaseHTTPRequestHandler):
         cid = org["cw_id"]
         configs = integ.cw_configurations(cid, type_id)
         billed = integ.cw_billed(cid)
-        by_serial = {}
+        by_serial, by_id = {}, {}
         for c in configs:
+            by_id[c["id"]] = c
             n = self._norm_serial(c["serial"])
             if n and n not in by_serial:
                 by_serial[n] = c
         used, rows = set(), []
-        for d in db.q("SELECT id, name, serial, model, site FROM devices WHERE org_id=? AND state='adopted' ORDER BY name", (org["id"],)):
-            n = self._norm_serial(d["serial"])
-            cfg = by_serial.get(n) if n else None
+        for d in db.q("SELECT id, name, serial, model, site, cw_config_id FROM devices WHERE org_id=? AND state='adopted' ORDER BY name", (org["id"],)):
+            override = d["cw_config_id"]
+            if override:   # a technician matched this router to a specific configuration - it wins over the serial match
+                cfg = by_id.get(override)
+            else:
+                n = self._norm_serial(d["serial"])
+                cfg = by_serial.get(n) if n else None
             if cfg:
                 used.add(cfg["id"])
             b = billed.get(cfg["id"]) if cfg else None
             rows.append({"device_id": d["id"], "name": d["name"], "serial": d["serial"] or "", "model": d["model"] or "",
-                         "site": d["site"] or "", "config": cfg, "billed": bool(b), "billed_on": b})
+                         "site": d["site"] or "", "config": cfg, "billed": bool(b), "billed_on": b,
+                         "override": override, "manual": bool(override and cfg)})
         orphans = [c for c in configs if c["id"] not in used]   # CW configs of this type with no managed router here
         return {"org": org["name"], "org_id": org["id"], "cw_id": cid, "type_id": type_id,
                 "type_name": cw.get("mikrotik_type_name") or "", "has_type": bool(type_id),
                 "managed": len(rows), "matched": sum(1 for r in rows if r["config"]), "billed": sum(1 for r in rows if r["billed"]),
-                "missed": sum(1 for r in rows if not r["billed"]), "rows": rows, "orphans": orphans}
+                "missed": sum(1 for r in rows if not r["billed"]), "rows": rows, "orphans": orphans,
+                "configs": [{"id": c["id"], "name": c["name"], "serial": c["serial"]} for c in configs]}
 
     UPTIME_RANGES = {"1d": 86400, "3d": 3 * 86400, "7d": 7 * 86400, "14d": 14 * 86400, "1M": 30 * 86400}
 
@@ -2653,6 +2660,15 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(502, str(e))
             db.audit(s["email"], "cw configuration created", f"{d['name']} ({d['serial'] or '?'})", self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True, "config": cfg})
+        if path == "/api/billing/match":   # manually match a router to a ConnectWise configuration (or clear = back to serial)
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            d = self.device_for(s, int(b.get("device_id") or 0))
+            cfg_id = b.get("config_id")
+            cfg_id = int(cfg_id) if str(cfg_id or "").isdigit() else None
+            db.run("UPDATE devices SET cw_config_id=? WHERE id=?", (cfg_id, d["id"]))
+            db.audit(s["email"], "cw config match", d["name"], self.client_ip(), org_id=d["org_id"], detail=str(cfg_id or "auto (serial)"))
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/console", path):   # run a RouterOS command and return its output
             s = self.require(tech=True, perm="winbox")
             d = self.device_for(s, m.group(1))

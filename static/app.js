@@ -6953,16 +6953,19 @@ async function billingReport(orgId) {
   let r;
   try { r = await api(`/api/billing?org_id=${orgId}`); } catch (e) { box.innerHTML = `<div class="card"><p class="status err">${esc(e.message)}</p></div>`; return; }
   const pill = (ok, yes, no) => ok ? `<span class="pill up-done">${yes}</span>` : `<span class="pill up-run">${no}</span>`;
+  const cfgOpt = (selId) => `<option value="">Auto (by serial)</option>` + (r.configs || []).map((c) =>
+    `<option value="${c.id}" ${String(c.id) === String(selId) ? "selected" : ""}>${esc(c.name)}${c.serial ? ` — ${esc(c.serial)}` : ""}</option>`).join("");
   const rows = r.rows.map((x) => `<tr>
     <td><b>${esc(x.name)}</b></td><td class="small mono">${esc(x.serial || "—")}</td><td class="small">${esc(x.model || "")}</td>
-    <td class="small">${x.config ? esc(x.config.name) : `<span class="status err">not in ConnectWise</span>`}</td>
-    <td>${x.config ? pill(x.billed, "billed", "not billed") : pill(false, "", "not billed")}</td>
-    <td class="small">${x.billed_on ? esc(x.billed_on.agreement) : (x.config ? "" : `<button class="btn small" type="button" data-create="${x.device_id}" ${r.has_type ? "" : "disabled"}>Create in ConnectWise</button>`)}</td>
+    <td class="small">${x.config ? `${esc(x.config.name)}${x.manual ? ` <span class="pill" title="Matched by hand, not by serial">manual</span>` : ""}` : `<span class="status err">not in ConnectWise</span>`}</td>
+    <td>${x.config ? pill(x.billed, "billed", "not billed") : pill(false, "", "not billed")}${x.billed_on ? `<div class="small muted">${esc(x.billed_on.agreement)}</div>` : ""}</td>
+    <td class="small"><select class="bmatch" data-match="${x.device_id}" aria-label="Match ${esc(x.name)} to a ConnectWise configuration">${cfgOpt(x.override)}</select>
+      ${x.config ? "" : ` <button class="btn small" type="button" data-create="${x.device_id}" ${r.has_type ? "" : "disabled"}>Create in ConnectWise</button>`}</td>
   </tr>`).join("");
   box.innerHTML = `<div class="tiles">${diagKpi(r.managed, "Managed")}${diagKpi(r.matched, "In ConnectWise")}${diagKpi(r.billed, "Billed")}${diagKpi(`<span class="${r.missed ? "status err" : ""}">${r.missed}</span>`, "Missed billing")}</div>
     ${r.has_type ? "" : `<div class="card"><p class="small status err">No configuration type is set, so this matched across every configuration type. Set the MikroTik type above for accurate results.</p></div>`}
     <div class="card"><h2>${esc(r.org)} — managed MikroTiks</h2>
-      ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Serial</th><th>Model</th><th>ConnectWise config</th><th>Billing</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">No managed routers for this client.</p>`}
+      ${r.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Serial</th><th>Model</th><th>ConnectWise config</th><th>Billing</th><th>Match</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="muted">No managed routers for this client.</p>`}
       <p class="small status" id="bRepMsg"></p></div>
     ${r.orphans.length ? `<div class="card"><h2>ConnectWise configs with no managed router (${r.orphans.length})</h2>
       <p class="small muted">Configurations of this type in ConnectWise that don't match any managed MikroTik here - possibly decommissioned, a serial mismatch, or managed elsewhere.</p>
@@ -6973,6 +6976,12 @@ async function billingReport(orgId) {
     const msg = $("bRepMsg"); if (msg) { msg.textContent = ""; msg.className = "small status"; }
     try { await post("/api/billing/create", { device_id: +b.dataset.create }); billingReport(orgId); }
     catch (e) { b.disabled = false; b.textContent = "Create in ConnectWise"; if (msg) { msg.textContent = e.message; msg.className = "small status err"; } }
+  }));
+  box.querySelectorAll(".bmatch").forEach((sel) => sel.addEventListener("change", async () => {
+    const msg = $("bRepMsg"); if (msg) { msg.textContent = ""; msg.className = "small status"; }
+    sel.disabled = true;
+    try { await post("/api/billing/match", { device_id: +sel.dataset.match, config_id: sel.value }); billingReport(orgId); }
+    catch (e) { sel.disabled = false; if (msg) { msg.textContent = e.message; msg.className = "small status err"; } }
   }));
 }
 

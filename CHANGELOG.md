@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.5 - 2026-11-04
+
+**ConnectWise billing: match a router to a configuration by hand.** When a router's serial doesn't line up with its
+ConnectWise configuration (a serial typo, a swapped unit, or a config with no serial), each row on the billing page now
+has a **Match** dropdown to point it at the right configuration - or back to "Auto (by serial)". A hand-matched router
+is tagged "manual", and the billed/missed counts use the chosen configuration. Stored per router (`devices.cw_config_id`).
+
 ## 3.5.0-beta.4 - 2026-11-04
 
 **Upgrades can open a ConnectWise ticket.** When you upgrade a router (now or scheduled), tick "Open a ConnectWise
