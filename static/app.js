@@ -6734,7 +6734,10 @@ async function go(v, arg) {
     if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || vpnHold || (v === "router" && rView.rtab === "remote") || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       const y = window.scrollY, board = v === "dashboard" ? $("main").dataset.board || arg : null;
       (v === "router" ? router(arg) : dashboard(board)).then(() => { if (v === "dashboard" && $("main").dataset.board === board) window.scrollTo({ top: y }); }).catch(() => {}); }, 30000);
-    if (v === "upgrades") timer = setInterval(() => { if (!$("dlg").open) upgradesView().catch(() => {}); }, 20000);
+    if (v === "upgrades") timer = setInterval(() => {
+      if ($("dlg").open || document.hidden || document.activeElement?.closest?.("#main input, #main select")) return;
+      const y = window.scrollY, jobs = $("upJobs")?.querySelector(".scroll-y"), jy = jobs ? jobs.scrollTop : 0;
+      upgradesView().then(() => { window.scrollTo({ top: y }); const j = $("upJobs")?.querySelector(".scroll-y"); if (j) j.scrollTop = jy; }).catch(() => {}); }, 20000);
     // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)
     if (v === "health") timer = setInterval(() => { if (hView.busy || document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; healthPage().catch(() => {}); }, 60000);
     if (v === "vpns") timer = setInterval(() => { if (vpnHold || document.hidden || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;

@@ -15,6 +15,9 @@ More reliable scheduled upgrades - a single flaky router (or a TikManager restar
 - **A TikManager restart mid-upgrade no longer just fails every in-flight job.** On startup each one is re-checked against
   its router: if it came back on a newer version the upgrade is recorded as done; otherwise it's re-queued (the job
   re-checks the version and only installs if the router is still behind, so a retry is safe).
+- **The Upgrades page no longer jumps back to the top every 20 seconds.** Its auto-refresh now keeps your scroll position
+  (including inside the Upgrade jobs list) and holds off while you're typing in a field, so you can read the jobs list
+  without it pulling you back up to the top.
 
 ## 3.2.0 - 2026-11-04
 
