@@ -6707,12 +6707,14 @@ async function diagForm(kind) {
   const title = kind === "traffic" ? "Traffic Watch" : "Speed Test";
   $("main").innerHTML = `<p><a href="#diag">← Diagnostics</a></p><div class="row"><h1>${title}</h1></div>
     <p class="muted">${kind === "traffic"
-      ? "Watch a router's live traffic for a set time to catch an issue as it happens, then get a report of who's using the connection. It reads the router's connection tracking, so no extra router permissions are needed."
+      ? "Watch a router's live traffic for a set time to catch an issue as it happens, then get a report of who's using the connection. Watch the whole router (connection tracking - no extra permissions) or pick one interface (torch - needs the 'sniff' permission, granted when the router is adopted)."
       : "Measure a router's internet download speed, latency and jitter - run from the site itself, through the router."}</p>
     <div class="card">
       <label class="field">Router <select id="dRouter">${online.map((r) => `<option value="${r.id}">${esc(r.name)}${r.org ? ` — ${esc(r.org)}` : ""}</option>`).join("")}</select></label>
       ${online.length ? "" : `<p class="small status err">No routers are online right now.</p>`}
-      ${kind === "traffic" ? `<label class="field">Watch for <select id="dMin"><option value="1">1 minute</option><option value="2" selected>2 minutes</option>
+      ${kind === "traffic" ? `<label class="field">Watch <select id="dIface"><option value="">All traffic (whole router)</option></select></label>
+      <p class="small muted" id="dIfaceMsg">All traffic uses connection tracking (any router). A specific interface uses torch and needs the 'sniff' permission.</p>
+      <label class="field">Watch for <select id="dMin"><option value="1">1 minute</option><option value="2" selected>2 minutes</option>
         <option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option></select></label>
       <label class="field">Only this address (optional) <input id="dFilter" placeholder="e.g. 192.168.1.50 or 192.168.1.0/24" spellcheck="false"></label>
       <p class="small muted">Tip: filter to one device's address to zero in on the issue you're recreating.</p>`
@@ -6720,12 +6722,28 @@ async function diagForm(kind) {
       <div class="actions"><button class="btn primary" type="button" id="dStart" ${online.length ? "" : "disabled"}>Start test</button></div>
       <p class="small status" id="dMsg"></p>
     </div>`;
+  if (kind === "traffic") {
+    const loadIfaces = async () => {
+      const sel = $("dIface"); if (!sel) return;
+      const keep = sel.value;
+      sel.innerHTML = `<option value="">All traffic (whole router)</option>`;
+      const id = +$("dRouter").value; if (!id) return;
+      try {
+        const { interfaces } = await api(`/api/diag/interfaces?device_id=${id}`);
+        for (const i of interfaces) sel.insertAdjacentHTML("beforeend",
+          `<option value="${esc(i.name)}">${esc(i.name)}${i.wan ? " (WAN)" : ""}${i.running ? "" : " — down"}</option>`);
+        if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+      } catch (e) { const m = $("dIfaceMsg"); if (m) { m.textContent = "Couldn't read this router's interfaces - you can still watch All traffic."; } }
+    };
+    $("dRouter")?.addEventListener("change", loadIfaces);
+    loadIfaces();
+  }
   $("dStart")?.addEventListener("click", async () => {
     $("dStart").disabled = true; $("dMsg").textContent = "Starting…"; $("dMsg").className = "small status";
     try {
       const body = { device_id: +$("dRouter").value };
       let r;
-      if (kind === "traffic") { body.minutes = +$("dMin").value; body.filter = $("dFilter").value.trim(); r = await post("/api/diag/traffic", body); }
+      if (kind === "traffic") { body.minutes = +$("dMin").value; body.filter = $("dFilter").value.trim(); body.iface = $("dIface").value; r = await post("/api/diag/traffic", body); }
       else r = await post("/api/diag/speed", body);
       go("diag", r.id);
     } catch (e) { $("dMsg").textContent = e.message; $("dMsg").className = "small status err"; $("dStart").disabled = false; }

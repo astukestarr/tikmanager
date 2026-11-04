@@ -1,9 +1,11 @@
 """Diagnostics: on-demand tests a technician runs against one router, each producing a saved report.
 
-- Traffic Watch (torch): watch live traffic on an interface for a set number of minutes, then report who is using the
-  connection - top talkers, top connections, protocols, total data each way and throughput over time. Torch is sampled
-  in short windows and the rates are integrated into byte totals (short calls keep each request well under any proxy
-  timeout, and let the report fill in while the test runs).
+- Traffic Watch: watch live traffic for a set number of minutes, then report who is using the connection - top talkers,
+  top connections, protocols, total data each way and throughput over time. Two modes: pick one interface and it uses
+  torch (needs the 'sniff' policy, granted at adoption); choose "All traffic" and it watches the whole router via
+  connection tracking (needs only 'read', so it works even where sniff isn't granted). Either way it samples in short
+  windows and integrates the rates into byte totals (short calls keep each request well under any proxy timeout, and
+  let the report fill in while the test runs).
 - Speed Test (fetch): measure the router's own internet download speed by fetching a CDN endpoint sized to the router's
   free storage, plus latency and jitter. Upload isn't included: RouterOS /tool/fetch can't source a large POST body.
 
@@ -126,6 +128,9 @@ class Diagnostics:
                 return self._fail(rid, "The router is offline, so the traffic test couldn't run.")
             cl = self.client_for(d)
             flt = (src_filter or "").strip()
+            iface = (iface or "").strip()
+            use_torch = bool(iface)   # a chosen interface -> torch (needs 'sniff'); "All traffic" -> connection tracking
+            scope = ((iface + (f" · {flt}" if flt else "")) if use_torch else (flt or "all traffic through the router"))
             flows, series = {}, []    # flows: key -> running totals with per-connection byte counters
             start = time.time()
             end = start + minutes * 60
@@ -134,41 +139,62 @@ class Diagnostics:
                 if self._cancelled(rid):
                     return
                 t0 = time.time()
-                try:
-                    rows = cl.connections()
-                except RouterError as e:
-                    return self._fail(rid, f"Couldn't read the connection table on {d['name']}: {e}")
-                if flt:
-                    rows = [r for r in rows if _in_net(r["src"], flt) or _in_net(r["dst"], flt)]
                 window = 0.0
-                for r in rows:
-                    key = (r["src"], r["dst"], r["proto"], r["port"])
-                    o, p = r["orig_bytes"], r["repl_bytes"]
-                    f = flows.get(key)
-                    if not f:   # first sight: record the baseline, count only growth from here on
-                        flows[key] = {"src": r["src"], "dst": r["dst"], "proto": r["proto"], "port": r["port"],
-                                      "last_o": o, "last_r": p, "acc_o": 0.0, "acc_r": 0.0}
-                        continue
-                    do = o - f["last_o"] if o >= f["last_o"] else o   # a drop = the connection was replaced (counter reset)
-                    dr = p - f["last_r"] if p >= f["last_r"] else p
-                    f["acc_o"] += do
-                    f["acc_r"] += dr
-                    f["last_o"], f["last_r"] = o, p
-                    window += do + dr
-                dt = (t0 - last_t) if last_t else SAMPLE_SECS
-                series.append({"t": int(t0), "bps": round(window * 8 / max(1, dt))})
-                last_t = t0
+                if use_torch:   # per-interface, packet-level: torch gives per-flow bit rates; integrate into byte totals
+                    try:
+                        rows = cl.torch(iface, SAMPLE_SECS, src=flt or None)
+                    except RouterError as e:
+                        msg = str(e).lower()
+                        if "permission" in msg or "not enough" in msg:
+                            return self._fail(rid, f"Watching one interface needs the 'sniff' permission, which {d['name']}'s TikManager user "
+                                                   "doesn't have yet. On the router (as an admin) run: /user group set [find name=tikmanager] "
+                                                   "policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp,sniff  - or choose \"All traffic\", "
+                                                   "which watches the whole router and needs no extra permission.")
+                        return self._fail(rid, f"Couldn't watch {iface} on {d['name']}: {e}")
+                    for r in rows:
+                        key = (r["src"], r["dst"], r["proto"], r["port"])
+                        f = flows.get(key)
+                        if not f:
+                            f = flows[key] = {"src": r["src"], "dst": r["dst"], "proto": r["proto"], "port": r["port"], "tx": 0.0, "rx": 0.0}
+                        f["tx"] += (r["tx_bps"] or 0) * SAMPLE_SECS / 8   # tx = from src, rx = to src; rate over the window -> bytes
+                        f["rx"] += (r["rx_bps"] or 0) * SAMPLE_SECS / 8
+                        window += (r["tx_bps"] or 0) + (r["rx_bps"] or 0)
+                    series.append({"t": int(t0), "bps": round(window)})   # torch rates are already bits/second
+                else:
+                    try:
+                        rows = cl.connections()
+                    except RouterError as e:
+                        return self._fail(rid, f"Couldn't read the connection table on {d['name']}: {e}")
+                    if flt:
+                        rows = [r for r in rows if _in_net(r["src"], flt) or _in_net(r["dst"], flt)]
+                    for r in rows:
+                        key = (r["src"], r["dst"], r["proto"], r["port"])
+                        o, p = r["orig_bytes"], r["repl_bytes"]
+                        f = flows.get(key)
+                        if not f:   # first sight: record the baseline, count only growth from here on
+                            flows[key] = {"src": r["src"], "dst": r["dst"], "proto": r["proto"], "port": r["port"],
+                                          "last_o": o, "last_r": p, "acc_o": 0.0, "acc_r": 0.0}
+                            continue
+                        do = o - f["last_o"] if o >= f["last_o"] else o   # a drop = the connection was replaced (counter reset)
+                        dr = p - f["last_r"] if p >= f["last_r"] else p
+                        f["acc_o"] += do
+                        f["acc_r"] += dr
+                        f["last_o"], f["last_r"] = o, p
+                        window += do + dr
+                    dt = (t0 - last_t) if last_t else SAMPLE_SECS
+                    series.append({"t": int(t0), "bps": round(window * 8 / max(1, dt))})
+                    last_t = t0
                 n += 1
                 done = min(0.99, (time.time() - start) / (minutes * 60))
                 if n % 5 == 0:   # store a partial report so the open report page fills in live
                     self.db.run("UPDATE diag_runs SET progress=?, result=? WHERE id=? AND status='running'",
-                                (round(done, 3), json.dumps(self._torch_report(flows, series, start, flt)), rid))
+                                (round(done, 3), json.dumps(self._torch_report(flows, series, start, flt, scope)), rid))
                 else:
                     self.db.run("UPDATE diag_runs SET progress=? WHERE id=? AND status='running'", (round(done, 3), rid))
                 time.sleep(max(0, SAMPLE_SECS - (time.time() - t0)))
             if self._cancelled(rid):
                 return
-            report = self._torch_report(flows, series, start, flt)
+            report = self._torch_report(flows, series, start, flt, scope)
             self.db.run("UPDATE diag_runs SET status='done', progress=1, result=?, finished_at=? WHERE id=? AND status='running'",
                         (json.dumps(report), time.time(), rid))
         except Exception as e:  # noqa: BLE001
@@ -178,7 +204,7 @@ class Diagnostics:
             with self.lock:
                 self.running.discard(rid)
 
-    def _torch_report(self, flows, series, start, flt=""):
+    def _torch_report(self, flows, series, start, flt="", scope=None):
         vals = [{"src": f["src"], "dst": f["dst"], "proto": f["proto"], "port": f["port"],
                  "tx": f.get("acc_o", f.get("tx", 0.0)), "rx": f.get("acc_r", f.get("rx", 0.0))} for f in flows.values()]
         vals = [f for f in vals if f["tx"] or f["rx"]]
@@ -213,7 +239,7 @@ class Diagnostics:
             step = len(pts) // 180 + 1
             pts = [{"t": pts[i]["t"], "bps": round(sum(p["bps"] for p in pts[i:i + step]) / len(pts[i:i + step]))}
                    for i in range(0, len(pts), step)]
-        return {"kind": "torch", "scope": flt or "all traffic through the router", "duration_s": round(time.time() - start), "samples": len(series),
+        return {"kind": "torch", "scope": scope or (flt or "all traffic through the router"), "duration_s": round(time.time() - start), "samples": len(series),
                 "total_tx": round(total_tx), "total_rx": round(total_rx), "total": round(total_tx + total_rx),
                 "peak_bps": max((p["bps"] for p in series), default=0), "hosts_seen": len({f["src"] for f in vals}),
                 "connections_seen": len(vals), "top_hosts": hosts, "top_dests": dests, "protocols": protos,

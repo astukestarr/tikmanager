@@ -3,6 +3,19 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.1 - 2026-11-04
+
+**Traffic Watch can watch one interface again.** The test now has a "Watch" choice:
+- **All traffic (whole router)** - the default, reads connection tracking, needs only the `read` permission (works on
+  any adopted router, including L2 switches).
+- **A specific interface** - watches just that interface with torch, for a finer per-interface view. Torch needs the
+  RouterOS `sniff` permission.
+
+New and re-adopted routers now get the `sniff` permission automatically. To watch an interface on a router adopted
+before this release, an admin grants it once:
+`/user group set [find name=tikmanager] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp,sniff`
+(if you don't, "All traffic" still works with no change). The test tells you the exact command if the permission is missing.
+
 ## 3.4.0 - 2026-11-04
 
 Everything since 3.2.0, tested and released together.
