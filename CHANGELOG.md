@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.16 - 2026-11-04
+
+**Alerts settings: select-all per channel, and a clearer "default company".** The CW&nbsp;Ticket / Email / Teams columns
+each have a tick box in the header that selects or clears that whole column at once (it shows a dash when only some
+events are ticked). The "Default company" field is now labelled a fallback and explained: a ticket always goes to the
+ConnectWise company the router's client is linked to (Clients page); the default company is used only when a router's
+client isn't linked, or for TikManager / server-wide alerts.
+
 ## 3.5.0-beta.15 - 2026-11-04
 
 **Upgrade → ConnectWise ticket: failures are now visible, and the backup-attach permission is named correctly.** When an

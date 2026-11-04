@@ -3970,15 +3970,20 @@ async function alertsPage() {
     ${a.can_edit ? `<div id="alSettingsTab"><div class="card" id="alSettings"><h2>Settings</h2>
       <h3 class="al-h">What to alert on</h3>
       <p class="small muted">Tick which channels each event should go to. An event with none ticked is off. Set up each channel's details below.</p>
-      <div class="table-wrap"><table class="al-table"><thead><tr><th>Event</th><th>CW&nbsp;Ticket</th><th>Email</th><th>Teams</th></tr></thead><tbody>${Object.entries(a.kinds).map(([k, m]) => `<tr>
+      <div class="table-wrap"><table class="al-table"><thead><tr><th>Event</th><th>CW&nbsp;Ticket</th><th>Email</th><th>Teams</th></tr>
+        <tr class="al-allrow"><th class="small muted">All events →</th>
+          <th class="al-c"><input type="checkbox" data-all="cw" title="Tick or untick every event for ConnectWise tickets"></th>
+          <th class="al-c"><input type="checkbox" data-all="email" title="Tick or untick every event for email"></th>
+          <th class="al-c"><input type="checkbox" data-all="teams" title="Tick or untick every event for Teams"></th></tr></thead><tbody>${Object.entries(a.kinds).map(([k, m]) => `<tr>
         <td>${esc(m.label)}${m.threshold ? ` <span class="small muted">- ${m.threshold === "minutes" ? "after" : "above"} <input type="number" class="al-th" data-th="${k}" value="${esc(st.kinds[k][m.threshold])}" min="1" max="${{ percent: 100, celsius: 120 }[m.threshold] || 1440}"> ${{ percent: "%", celsius: "°C" }[m.threshold] || "min"}</span>` : ""}</td>
         <td class="al-c"><input type="checkbox" data-ch="cw" data-kind="${k}" ${st.kinds[k].cw ? "checked" : ""} aria-label="ConnectWise ticket for ${esc(m.label)}"></td>
         <td class="al-c"><input type="checkbox" data-ch="email" data-kind="${k}" ${st.kinds[k].email ? "checked" : ""} aria-label="Email for ${esc(m.label)}"></td>
         <td class="al-c"><input type="checkbox" data-ch="teams" data-kind="${k}" ${st.kinds[k].teams ? "checked" : ""} aria-label="Teams for ${esc(m.label)}"></td></tr>`).join("")}</tbody></table></div>
       <h3 class="al-h">ConnectWise ticket settings</h3>
       ${a.cw_ready ? `<div class="grid2" id="alCwFields"><p class="small muted">Loading boards…</p></div>
-        <p class="small muted">Tickets go to the client's linked ConnectWise company (Clients page); the default company is used for clients that aren't linked and for
-          TikManager / server problems. The ConnectWise API member's security role needs <b>Service Desk &gt; Service Tickets: Add, Edit, Inquire</b>,
+        <p class="small muted">A ticket always goes to the ConnectWise company its router's client is linked to (set that link on the <a href="#clients">Clients</a> page).
+          The <b>default company</b> below is only a fallback - used when a router's client isn't linked to a ConnectWise company yet, and for TikManager /
+          server-wide alerts that aren't about one particular router. The ConnectWise API member's security role needs <b>Service Desk &gt; Service Tickets: Add, Edit, Inquire</b>,
           <b>Service Desk &gt; Close Service Tickets: Edit, Inquire</b> (to close a ticket when the problem clears), <b>System &gt; Table Setup: Inquire</b>
           (for the board / status / priority lists) and <b>Companies &gt; Company Maintenance: Inquire</b>. Set each Inquire to All. Full list in the README.</p>`
         : `<p class="small muted">Connect ConnectWise PSA on Admin > Integrations first.</p>`}
@@ -4011,7 +4016,7 @@ async function alertsPage() {
       const o = await api(`/api/admin/alerts/cw-options?board=${board || ""}`);
       const sel = (id, list, cur, blank) => `<select id="${id}">${blank ? `<option value="">${blank}</option>` : ""}${list.map((x) => `<option value="${x.id}" ${String(x.id) === String(cur) ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`;
       $("alCwFields").innerHTML = `<label class="field">Board ${sel("alBoard", o.boards, board, "pick a board")}</label>
-        <label class="field">Default company ${sel("alCompany", o.companies, st.cw.company_id, "pick a company")}</label>
+        <label class="field">Default company <span class="small muted">(fallback - see note below)</span> ${sel("alCompany", o.companies, st.cw.company_id, "none (only use the router's linked company)")}</label>
         <label class="field">Status for new tickets ${sel("alStatusNew", o.statuses.filter((x) => !x.closed), st.cw.status_id, "board default")}</label>
         <label class="field">Status when it clears ${sel("alStatusClosed", o.statuses.filter((x) => x.closed), st.cw.closed_status_id, "leave open (add a note only)")}</label>
         <label class="field">Priority ${sel("alPriority", o.priorities, st.cw.priority_id, "board default")}</label>`;
@@ -4019,6 +4024,18 @@ async function alertsPage() {
     } catch (e) { $("alCwFields").innerHTML = `<p class="status err small">${esc(e.message)}</p>`; }
   };
   cwFields(st.cw.board_id);
+  const syncAll = () => document.querySelectorAll("[data-all]").forEach((m) => {   // the column's "all" box reflects its events
+    const boxes = [...document.querySelectorAll(`[data-ch="${m.dataset.all}"]`)];
+    const on = boxes.filter((c) => c.checked).length;
+    m.checked = on > 0 && on === boxes.length;
+    m.indeterminate = on > 0 && on < boxes.length;
+  });
+  document.querySelectorAll("[data-all]").forEach((m) => m.addEventListener("change", () => {
+    document.querySelectorAll(`[data-ch="${m.dataset.all}"]`).forEach((c) => { c.checked = m.checked; });
+    m.indeterminate = false;
+  }));
+  document.querySelectorAll("[data-ch]").forEach((c) => c.addEventListener("change", syncAll));
+  syncAll();
   $("alSave").addEventListener("click", async () => {
     const kinds = {};
     $("main").querySelectorAll("[data-ch]").forEach((c) => { const k = c.dataset.kind; (kinds[k] = kinds[k] || {})[c.dataset.ch] = c.checked; });
