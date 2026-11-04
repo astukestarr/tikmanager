@@ -495,6 +495,42 @@ class Handler(BaseHTTPRequestHandler):
                      f"Source: {res.get('source')}"]
         mailer.send(to, subject, "\n".join(lines) + "\n\n- TikManager")
 
+    UPTIME_RANGES = {"1d": 86400, "3d": 3 * 86400, "7d": 7 * 86400, "14d": 14 * 86400, "1M": 30 * 86400}
+
+    def uptime_report(self, d, rng):
+        """Uptime over the window from the router's online/offline events (kept 180 days): overall % and ~40 status blocks."""
+        secs = self.UPTIME_RANGES.get(rng, 86400)
+        now = time.time()
+        start = now - secs
+        evs = db.q("SELECT kind, ts FROM events WHERE device_id=? AND kind IN ('online','offline') ORDER BY ts", (d["id"],))
+        state_up = None
+        for e in evs:   # the state as it was at the window's start = the last transition before it
+            if e["ts"] <= start:
+                state_up = e["kind"] == "online"
+        if state_up is None:
+            first_in = next((e for e in evs if e["ts"] > start), None)
+            state_up = (first_in["kind"] == "offline") if first_in else bool(d["online"])
+        points = [(start, state_up)] + [(e["ts"], e["kind"] == "online") for e in evs if e["ts"] > start] + [(now, None)]
+        n = 40
+        bw = secs / n
+        down = [0.0] * n
+        total_down = 0.0
+        for i in range(len(points) - 1):
+            t0, up = points[i]
+            t1 = points[i + 1][0]
+            if up:
+                continue
+            total_down += t1 - t0
+            a = t0
+            while a < t1:
+                bi = min(n - 1, int((a - start) / bw))
+                seg_end = min(t1, start + (bi + 1) * bw)
+                down[bi] += seg_end - a
+                a = seg_end
+        blocks = [{"t": int(start + i * bw), "down_pct": round(100 * down[i] / bw, 1) if bw else 0,
+                   "state": "down" if down[i] > 0.5 * bw else "partial" if down[i] > 1 else "up"} for i in range(n)]
+        return {"range": rng, "pct": round(100 * (secs - total_down) / secs, 3) if secs else 100.0, "blocks": blocks}
+
     def vpn_candidates(self, org_id, vpn_id):
         rows = db.q("""SELECT d.id, d.name, d.online, d.wan_ip, d.model, d.networks, d.thumb_slug, v.name AS other_vpn FROM devices d
                        LEFT JOIN vpn_sites s ON s.device_id = d.id AND s.vpn_id IS NOT ? LEFT JOIN vpns v ON v.id = s.vpn_id
@@ -1005,6 +1041,10 @@ class Handler(BaseHTTPRequestHandler):
             if not r or not r["result"]:
                 raise HttpError(404, "No finished report to export.")
             return self.diag_csv(diag.row(r))
+        if m := re.fullmatch(r"/api/devices/(\d+)/uptime", path):   # uptime history bar from online/offline events
+            s = self.require()
+            d = self.device_for(s, m.group(1))
+            return self.json(self.uptime_report(d, q.get("range") or "1M"))
         # --- Wizards > WireGuard Builder (technicians) ---
         if path == "/api/wg-builds":   # every build with its live-ish status
             self.require(tech=True)
@@ -2476,6 +2516,20 @@ class Handler(BaseHTTPRequestHandler):
             rid = diag.start_link(init, tgt, addr, str(b.get("direction") or "receive"), s["email"])
             db.audit(s["email"], "diagnostics link test", f"{init['name']} -> {tgt['name']}", self.client_ip(), org_id=init["org_id"])
             return self.json({"ok": True, "id": rid})
+        if m := re.fullmatch(r"/api/devices/(\d+)/console", path):   # run a RouterOS command and return its output
+            s = self.require(tech=True, perm="winbox")
+            d = self.device_for(s, m.group(1))
+            if not d["online"]:
+                raise HttpError(409, f"{d['name']} is offline.")
+            cmd = str(self.body().get("command") or "").strip()
+            if not cmd:
+                raise HttpError(400, "Type a command.")
+            db.audit(s["email"], "console command", d["name"], self.client_ip(), org_id=d["org_id"], detail=cmd[:400])
+            try:
+                out = poller.client(d).run_script(cmd, timeout=30)
+            except RouterError as e:
+                out = f"error: {e}"
+            return self.json({"output": out})
         if m := re.fullmatch(r"/api/diag/runs/(\d+)/cancel", path):
             s = self.require(tech=True, write=True)
             diag.cancel(int(m.group(1)), s["email"])

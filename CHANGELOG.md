@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.4.0-beta.1 - 2026-11-04
+
+Two additions to the router page:
+
+- **Uptime history bar.** The router's Overview now shows an uptime bar - pick **1M / 14d / 7d / 3d / 1d** and see a block
+  per slice (green up, amber partial, red down) with the overall **uptime %** for that window. It's computed from the
+  router's own online/offline history (kept 180 days), so it needs no new data collection.
+- **Console.** A new **Console** tab runs a RouterOS command on the router and shows the output in the browser. It's a
+  command runner - one command at a time, through TikManager's limited router user, and every command is logged - not an
+  interactive shell (no prompts, Safe Mode or editors); for a full interactive session use Winbox. Technician-only, and
+  it needs the Winbox permission.
+
 ## 3.3.0-beta.10 - 2026-11-04
 
 - **Link test: clearer "can't connect" guidance.** When the bandwidth-test can't reach the target, the message now

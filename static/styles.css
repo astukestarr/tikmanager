@@ -205,6 +205,14 @@ input[type=color] { width: 56px; height: 34px; padding: 2px; }
 .spark { width: 100%; height: 40px; display: block; margin: 6px 0 14px; }
 .qr { max-width: 200px; margin: 0 auto 12px; }
 .qr svg { width: 100%; height: auto; display: block; border: 8px solid #fff; border-radius: 6px; background: #fff; }
+.uptime-bar { display: flex; gap: 2px; margin: 10px 0 6px; }
+.uptime-bar .ub { flex: 1 1 0; height: 30px; border-radius: 2px; background: #2ecc71; min-width: 2px; }
+.uptime-bar .ub.up { background: #2ecc71; }
+.uptime-bar .ub.partial { background: #f1c40f; }
+.uptime-bar .ub.down { background: #e74c3c; }
+.console-out { background: #0b1020; color: #d7e0ee; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
+  padding: 10px 12px; border-radius: 8px; height: 340px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0 0 10px; }
+.console-in { flex: 1; }
 .diag-chart { width: 100%; height: 120px; display: block; }
 .diag-chart .area { fill: var(--accent); opacity: .15; }
 .diag-chart .line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }

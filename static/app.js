@@ -518,6 +518,35 @@ async function showAdoption() {
 // --- router page (UniFi-style: summary panel on the left, activity chart and details on the right) ----------------
 const rView = { range: "1d", iface: "", latency: true, loss: true };   // kept across the page's 30-second refresh
 
+const UPRANGES = ["1M", "14d", "7d", "3d", "1d"];
+async function loadUptime(d) {
+  rView.uprange = rView.uprange || "1M";
+  const card = $("uptimeCard");
+  let data;
+  try { data = await api(`/api/devices/${d.id}/uptime?range=${rView.uprange}`); } catch { if (card) card.innerHTML = ""; return; }
+  if (!card) return;
+  const cls = data.pct >= 99.9 ? "status ok" : data.pct >= 99 ? "" : "status warn";
+  card.innerHTML = `<div class="row"><h2>Uptime</h2><span class="spacer"></span>
+    <div class="seg" role="group" aria-label="Uptime range">${UPRANGES.map((k) => `<button type="button" data-uprange="${k}" class="${rView.uprange === k ? "on" : ""}">${k}</button>`).join("")}</div></div>
+    <div class="uptime-bar">${data.blocks.map((b) => `<i class="ub ${b.state}" title="${new Date(b.t * 1000).toLocaleString()} · ${(100 - b.down_pct).toFixed(1)}% up"></i>`).join("")}</div>
+    <div class="row small muted"><span>${rView.uprange} ago</span><span class="spacer"></span><b class="${cls}">${data.pct}% up</b><span class="spacer"></span><span>now</span></div>`;
+  card.querySelectorAll("[data-uprange]").forEach((b) => b.addEventListener("click", () => { rView.uprange = b.dataset.uprange; loadUptime(d); }));
+}
+function consoleTab(d) {
+  const out = $("conOut"), cmd = $("conCmd"), form = $("conForm");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const c = cmd.value.trim();
+    if (!c) return;
+    out.textContent += `[${d.name}] > ${c}\n`;
+    cmd.value = ""; cmd.disabled = true;
+    try { const r = await post(`/api/devices/${d.id}/console`, { command: c }); out.textContent += (r.output && r.output.trim() ? r.output.replace(/\s+$/, "") : "(no output)") + "\n\n"; }
+    catch (err) { out.textContent += "error: " + err.message + "\n\n"; }
+    cmd.disabled = false; cmd.focus(); out.scrollTop = out.scrollHeight;
+  });
+  cmd.focus();
+}
 async function router(id) {
   const d = await api(`/api/devices/${id}`);
   const memPct = d.mem_total ? Math.round(100 * d.mem_used / d.mem_total) : null;
@@ -532,7 +561,7 @@ async function router(id) {
   const radios = (d.interfaces || []).some(isRadio);
   const tabs = adopted ? [["overview", "Overview"], ["network", "Network"], ...(d.online && isTech() ? [["ports", "Ports"]] : []), ...(radios ? [["wireless", "Wireless"]] : []),
     ...(d.online && isTech() ? [["firewall", "Firewall"]] : []), ...(isTech() ? [["routing", "Routing"], ["flows", "Flows"]] : []), ...(canVpn() ? [["vpns", "VPNs"]] : []), ...(isTech() ? [["remote", "Remote access"]] : []),
-    ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
+    ["backups", "Backups"], ["events", "Events"], ...(isTech() ? [["logs", "Logs"]] : []), ...(d.online && can("winbox") ? [["console", "Console"]] : []), ["settings", canWrite() ? "Settings" : "Location"]] : [];
   if (adopted && !tabs.some(([k]) => k === rView.rtab)) rView.rtab = "overview";
   const tab = adopted ? rView.rtab : "events";
   const on = (k) => !adopted || tab === k;
@@ -588,6 +617,7 @@ async function router(id) {
           <li>Clearing the flag needs someone at the router: <span class="mono">/system device-mode update flagged=no</span>, then press the button or power-cycle it when asked.</li></ol>
         ${d.dm_info && d.dm_info.attempts ? `<p class="small muted">Device-mode change attempts: ${d.dm_info.attempts}</p>` : ""}</div>` : ""}
       ${adopted && tab === "overview" ? `
+      <div class="card" id="uptimeCard"><p class="small muted">Loading uptime…</p></div>
       <div class="card">
         <div class="chart-toolbar">
           <select id="cIface" aria-label="Interface"><option value="">WAN (internet)</option></select>
@@ -673,6 +703,11 @@ async function router(id) {
           <p class="small muted">Moves the router with its backups, events and upgrade history. Users of the old client lose access to it.</p>` : ""}
         <div class="actions"><button class="btn danger" type="button" id="remove">${d.state === "adopted" ? "Remove router" : "Reject"}</button><span class="status" id="mStatus"></span></div>
         <p class="small muted">Removing it disconnects the tunnel. On the router you can then delete the <span class="mono">tikmanager</span> interface, user, logging action and firewall rule.</p></div>` : ""}
+      ${adopted && tab === "console" ? `<div class="card" id="consoleCard"><h2>Console</h2>
+        <p class="small muted">Runs one RouterOS command at a time through TikManager's limited router user and shows the output - it's a command runner, not an interactive shell (no prompts, Safe Mode or editors). Every command is logged. For a full interactive session use Winbox.</p>
+        <pre class="console-out" id="conOut" aria-live="polite"></pre>
+        <form id="conForm" class="row"><input id="conCmd" class="mono console-in" placeholder="/system resource print" spellcheck="false" autocomplete="off" autocapitalize="off">
+          <button class="btn primary" type="submit">Run</button></form></div>` : ""}
     </section>
   </div>`;
   setBars($("main"));
@@ -718,6 +753,8 @@ async function router(id) {
   $("rUpCancel")?.addEventListener("click", async () => { await post(`/api/upgrades/${d.upgrade.id}/cancel`); router(d.id); });
   if ($("bkCard")) loadBackups(d).then(() => { if (rView.backupNow) { rView.backupNow = false; $("bkNow")?.click(); } });
   if ($("dhcpCard")) loadDhcp(d);
+  if ($("uptimeCard")) loadUptime(d);
+  if ($("consoleCard")) consoleTab(d);
   if ($("wlCard")) loadWireless(d);
   if ($("rLogs")) logViewer($("rLogs"), { device_id: d.id });
   if ($("ptRoot")) portsTab(d);

@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "3.3.0"    # the release these slides describe (its betas included)
-SINCE = "3.2.0"      # the full release before it
+RELEASE = "3.4.0"    # the release these slides describe (its betas included)
+SINCE = "3.3.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -164,12 +164,22 @@ SLIDES_3_3 = [
              "WAN or site-to-site link. Pick the two routers, the address and the direction; TikManager briefly turns on the target's "
              "bandwidth-test server and restores it after. This measures the path between the routers, not the public internet."},
 ]
-SLIDES = SLIDES_3_3
+SLIDES_3_4 = [
+    {"id": "uptime-bar", "title": "Uptime history", "img": None, "view": "routers", "who": "tech",
+     "text": "Every router's page now has an Uptime bar: pick 1M / 14d / 7d / 3d / 1d and see a block per slice (green up, "
+             "amber partial, red down) with the overall uptime % for the window, worked out from the router's own online/offline "
+             "history."},
+    {"id": "console", "title": "Console", "img": None, "view": "routers", "who": "tech",
+     "text": "A Console tab on the router page runs a RouterOS command and shows the output, right in the browser. It's a command "
+             "runner (one command at a time, through TikManager's limited router user, every command logged) - for a full interactive "
+             "session use Winbox. Needs the Winbox permission."},
+]
+SLIDES = SLIDES_3_4
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"3.4.0": {"since": "3.3.0", "slides": SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")
