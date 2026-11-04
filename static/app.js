@@ -3968,22 +3968,24 @@ async function alertsPage() {
     <div class="card"><h2>Resolved in the last 7 days (${a.recent.length})</h2>${a.recent.length ? `<div class="table-wrap"><table><thead><tr><th>Started</th><th>Problem</th><th>Where</th><th>Status</th><th>Sent</th></tr></thead>
       <tbody>${a.recent.map(row).join("")}</tbody></table></div>` : `<p class="muted">None.</p>`}</div></div>
     ${a.can_edit ? `<div id="alSettingsTab"><div class="card" id="alSettings"><h2>Settings</h2>
-      <h3 class="al-h">What to alert on</h3><div class="al-kinds">${Object.entries(a.kinds).map(([k, m]) => `<label class="chk al-kind"><input type="checkbox" data-kind="${k}" ${st.kinds[k].on ? "checked" : ""}> ${esc(m.label)}
-        ${m.threshold ? `<span class="small muted"> - ${m.threshold === "minutes" ? "after" : "above"} <input type="number" class="al-th" data-th="${k}" value="${esc(st.kinds[k][m.threshold])}" min="1" max="${{ percent: 100, celsius: 120 }[m.threshold] || 1440}"> ${{ percent: "%", celsius: "°C" }[m.threshold] || "minutes"}</span>` : ""}</label>`).join("")}</div>
-      <h3 class="al-h">ConnectWise tickets</h3>
-      ${a.cw_ready ? `<label class="chk"><input type="checkbox" id="alCwOn" ${st.cw.on ? "checked" : ""}> Open a ticket for each problem, and close it when it clears</label>
-        <div class="grid2" id="alCwFields"><p class="small muted">Loading boards…</p></div>
+      <h3 class="al-h">What to alert on</h3>
+      <p class="small muted">Tick which channels each event should go to. An event with none ticked is off. Set up each channel's details below.</p>
+      <div class="table-wrap"><table class="al-table"><thead><tr><th>Event</th><th>CW&nbsp;Ticket</th><th>Email</th><th>Teams</th></tr></thead><tbody>${Object.entries(a.kinds).map(([k, m]) => `<tr>
+        <td>${esc(m.label)}${m.threshold ? ` <span class="small muted">- ${m.threshold === "minutes" ? "after" : "above"} <input type="number" class="al-th" data-th="${k}" value="${esc(st.kinds[k][m.threshold])}" min="1" max="${{ percent: 100, celsius: 120 }[m.threshold] || 1440}"> ${{ percent: "%", celsius: "°C" }[m.threshold] || "min"}</span>` : ""}</td>
+        <td class="al-c"><input type="checkbox" data-ch="cw" data-kind="${k}" ${st.kinds[k].cw ? "checked" : ""} aria-label="ConnectWise ticket for ${esc(m.label)}"></td>
+        <td class="al-c"><input type="checkbox" data-ch="email" data-kind="${k}" ${st.kinds[k].email ? "checked" : ""} aria-label="Email for ${esc(m.label)}"></td>
+        <td class="al-c"><input type="checkbox" data-ch="teams" data-kind="${k}" ${st.kinds[k].teams ? "checked" : ""} aria-label="Teams for ${esc(m.label)}"></td></tr>`).join("")}</tbody></table></div>
+      <h3 class="al-h">ConnectWise ticket settings</h3>
+      ${a.cw_ready ? `<div class="grid2" id="alCwFields"><p class="small muted">Loading boards…</p></div>
         <p class="small muted">Tickets go to the client's linked ConnectWise company (Clients page); the default company is used for clients that aren't linked and for
           TikManager / server problems. The ConnectWise API member's security role needs <b>Service Desk &gt; Service Tickets: Add, Edit, Inquire</b>,
           <b>Service Desk &gt; Close Service Tickets: Edit, Inquire</b> (to close a ticket when the problem clears), <b>System &gt; Table Setup: Inquire</b>
           (for the board / status / priority lists) and <b>Companies &gt; Company Maintenance: Inquire</b>. Set each Inquire to All. Full list in the README.</p>`
         : `<p class="small muted">Connect ConnectWise PSA on Admin > Integrations first.</p>`}
       <h3 class="al-h">Email</h3>
-      ${a.mail_ready ? `<label class="chk"><input type="checkbox" id="alEmailOn" ${st.email.on ? "checked" : ""}> Email each problem (and when it clears) to</label>
-        <label class="field"><input id="alEmailTo" value="${esc(st.email.to || "")}" placeholder="noc@example.com, alan@example.com" spellcheck="false"></label>`
+      ${a.mail_ready ? `<label class="field">Send alert emails to <input id="alEmailTo" value="${esc(st.email.to || "")}" placeholder="noc@example.com, alan@example.com" spellcheck="false"></label>`
         : `<p class="small muted">Set up email on Admin > Integrations > Email first.</p>`}
       <h3 class="al-h">Microsoft Teams</h3>
-      <label class="chk"><input type="checkbox" id="alTeamsOn" ${st.teams.on ? "checked" : ""}> Post each problem (and when it clears) to a Teams channel</label>
       <label class="field">Workflow webhook URL ${a.teams_ready ? `<span class="small status ok">saved - leave blank to keep it</span>` : ""}
         <input id="alTeamsUrl" type="password" autocomplete="off" placeholder="https://...logic.azure.com/... or ...powerplatform.com/..."></label>
       <p class="small muted">In Teams: the channel's <b>...</b> > <b>Workflows</b> > <b>Post to a channel when a webhook request is received</b>, then paste the URL it gives you.</p>
@@ -4019,12 +4021,12 @@ async function alertsPage() {
   cwFields(st.cw.board_id);
   $("alSave").addEventListener("click", async () => {
     const kinds = {};
-    $("main").querySelectorAll("[data-kind]").forEach((c) => { kinds[c.dataset.kind] = { on: c.checked }; });
-    $("main").querySelectorAll("[data-th]").forEach((i) => { const k = i.dataset.th; kinds[k][a.kinds[k].threshold] = i.value; });
-    const body = { kinds, teams: { on: $("alTeamsOn").checked } };
-    if ($("alEmailOn")) body.email = { on: $("alEmailOn").checked, to: $("alEmailTo").value };
+    $("main").querySelectorAll("[data-ch]").forEach((c) => { const k = c.dataset.kind; (kinds[k] = kinds[k] || {})[c.dataset.ch] = c.checked; });
+    $("main").querySelectorAll("[data-th]").forEach((i) => { const k = i.dataset.th; (kinds[k] = kinds[k] || {})[a.kinds[k].threshold] = i.value; });
+    const body = { kinds };
+    if ($("alEmailTo")) body.email = { to: $("alEmailTo").value };
     if ($("alTeamsUrl").value.trim()) body.teams_webhook = $("alTeamsUrl").value.trim();
-    if ($("alCwOn")) body.cw = { on: $("alCwOn").checked, board_id: $("alBoard")?.value, company_id: $("alCompany")?.value, status_id: $("alStatusNew")?.value,
+    if ($("alBoard")) body.cw = { board_id: $("alBoard").value, company_id: $("alCompany")?.value, status_id: $("alStatusNew")?.value,
       closed_status_id: $("alStatusClosed")?.value, priority_id: $("alPriority")?.value };
     try { await post("/api/admin/alerts/settings", body); await alertsPage(); $("alStatus").textContent = "Saved."; $("alStatus").className = "status ok"; }
     catch (e) { status(e.message, "err"); }

@@ -51,7 +51,7 @@ KINDS = {   # kind -> (label, on by default, threshold name, default threshold)
     "critical": ("Critical check down (a router can't reach an address it must - Monitoring > Critical checks)", True, "minutes", 2),
     "remote_access": ("Remote access: someone connected from a new address, or their key was used from two places (clears after an hour)", True, None, None),
 }
-DEFAULTS = {"kinds": {k: {"on": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
+DEFAULTS = {"kinds": {k: {"on": v[1], "cw": v[1], "email": v[1], "teams": v[1], **({v[2]: v[3]} if v[2] else {})} for k, v in KINDS.items()},
             "cw": {"on": False, "board_id": None, "status_id": None, "closed_status_id": None, "priority_id": None, "company_id": None},
             "teams": {"on": False}, "email": {"on": False, "to": ""}}
 
@@ -70,9 +70,13 @@ class Alerts:
         out = json.loads(json.dumps(DEFAULTS))
         for k in ("cw", "teams", "email"):
             out[k].update({x: y for x, y in (saved.get(k) or {}).items() if x in out[k]})
-        for k, v in (saved.get("kinds") or {}).items():
+        saved_kinds = saved.get("kinds") or {}
+        for k, v in saved_kinds.items():
             if k in out["kinds"]:
                 out["kinds"][k].update({x: y for x, y in v.items() if x in out["kinds"][k]})
+        if saved_kinds and not any("cw" in (v or {}) for v in saved_kinds.values()):
+            for kv in out["kinds"].values():   # old settings (one on/off per kind): route each on-kind to every channel, as before
+                kv["cw"] = kv["email"] = kv["teams"] = bool(kv.get("on"))
         return out
 
     def save(self, b):
@@ -81,32 +85,35 @@ class Alerts:
         for k, v in (b.get("kinds") or {}).items():
             if k not in KINDS:
                 continue
-            cur["kinds"][k]["on"] = bool(v.get("on"))
+            kc = cur["kinds"][k]
+            kc["cw"], kc["email"], kc["teams"] = bool(v.get("cw")), bool(v.get("email")), bool(v.get("teams"))
+            kc["on"] = kc["cw"] or kc["email"] or kc["teams"]   # a kind is evaluated if it routes to at least one channel
             th = KINDS[k][2]
             if th and v.get(th) not in (None, ""):
-                cur["kinds"][k][th] = num(v[th], 1, 1440) if th == "minutes" else num(v[th], 30, 120) if th == "celsius" else num(v[th], 50, 100)
+                kc[th] = num(v[th], 1, 1440) if th == "minutes" else num(v[th], 30, 120) if th == "celsius" else num(v[th], 50, 100)
         cw = b.get("cw") or {}
-        cur["cw"]["on"] = bool(cw.get("on"))
         for f in ("board_id", "status_id", "closed_status_id", "priority_id", "company_id"):
             if f in cw:
                 cur["cw"][f] = int(cw[f]) if str(cw[f] or "").isdigit() else None
-        if cur["cw"]["on"] and not cur["cw"]["board_id"]:
-            raise ValueError("Pick the ConnectWise board tickets go to.")
-        cur["teams"]["on"] = bool((b.get("teams") or {}).get("on"))
         em = b.get("email") or {}
-        if em:
+        if "to" in em:
             from mailer import MailError, addresses
             try:
-                to = addresses(em.get("to") or "")
+                cur["email"]["to"] = ", ".join(addresses(em.get("to") or ""))
             except MailError as e:
                 raise ValueError(str(e)) from None
-            cur["email"] = {"on": bool(em.get("on")), "to": ", ".join(to)}
-            if cur["email"]["on"] and not to:
-                raise ValueError("Add who alert emails go to.")
         if "teams_webhook" in b or b.get("teams_clear"):
             self.integ.save("teams", {"webhook": str(b.get("teams_webhook") or "")} if not b.get("teams_clear") else {"clear": ["webhook"]})
+        # each channel is "on" when at least one kind routes to it - the per-kind checkboxes are the only switch
+        cur["cw"]["on"] = any(kv.get("cw") for kv in cur["kinds"].values())
+        cur["teams"]["on"] = any(kv.get("teams") for kv in cur["kinds"].values())
+        cur["email"]["on"] = any(kv.get("email") for kv in cur["kinds"].values())
+        if cur["cw"]["on"] and not cur["cw"]["board_id"]:
+            raise ValueError("Pick the ConnectWise board tickets go to (under ConnectWise ticket settings) - some events are set to open a ticket.")
+        if cur["email"]["on"] and not cur["email"]["to"]:
+            raise ValueError("Add who alert emails go to (under Email) - some events are set to email.")
         if cur["teams"]["on"] and not self.integ.configured("teams"):
-            raise ValueError("Paste the Teams workflow webhook URL first.")
+            raise ValueError("Paste the Teams workflow webhook URL first - some events are set to post to Teams.")
         self.db.set_setting("alert_settings", json.dumps(cur))
         return cur
 
@@ -304,9 +311,10 @@ class Alerts:
 
     def notify_open(self, cfg, a):
         cw_note = teams_note = None
+        kc = cfg["kinds"].get(a.get("kind") or "", {})   # which channels this kind of problem routes to
         client = (self.db.one("SELECT name FROM orgs WHERE id=?", (a["org_id"],)) or {}).get("name", "") if a["org_id"] else ""
         link = self._link(a["device_id"], a.get("kind"))
-        if cfg["cw"]["on"] and self.integ.configured("cw"):
+        if cfg["cw"]["on"] and kc.get("cw", True) and self.integ.configured("cw"):
             company = self._company(cfg, a["org_id"])
             if not company:
                 cw_note = "No ticket: this client isn't linked to a ConnectWise company and no default company is set."
@@ -318,14 +326,14 @@ class Alerts:
                     self.db.run("UPDATE alerts SET cw_ticket=? WHERE id=?", (tid, a["id"]))
                 except IntegrationError as e:
                     cw_note = f"Ticket not opened: {e}"
-        if cfg["teams"]["on"] and self.integ.configured("teams"):
+        if cfg["teams"]["on"] and kc.get("teams", True) and self.integ.configured("teams"):
             try:
                 self.integ.teams_post(self._card(a["title"], a["detail"] or "", False, link, client))
             except IntegrationError as e:
                 teams_note = f"Teams message not sent: {e}"
         self._hooks(a, "open", a["detail"])
         mailer = getattr(self, "mailer", None)
-        if cfg["email"]["on"] and mailer and mailer.configured():
+        if cfg["email"]["on"] and kc.get("email", True) and mailer and mailer.configured():
             try:
                 mailer.send(cfg["email"]["to"], f"[TikManager] {a['title']}"[:200],
                             f"{a['detail'] or ''}\n\n{'Client: ' + client + chr(10) if client else ''}Started: {time.strftime('%Y-%m-%d %H:%M')}\n{link}\n\n"
@@ -346,18 +354,19 @@ class Alerts:
     def notify_resolved(self, cfg, a):
         mins = int((time.time() - a["opened_at"]) // 60)
         text = f"Resolved after {mins} minute{'s' if mins != 1 else ''} - TikManager no longer sees this problem."
-        if a["cw_ticket"] and self.integ.configured("cw"):
+        kc = cfg["kinds"].get(a.get("kind") or "", {})
+        if a["cw_ticket"] and self.integ.configured("cw"):   # a ticket was opened: always close it
             try:
                 self.integ.cw_close(a["cw_ticket"], text, cfg["cw"].get("closed_status_id"))
             except IntegrationError as e:
                 self.db.run("UPDATE alerts SET cw_note=? WHERE id=?", (f"Ticket not closed: {e}", a["id"]))
-        if cfg["teams"]["on"] and self.integ.configured("teams"):
+        if cfg["teams"]["on"] and kc.get("teams", True) and self.integ.configured("teams"):
             try:
                 self.integ.teams_post(self._card(a["title"], text, True, self._link(a["device_id"], a.get("kind"))))
             except IntegrationError:
                 pass
         mailer = getattr(self, "mailer", None)
-        if cfg["email"]["on"] and mailer and mailer.configured():
+        if cfg["email"]["on"] and kc.get("email", True) and mailer and mailer.configured():
             try:
                 mailer.send(cfg["email"]["to"], f"[TikManager] Resolved: {a['title']}"[:200], f"{text}\n\n{self._link(a['device_id'])}")
             except Exception:  # noqa: BLE001

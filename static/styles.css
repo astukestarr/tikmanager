@@ -641,6 +641,8 @@ tr.pt-selrow td { background: color-mix(in srgb, var(--accent) 8%, transparent);
 .al-h { font-size: 14px; margin: 18px 0 6px; }
 .al-kinds { display: grid; gap: 6px; }
 .al-kind { align-items: center; }
+.al-table th:not(:first-child), .al-table td.al-c { text-align: center; width: 92px; white-space: nowrap; }
+.al-table td.al-c input { margin: 0; }
 .al-th { width: 64px; padding: 2px 6px; }
 
 /* community script library */
