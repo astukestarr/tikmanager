@@ -6666,12 +6666,10 @@ async function wgbImport() {
 const DIAG_TESTS = [
   { kind: "traffic", title: "Traffic Watch", icon: "monitor",
     desc: "Watch live traffic on a router for a set time, then see who's using the connection - top talkers, connections and protocols." },
-  { kind: "speed", title: "Speed Test", icon: "network",
-    desc: "Check a router's internet reachability, latency and jitter (rough download) - run from the site itself." },
-  { kind: "link", title: "Link test", icon: "vpns",
-    desc: "Measure real throughput between two of your routers (RAM-to-RAM, 20 TCP streams) over the LAN, WAN or a tunnel - can show gigabit." },
   { kind: "sniff", title: "Packet Sniffer", icon: "diag", perm: "winbox",
     desc: "Capture packet metadata for a few seconds (who talked to whom, protocols and ports) - in the router's memory, no contents saved. Needs the Winbox permission." },
+  { kind: "link", title: "Link test", icon: "vpns", exp: true,
+    desc: "Measure real throughput between two of your routers (RAM-to-RAM, 20 TCP streams) over the LAN, WAN or a tunnel - can show gigabit." },
 ];
 const fmtBytes = (b) => { b = Math.max(0, b || 0); const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
 const fmtBps = (b) => { b = Math.max(0, b || 0); const u = ["bps", "Kbps", "Mbps", "Gbps"]; let i = 0; while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
@@ -6688,7 +6686,7 @@ function diagSummary(r) {
 }
 
 async function diagView(arg) {
-  if (arg === "traffic" || arg === "speed") return diagForm(arg);
+  if (arg === "traffic") return diagForm(arg);
   if (arg === "link") return diagLinkForm();
   if (arg === "sniff") return diagSniffForm();
   if (/^\d+$/.test(arg || "")) return diagReport(arg);
@@ -6786,7 +6784,7 @@ async function diagLanding() {
   $("main").innerHTML = `<div class="row"><h1>Diagnostics</h1></div>
     <p class="muted">On-demand tests you run against a router - each one saves a report you can revisit, email or export.</p>
     <div class="wiz-tiles">${DIAG_TESTS.filter((t) => !t.perm || can(t.perm)).map((t) => `<button type="button" class="wiz-tile" data-diag="${t.kind}">
-      <span class="exp-badge">Experimental</span>
+      ${t.exp ? `<span class="exp-badge">Experimental</span>` : ""}
       <span class="wiz-ico">${NAV_ICONS[t.icon] || NAV_ICONS_EXTRA[t.icon] || ""}</span>
       <span class="wiz-name">${esc(t.title)}</span><span class="wiz-desc">${esc(t.desc)}</span></button>`).join("")}</div>
     <div class="card"><h2>Recent tests</h2>${runs.length ? `<div class="table-wrap"><table><thead><tr><th>Test</th><th>Router</th><th>Client</th><th>Result</th><th>Status</th><th>When</th></tr></thead><tbody>
@@ -6799,50 +6797,42 @@ async function diagLanding() {
   if (runs.some((r) => r.status === "running")) window._diagLT = setTimeout(() => { if (location.hash === "#diag") diagLanding(); }, 4000);
 }
 
-async function diagForm(kind) {
+async function diagForm() {
   const { routers } = await api("/api/diag/candidates");
   const online = routers.filter((r) => r.online);
-  const title = kind === "traffic" ? "Traffic Watch" : "Speed Test";
-  $("main").innerHTML = `<p><a href="#diag">← Diagnostics</a></p><div class="row"><h1>${title}</h1></div>
-    <p class="muted">${kind === "traffic"
-      ? "Watch a router's live traffic for a set time to catch an issue as it happens, then get a report of who's using the connection. Watch the whole router (connection tracking - no extra permissions) or pick one interface (torch - needs the 'sniff' permission, granted when the router is adopted)."
-      : "Measure a router's internet download speed, latency and jitter - run from the site itself, through the router."}</p>
+  $("main").innerHTML = `<p><a href="#diag">← Diagnostics</a></p><div class="row"><h1>Traffic Watch</h1></div>
+    <p class="muted">Watch a router's live traffic for a set time to catch an issue as it happens, then get a report of who's using the connection.
+      Watch the whole router (connection tracking - no extra permissions) or pick one interface (torch - needs the 'sniff' permission, granted when the router is adopted).</p>
     <div class="card">
       <label class="field">Router <select id="dRouter">${online.map((r) => `<option value="${r.id}">${esc(r.name)}${r.org ? ` — ${esc(r.org)}` : ""}</option>`).join("")}</select></label>
       ${online.length ? "" : `<p class="small status err">No routers are online right now.</p>`}
-      ${kind === "traffic" ? `<label class="field">Watch <select id="dIface"><option value="">All traffic (whole router)</option></select></label>
+      <label class="field">Watch <select id="dIface"><option value="">All traffic (whole router)</option></select></label>
       <p class="small muted" id="dIfaceMsg">All traffic uses connection tracking (any router). A specific interface uses torch and needs the 'sniff' permission.</p>
       <label class="field">Watch for <select id="dMin"><option value="1">1 minute</option><option value="2" selected>2 minutes</option>
         <option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option></select></label>
       <label class="field">Only this address (optional) <input id="dFilter" placeholder="e.g. 192.168.1.50 or 192.168.1.0/24" spellcheck="false"></label>
-      <p class="small muted">Tip: filter to one device's address to zero in on the issue you're recreating.</p>`
-      : `<p class="small muted">Downloads a sample sized to the router's free storage from Cloudflare's speed service and pings 1.1.1.1 for latency. Download only.</p>`}
+      <p class="small muted">Tip: filter to one device's address to zero in on the issue you're recreating.</p>
       <div class="actions"><button class="btn primary" type="button" id="dStart" ${online.length ? "" : "disabled"}>Start test</button></div>
       <p class="small status" id="dMsg"></p>
     </div>`;
-  if (kind === "traffic") {
-    const loadIfaces = async () => {
-      const sel = $("dIface"); if (!sel) return;
-      const keep = sel.value;
-      sel.innerHTML = `<option value="">All traffic (whole router)</option>`;
-      const id = +$("dRouter").value; if (!id) return;
-      try {
-        const { interfaces } = await api(`/api/diag/interfaces?device_id=${id}`);
-        for (const i of interfaces) sel.insertAdjacentHTML("beforeend",
-          `<option value="${esc(i.name)}">${esc(i.name)}${i.wan ? " (WAN)" : ""}${i.running ? "" : " — down"}</option>`);
-        if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
-      } catch (e) { const m = $("dIfaceMsg"); if (m) { m.textContent = "Couldn't read this router's interfaces - you can still watch All traffic."; } }
-    };
-    $("dRouter")?.addEventListener("change", loadIfaces);
-    loadIfaces();
-  }
+  const loadIfaces = async () => {
+    const sel = $("dIface"); if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">All traffic (whole router)</option>`;
+    const id = +$("dRouter").value; if (!id) return;
+    try {
+      const { interfaces } = await api(`/api/diag/interfaces?device_id=${id}`);
+      for (const i of interfaces) sel.insertAdjacentHTML("beforeend",
+        `<option value="${esc(i.name)}">${esc(i.name)}${i.wan ? " (WAN)" : ""}${i.running ? "" : " — down"}</option>`);
+      if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    } catch (e) { const m = $("dIfaceMsg"); if (m) { m.textContent = "Couldn't read this router's interfaces - you can still watch All traffic."; } }
+  };
+  $("dRouter")?.addEventListener("change", loadIfaces);
+  loadIfaces();
   $("dStart")?.addEventListener("click", async () => {
     $("dStart").disabled = true; $("dMsg").textContent = "Starting…"; $("dMsg").className = "small status";
     try {
-      const body = { device_id: +$("dRouter").value };
-      let r;
-      if (kind === "traffic") { body.minutes = +$("dMin").value; body.filter = $("dFilter").value.trim(); body.iface = $("dIface").value; r = await post("/api/diag/traffic", body); }
-      else r = await post("/api/diag/speed", body);
+      const r = await post("/api/diag/traffic", { device_id: +$("dRouter").value, minutes: +$("dMin").value, filter: $("dFilter").value.trim(), iface: $("dIface").value });
       go("diag", r.id);
     } catch (e) { $("dMsg").textContent = e.message; $("dMsg").className = "small status err"; $("dStart").disabled = false; }
   });

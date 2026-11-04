@@ -74,14 +74,6 @@ class Diagnostics:
         threading.Thread(target=self._run_torch, args=(rid, device["id"], iface, minutes, src_filter), daemon=True, name=f"diag-torch-{rid}").start()
         return rid
 
-    def start_speed(self, device, iface, user):
-        rid = self.db.run("""INSERT INTO diag_runs (org_id, device_id, kind, iface, params, status, progress, started_at, created_by, created_at)
-                             VALUES (?,?,'speedtest',?,'{}','running',0,?,?,?)""",
-                          (device["org_id"], device["id"], iface or "", time.time(), user, time.time()))
-        self.db.event(device["id"], device["org_id"], "diagnostics", f"Speed Test started by {user}")
-        threading.Thread(target=self._run_speed, args=(rid, device["id"], iface), daemon=True, name=f"diag-speed-{rid}").start()
-        return rid
-
     def start_link(self, initiator, target, target_addr, direction, user):
         direction = direction if direction in ("receive", "send", "both") else "receive"
         rid = self.db.run("""INSERT INTO diag_runs (org_id, device_id, kind, iface, params, status, progress, started_at, created_by, created_at)
@@ -255,58 +247,6 @@ class Diagnostics:
                 "peak_bps": max((p["bps"] for p in series), default=0), "hosts_seen": len({f["src"] for f in vals}),
                 "connections_seen": len(vals), "top_hosts": hosts, "top_dests": dests, "protocols": protos,
                 "connections": connections, "series": pts}
-
-    # --- Speed Test (fetch) -----------------------------------------------------------------------------------
-    def _run_speed(self, rid, device_id, iface):
-        with self.lock:
-            self.running.add(rid)
-        try:
-            d = self.db.one("SELECT * FROM devices WHERE id=?", (device_id,))
-            if not d or not d["online"]:
-                return self._fail(rid, "The router is offline, so the speed test couldn't run.")
-            cl = self.client_for(d)
-            try:
-                st = cl.status()
-            except RouterError as e:
-                return self._fail(rid, f"Couldn't read {d['name']}: {e}")
-            free = int(st.get("hdd_free") or 0)
-            size = int(max(SPEED_FLOOR, min(SPEED_CEIL, free * 0.4))) if free else 20_000_000
-            url = self.speed_base().format(bytes=size)
-            lat = cl.latency(SPEED_PING, count=10)
-            best, last = None, {}
-            for _ in range(2):
-                if self._cancelled(rid):
-                    return
-                try:
-                    last = cl.speedtest(url, size, timeout=max(60, size // 1_000_000 + 40))
-                except RouterError as e:
-                    return self._fail(rid, f"The download test couldn't run on {d['name']}: {e}")
-                if last.get("ok") and last.get("mbps"):
-                    best = last if (not best or last["mbps"] > best["mbps"]) else best
-            if not best:
-                status = last.get("status") or "no result"
-                if "permission" in status.lower():   # the router user can't run /tool fetch - it needs the 'ftp' policy
-                    return self._fail(rid, f"The download test couldn't run (fetch status: {status}). TikManager's router user needs the "
-                                           "'ftp' policy to download. On the router (as an admin) run: /user group set [find name=tikmanager] "
-                                           "policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp")
-                return self._fail(rid, f"The download test didn't complete (fetch status: {status}). Check the router's internet "
-                                       "access and DNS, that /tool fetch is allowed by its device-mode, and that it has room in flash. "
-                                       "A pure switch with no internet route won't be able to run it.")
-            report = {"kind": "speedtest", "iface": iface or "", "down_mbps": best["mbps"], "bytes": best["bytes"],
-                      "secs": best["secs"], "size_mb": round(size / 1_000_000, 1), "source": url.split("?")[0],
-                      "latency": lat, "note": "A rough internet reachability/latency check - NOT a line-rate speed test. It's a single "
-                      "stream saved to the router's storage, so flash-write speed and single-stream TCP cap the download well below a fast "
-                      "link's real rate (a gigabit link will read far lower). Trust the latency, jitter and loss; use the download only to tell "
-                      "'working' from 'badly degraded'. For true throughput use a browser speed test on a PC behind the router, or a "
-                      "router-to-router bandwidth test."}
-            self.db.run("UPDATE diag_runs SET status='done', progress=1, result=?, finished_at=? WHERE id=? AND status='running'",
-                        (json.dumps(report), time.time(), rid))
-        except Exception as e:  # noqa: BLE001
-            traceback.print_exc()
-            self._fail(rid, f"Error: {e}")
-        finally:
-            with self.lock:
-                self.running.discard(rid)
 
     # --- Link test (router-to-router bandwidth-test) -----------------------------------------------------------
     def _run_link(self, rid, init_id, tgt_id, target_addr, direction):

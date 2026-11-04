@@ -2625,15 +2625,6 @@ class Handler(BaseHTTPRequestHandler):
                                    str(b.get("filter") or "").strip()[:60], s["email"])
             db.audit(s["email"], "diagnostics traffic watch", d["name"], self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True, "id": rid})
-        if path == "/api/diag/speed":   # start a Speed Test run
-            s = self.require(tech=True, write=True)
-            b = self.body()
-            d = self.device_for(s, int(b.get("device_id") or 0))
-            if not d["online"]:
-                raise HttpError(409, f"{d['name']} is offline.")
-            rid = diag.start_speed(d, str(b.get("iface") or "").strip()[:40], s["email"])
-            db.audit(s["email"], "diagnostics speed test", d["name"], self.client_ip(), org_id=d["org_id"])
-            return self.json({"ok": True, "id": rid})
         if path == "/api/diag/link":   # start a Link test (router-to-router bandwidth-test)
             s = self.require(tech=True, write=True)
             b = self.body()

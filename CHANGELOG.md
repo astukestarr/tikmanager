@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.5.0-beta.11 - 2026-11-04
+
+**Diagnostics tidy-up.** Removed the fetch-based **Speed Test** (flash-write and single-stream limits made its number
+unreliable - use the **Link test** for real throughput). **Traffic Watch** and the **Packet Sniffer** lost their
+"Experimental" tag now that they're proven on hardware; Link test keeps it. Old Speed Test reports still open from the
+history.
+
 ## 3.5.0-beta.10 - 2026-11-04
 
 **ConnectWise billing fixes** (verified against the ConnectWise REST spec):
