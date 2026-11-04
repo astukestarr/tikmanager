@@ -136,8 +136,11 @@ set `RELEASE`/`SINCE`/`SLIDES` to it - if `RELEASE` doesn't match the running ve
 for the next fix), tag `vX.Y.Z-beta.N`, changelog heading `## X.Y.Z-beta.N - date`. Only installations on the Beta
 channel (Admin > Settings > Version & updates) see betas, and only the newest beta is ever offered - so a beta that a
 later beta fixes is never installed again. When the maintainer has tested a beta and says to **release it**, release the
-same code as `X.Y.Z` (stable): bump `version.py`, add a `## X.Y.Z` changelog section summing up its betas, tag `vX.Y.Z`.
-Never release a stable version without that go-ahead. To pull a broken version with no fix yet, add it to `withdrawn` in
+same code as `X.Y.Z` (stable): bump `version.py`, add a `## X.Y.Z` changelog section summing up its betas, tag `vX.Y.Z`,
+and **update `README.md`** so its intro and the "Using it" table of contents (and a short section per area) cover anything
+new since the last stable release - new pages, sections and features. (Betas don't touch the README; it's refreshed only
+at a full/stable release, so it always describes what Stable-channel users are actually running.) Never release a stable
+version without that go-ahead. To pull a broken version with no fix yet, add it to `withdrawn` in
 `RELEASES.json` and push (no new version needed - it's read from the default branch); installations skip it and the root
 updater refuses it.
 
