@@ -29,6 +29,10 @@ class Poller:
         self._tls_down, self._tls_said = {}, {}   # device id -> when HTTPS last failed / when that was last recorded
         self._last_prune = 0
 
+    def api_password(self, d):
+        """The router's TikManager API/user password (same one the client authenticates with) - e.g. for a btest login."""
+        return derive(self.key, f"router-api:{d['id']}")
+
     def client(self, d):
         if self.s.dev:
             return SimRouter(d["id"], d["name"])

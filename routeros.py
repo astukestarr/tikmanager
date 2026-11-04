@@ -500,6 +500,38 @@ class RouterOS:
         return {"ok": bool(ok), "bytes": size_bytes if ok else 0, "secs": round(secs, 2),
                 "mbps": round(size_bytes * 8 / secs / 1_000_000, 1) if ok else None, "status": status or "no result"}
 
+    # --- Link test (router-to-router bandwidth-test) ----------------------------------------------------------
+    def btest_server_get(self):
+        """Current /tool/bandwidth-server state, so the Link test can restore it after."""
+        r = self.get("/tool/bandwidth-server")
+        if isinstance(r, list):
+            r = r[0] if r else {}
+        r = r or {}
+        return {"enabled": str(r.get("enabled")).lower() == "true", "authenticate": str(r.get("authenticate")).lower() == "true"}
+
+    def btest_server_set(self, enabled, authenticate=True):
+        """Turn the bandwidth-test server on/off on this (target) router."""
+        self.run_script(f"/tool bandwidth-server set enabled={'yes' if enabled else 'no'} authenticate={'yes' if authenticate else 'no'}")
+
+    def bandwidth_test(self, address, password, direction="receive", duration=10, streams=20, user="tikmanager"):
+        """Run a TCP bandwidth-test from this (initiator) router to `address` (a target router whose btest server is on),
+        RAM-to-RAM with `streams` parallel connections. Returns {ok, status, tx_bps, rx_bps} (average throughput)."""
+        pw = str(password).replace("\\", "\\\\").replace('"', '\\"')
+        script = "\n".join([
+            ':local st "error"; :local tx 0; :local rx 0;',
+            ':onerror e in={',
+            f'  :local r [/tool bandwidth-test address={address} user={user} password="{pw}" direction={direction} '
+            f'protocol=tcp tcp-connection-count={int(streams)} duration={int(duration)}s as-value];',
+            '  :set st ($r->"status"); :set tx ($r->"tx-total-average"); :set rx ($r->"rx-total-average");',
+            '} do={ :set st ("error: " . $e); }',
+            ':put ($st . "|" . $tx . "|" . $rx);'])
+        out = (self.run_script(script, timeout=int(duration) + 40) or "").strip()
+        parts = (out.splitlines()[-1] if out else "").split("|")
+        status = parts[0].strip() if parts else ""
+        tx = _num(parts[1]) if len(parts) > 1 else 0
+        rx = _num(parts[2]) if len(parts) > 2 else 0
+        return {"ok": status == "done", "status": status or "no result", "tx_bps": tx or 0, "rx_bps": rx or 0}
+
     def dhcp_leases(self):
         """DHCP leases with the server (and its interface) each came from. Read live when someone opens the router page."""
         servers = {s.get("name"): s.get("interface", "") for s in self.optional(lambda: self.get("/ip/dhcp-server"), []) or []}
@@ -2234,6 +2266,20 @@ class SimRouter:
             out.append({"src": f"{lan3}.{10 + i * 7}", "dst": d, "proto": proto, "port": port,
                         "orig_bytes": int(secs * rate * 0.12), "repl_bytes": int(secs * rate)})
         return out
+
+    def btest_server_get(self):
+        return dict(self._sim().get("btest_srv") or {"enabled": False, "authenticate": True})
+
+    def btest_server_set(self, enabled, authenticate=True):
+        self._sim()["btest_srv"] = {"enabled": bool(enabled), "authenticate": bool(authenticate)}
+
+    def bandwidth_test(self, address, password, direction="receive", duration=10, streams=20, user="tikmanager"):
+        time.sleep(min(3, duration * 0.3))
+        rr = random.Random(self.id * 23 + int(time.time() // 60))
+        line = round((850 + rr.random() * 120) * 1_000_000)   # ~0.85-0.97 Gbps, RAM-to-RAM
+        return {"ok": True, "status": "done",
+                "tx_bps": line if direction in ("send", "both") else 0,
+                "rx_bps": line if direction in ("receive", "both") else 0}
 
     def topology(self):
         """Simulated network: a switch and an access point behind the router, phones, printers, PCs, a VM host."""

@@ -127,7 +127,7 @@ integ =Integrations(db, backups.vault, settings)
 vpns = Vpns(db, poller.client, backups)
 wgbuilds = WgBuilds(db, poller.client, backups)   # Router Wizard > WireGuard Builder: point-to-point tunnel between two routers
 ipsecbuilds = IpsecBuilds(db, poller.client, backups, backups.vault)   # Router Wizard > IPsec Tunnel: MikroTik to any-brand far end
-diag = Diagnostics(db, poller.client, settings)   # Diagnostics: on-demand Traffic Watch (torch) and Speed Test (fetch) runs
+diag = Diagnostics(db, poller.client, settings, poller.api_password)   # Diagnostics: Traffic Watch, Speed Test, Link test
 remote = RemoteAccess(db, poller.client, backups)   # Router page > Remote access (WireGuard for Windows into a router)
 remote.start()   # automatic revoke at each person's expiry date
 vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
@@ -447,6 +447,13 @@ class Handler(BaseHTTPRequestHandler):
             for c in res.get("connections", []):
                 w.writerow([c["src"], c["dst"], c["service"], c["proto"], c["port"], c["rx"], c["tx"], c["bytes"]])
             fname = f"traffic-watch-{run['id']}.csv"
+        elif run["kind"] == "link":
+            w.writerow(["metric", "value"])
+            for k, v in (("initiator", res.get("initiator")), ("target", res.get("target")), ("target_addr", res.get("target_addr")),
+                         ("direction", res.get("direction")), ("download_mbps", res.get("down_mbps")), ("upload_mbps", res.get("up_mbps")),
+                         ("streams", res.get("streams")), ("seconds", res.get("secs"))):
+                w.writerow([k, v])
+            fname = f"link-test-{run['id']}.csv"
         else:
             lat = res.get("latency") or {}
             w.writerow(["metric", "value"])
@@ -473,6 +480,12 @@ class Handler(BaseHTTPRequestHandler):
                      f"Peak: {mbps(res.get('peak_bps'))}    Hosts: {res.get('hosts_seen')}    Connections: {res.get('connections_seen')}",
                      "", "Top talkers:"]
             lines += [f"  {h['key']:<18} {mb(h['bytes'])}  (down {mb(h['rx'])}, up {mb(h['tx'])})" for h in res.get("top_hosts", [])]
+        elif run["kind"] == "link":
+            subject = f"Link test report - {res.get('initiator')} -> {res.get('target')}"
+            lines = [f"Link test: {res.get('initiator')} -> {res.get('target')} ({res.get('target_addr')})",
+                     f"Direction: {res.get('direction')}    Streams: {res.get('streams')}    Duration: {res.get('secs')}s",
+                     f"Download: {res.get('down_mbps')} Mbps    Upload: {res.get('up_mbps')} Mbps",
+                     "", "Router-to-router throughput over the path between these two routers (not the public internet)."]
         else:
             lat = res.get("latency") or {}
             subject = f"Speed Test report - {dev}"
@@ -961,7 +974,7 @@ class Handler(BaseHTTPRequestHandler):
         # --- Diagnostics (technicians) ---
         if path == "/api/diag/candidates":   # routers to run a test against
             self.require(tech=True)
-            return self.json({"routers": db.q("""SELECT d.id, d.name, o.name AS org, d.online, d.model FROM devices d
+            return self.json({"routers": db.q("""SELECT d.id, d.name, o.name AS org, d.online, d.model, d.wan_ip FROM devices d
                                                  LEFT JOIN orgs o ON o.id=d.org_id WHERE d.state='adopted' ORDER BY o.name, d.name""")})
         if path == "/api/diag/interfaces":   # live interfaces for the Traffic Watch picker (the WAN is flagged)
             s = self.require(tech=True)
@@ -2447,6 +2460,21 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(409, f"{d['name']} is offline.")
             rid = diag.start_speed(d, str(b.get("iface") or "").strip()[:40], s["email"])
             db.audit(s["email"], "diagnostics speed test", d["name"], self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True, "id": rid})
+        if path == "/api/diag/link":   # start a Link test (router-to-router bandwidth-test)
+            s = self.require(tech=True, write=True)
+            b = self.body()
+            init = self.device_for(s, int(b.get("initiator_id") or 0))
+            tgt = self.device_for(s, int(b.get("target_id") or 0))
+            if init["id"] == tgt["id"]:
+                raise HttpError(400, "Pick two different routers.")
+            if not init["online"] or not tgt["online"]:
+                raise HttpError(409, "Both routers must be online.")
+            addr = str(b.get("target_addr") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9.:_-]{1,100}", addr):   # IP or host name the initiator can reach; no spaces/quotes (script-safe)
+                raise HttpError(400, "Enter the target router's address (an IP or host name the initiating router can reach).")
+            rid = diag.start_link(init, tgt, addr, str(b.get("direction") or "receive"), s["email"])
+            db.audit(s["email"], "diagnostics link test", f"{init['name']} -> {tgt['name']}", self.client_ip(), org_id=init["org_id"])
             return self.json({"ok": True, "id": rid})
         if m := re.fullmatch(r"/api/diag/runs/(\d+)/cancel", path):
             s = self.require(tech=True, write=True)

@@ -156,8 +156,13 @@ SLIDES_3_3 = [
              "of who's using the connection: top talkers, destinations, services and connections, plus throughput over time. Filter to "
              "one address to zero in. It reads the router's connection tracking, so no extra router permissions are needed."},
     {"id": "speed-test", "title": "Speed Test", "img": None, "view": "diag", "who": "tech",
-     "text": "Measure a site's internet download speed, latency and jitter from the router itself - it fetches a sample sized to the "
-             "router's free storage from Cloudflare and pings for latency. Works on every router, no app or container needed."},
+     "text": "Check a site's internet reachability, latency and jitter from the router itself (with a rough download figure). A quick "
+             "'is the internet up and healthy' test - not a line-rate speed test (a single fetch to the router's storage can't measure a "
+             "fast link). Needs the router user's 'ftp' policy (new routers get it; existing ones need it granted once)."},
+    {"id": "link-test", "title": "Link test", "img": None, "view": "diag", "who": "tech",
+     "text": "Measure real throughput between two of your routers - RAM-to-RAM with 20 TCP streams, so it can show gigabit over a LAN, "
+             "WAN or site-to-site link. Pick the two routers, the address and the direction; TikManager briefly turns on the target's "
+             "bandwidth-test server and restores it after. This measures the path between the routers, not the public internet."},
 ]
 SLIDES = SLIDES_3_3
 IDS = {s["id"] for s in SLIDES}

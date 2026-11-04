@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.3.0-beta.7 - 2026-11-04
+
+**New Diagnostics test: Link test** - measure real throughput **between two of your routers**, which (unlike the internet
+Speed Test) *can* show gigabit. It runs a RouterOS `bandwidth-test` over the path between them: **RAM-to-RAM (no disk
+bottleneck), TCP, 20 parallel streams**. Pick the initiating router, the target router, the address the initiator reaches
+it at (prefilled with the target's WAN IP), and the direction (download / upload / both). TikManager briefly turns on the
+target's bandwidth-test server for the test and restores it afterward, authenticating as its own router user. It measures
+the LAN / WAN / site-to-site path between the two routers - **not** the public internet (nothing router-side can measure
+that honestly; use a browser speed test on a PC behind the router for internet line rate).
+
 ## 3.3.0-beta.6 - 2026-11-04
 
 - **Speed Test is labelled honestly.** Its download is a single stream saved to the router's storage, so flash-write

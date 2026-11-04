@@ -52,8 +52,8 @@ def _service(proto, port):
 
 
 class Diagnostics:
-    def __init__(self, db, client_for, settings=None):
-        self.db, self.client_for, self.settings = db, client_for, settings
+    def __init__(self, db, client_for, settings=None, pw_for=None):
+        self.db, self.client_for, self.settings, self.pw_for = db, client_for, settings, pw_for
         self.running = set()
         self.lock = threading.Lock()
 
@@ -77,6 +77,17 @@ class Diagnostics:
                           (device["org_id"], device["id"], iface or "", time.time(), user, time.time()))
         self.db.event(device["id"], device["org_id"], "diagnostics", f"Speed Test started by {user}")
         threading.Thread(target=self._run_speed, args=(rid, device["id"], iface), daemon=True, name=f"diag-speed-{rid}").start()
+        return rid
+
+    def start_link(self, initiator, target, target_addr, direction, user):
+        direction = direction if direction in ("receive", "send", "both") else "receive"
+        rid = self.db.run("""INSERT INTO diag_runs (org_id, device_id, kind, iface, params, status, progress, started_at, created_by, created_at)
+                             VALUES (?,?,'link',?,?,'running',0,?,?,?)""",
+                          (initiator["org_id"], initiator["id"], "",
+                           json.dumps({"target_id": target["id"], "target": target["name"], "target_addr": target_addr, "direction": direction}),
+                           time.time(), user, time.time()))
+        self.db.event(initiator["id"], initiator["org_id"], "diagnostics", f"Link test to {target['name']} started by {user}")
+        threading.Thread(target=self._run_link, args=(rid, initiator["id"], target["id"], target_addr, direction), daemon=True, name=f"diag-link-{rid}").start()
         return rid
 
     def cancel(self, rid, user):
@@ -257,6 +268,63 @@ class Diagnostics:
             traceback.print_exc()
             self._fail(rid, f"Error: {e}")
         finally:
+            with self.lock:
+                self.running.discard(rid)
+
+    # --- Link test (router-to-router bandwidth-test) -----------------------------------------------------------
+    def _run_link(self, rid, init_id, tgt_id, target_addr, direction):
+        with self.lock:
+            self.running.add(rid)
+        restore = None
+        tgt_cl = None
+        try:
+            init = self.db.one("SELECT * FROM devices WHERE id=?", (init_id,))
+            tgt = self.db.one("SELECT * FROM devices WHERE id=?", (tgt_id,))
+            if not init or not init["online"]:
+                return self._fail(rid, "The initiating router is offline.")
+            if not tgt or not tgt["online"]:
+                return self._fail(rid, "The target router is offline.")
+            if not self.pw_for:
+                return self._fail(rid, "The link test isn't available (no credential source configured).")
+            init_cl, tgt_cl = self.client_for(init), self.client_for(tgt)
+            # turn the target's bandwidth-test server on for the test, remembering its prior state to restore
+            try:
+                prev = tgt_cl.btest_server_get()
+            except RouterError as e:
+                return self._fail(rid, f"Couldn't read the bandwidth-test server on {tgt['name']}: {e}")
+            if not prev.get("enabled"):
+                try:
+                    tgt_cl.btest_server_set(True, authenticate=True)
+                    restore = prev
+                    self.db.event(tgt["id"], tgt["org_id"], "diagnostics", "Bandwidth-test server enabled for a link test")
+                except RouterError as e:
+                    return self._fail(rid, f"Couldn't enable the bandwidth-test server on {tgt['name']}: {e}")
+            if self._cancelled(rid):
+                return
+            try:
+                r = init_cl.bandwidth_test(target_addr, self.pw_for(tgt), direction=direction, duration=10, streams=20)
+            except RouterError as e:
+                return self._fail(rid, f"The bandwidth test couldn't run on {init['name']}: {e}")
+            if not r.get("ok"):
+                st = r.get("status") or "no result"
+                hint = " Check that the target address is reachable from the initiator and that nothing blocks TCP 2000 between them." if "error" in st else ""
+                return self._fail(rid, f"The link test didn't complete (bandwidth-test status: {st}).{hint}")
+            report = {"kind": "link", "initiator": init["name"], "target": tgt["name"], "target_addr": target_addr,
+                      "direction": direction, "down_mbps": round((r.get("rx_bps") or 0) / 1_000_000, 1),
+                      "up_mbps": round((r.get("tx_bps") or 0) / 1_000_000, 1), "streams": 20, "secs": 10,
+                      "note": "Router-to-router throughput over the path between these two routers (RAM-to-RAM, 20 TCP streams) - "
+                              "not the public internet. The target's bandwidth-test server was turned on for the test and restored after."}
+            self.db.run("UPDATE diag_runs SET status='done', progress=1, result=?, finished_at=? WHERE id=? AND status='running'",
+                        (json.dumps(report), time.time(), rid))
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            self._fail(rid, f"Error: {e}")
+        finally:
+            if restore is not None and tgt_cl is not None:   # put the target's btest server back how it was (it was off)
+                try:
+                    tgt_cl.btest_server_set(False, authenticate=restore.get("authenticate", True))
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
             with self.lock:
                 self.running.discard(rid)
 

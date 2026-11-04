@@ -6547,24 +6547,65 @@ const DIAG_TESTS = [
   { kind: "traffic", title: "Traffic Watch", icon: "monitor",
     desc: "Watch live traffic on a router for a set time, then see who's using the connection - top talkers, connections and protocols." },
   { kind: "speed", title: "Speed Test", icon: "network",
-    desc: "Measure a router's internet download speed, latency and jitter - run from the site itself, through the router." },
+    desc: "Check a router's internet reachability, latency and jitter (rough download) - run from the site itself." },
+  { kind: "link", title: "Link test", icon: "vpns",
+    desc: "Measure real throughput between two of your routers (RAM-to-RAM, 20 TCP streams) over the LAN, WAN or a tunnel - can show gigabit." },
 ];
 const fmtBytes = (b) => { b = Math.max(0, b || 0); const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
 const fmtBps = (b) => { b = Math.max(0, b || 0); const u = ["bps", "Kbps", "Mbps", "Gbps"]; let i = 0; while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; } return `${b.toFixed(i === 0 || b >= 100 ? 0 : 1)} ${u[i]}`; };
-const diagKind = (r) => r.kind === "torch" ? "Traffic Watch" : "Speed Test";
+const diagKind = (r) => r.kind === "torch" ? "Traffic Watch" : r.kind === "link" ? "Link test" : "Speed Test";
 const diagStatus = (r) => r.status === "running" ? `<span class="pill up-run">running${r.progress ? ` ${Math.round(r.progress * 100)}%` : ""}</span>`
   : r.status === "done" ? `<span class="pill up-done">done</span>` : r.status === "cancelled" ? `<span class="pill">stopped</span>` : `<span class="status err">failed</span>`;
 function diagSummary(r) {
   const x = r.result;
   if (!x) return r.status === "failed" ? `<span class="status err">${esc(r.error || "failed")}</span>` : "—";
   if (r.kind === "torch") return `${fmtBytes(x.total)} · peak ${fmtBps(x.peak_bps)} · ${x.hosts_seen} hosts`;
+  if (r.kind === "link") return `${x.down_mbps ?? "—"}↓ / ${x.up_mbps ?? "—"}↑ Mbps → ${esc(x.target || "")}`;
   return `${x.down_mbps} Mbps down${x.latency && x.latency.avg != null ? ` · ${x.latency.avg} ms` : ""}`;
 }
 
 async function diagView(arg) {
   if (arg === "traffic" || arg === "speed") return diagForm(arg);
+  if (arg === "link") return diagLinkForm();
   if (/^\d+$/.test(arg || "")) return diagReport(arg);
   return diagLanding();
+}
+
+async function diagLinkForm() {
+  const { routers } = await api("/api/diag/candidates");
+  const online = routers.filter((r) => r.online);
+  const opts = online.map((r) => `<option value="${r.id}" data-wan="${esc(r.wan_ip || "")}">${esc(r.name)}${r.org ? ` — ${esc(r.org)}` : ""}</option>`).join("");
+  $("main").innerHTML = `<p><a href="#diag">← Diagnostics</a></p><div class="row"><h1>Link test</h1></div>
+    <p class="muted">Measure real throughput between two of your routers (RAM-to-RAM, 20 TCP streams) over the LAN, WAN or a tunnel - this can show gigabit.
+      It briefly turns on the target's bandwidth-test server and restores it after, and measures the path between the two routers, not the public internet.</p>
+    <div class="card">
+      <label class="field">From (initiator) <select id="dInit">${opts}</select></label>
+      <label class="field">To (target) <select id="dTgt">${opts}</select></label>
+      <label class="field">Target address <input id="dAddr" placeholder="IP the initiator can reach the target at" spellcheck="false"></label>
+      <p class="small muted">The address the initiating router reaches the target at (its LAN, WAN or tunnel IP, depending on the path). Prefilled with the target's WAN IP as a guess - change it if that's not the reachable one.</p>
+      <label class="field">Direction <select id="dDir"><option value="receive" selected>Download (initiator ← target)</option><option value="send">Upload (initiator → target)</option><option value="both">Both</option></select></label>
+      ${online.length >= 2 ? "" : `<p class="small status err">Need at least two online routers.</p>`}
+      <div class="actions"><button class="btn primary" type="button" id="dStart" ${online.length >= 2 ? "" : "disabled"}>Start test</button></div>
+      <p class="small status" id="dMsg"></p>
+    </div>`;
+  const tgt = $("dTgt");
+  if (tgt && tgt.options.length > 1) tgt.selectedIndex = 1;
+  const fillAddr = () => { const o = $("dTgt").selectedOptions[0]; $("dAddr").value = (o && o.dataset.wan) || ""; };
+  fillAddr();
+  $("dTgt").addEventListener("change", fillAddr);
+  $("dStart")?.addEventListener("click", async () => {
+    $("dStart").disabled = true; $("dMsg").textContent = "Starting…"; $("dMsg").className = "small status";
+    try {
+      const r = await post("/api/diag/link", { initiator_id: +$("dInit").value, target_id: +$("dTgt").value, target_addr: $("dAddr").value.trim(), direction: $("dDir").value });
+      go("diag", r.id);
+    } catch (e) { $("dMsg").textContent = e.message; $("dMsg").className = "small status err"; $("dStart").disabled = false; }
+  });
+}
+function diagLinkReport(x) {
+  return `<div class="tiles">${diagKpi(`${x.down_mbps ?? "—"}<span class="small"> Mbps</span>`, "Download")}${diagKpi(`${x.up_mbps ?? "—"}<span class="small"> Mbps</span>`, "Upload")}
+      ${diagKpi(x.streams ?? "—", "Streams")}${diagKpi((x.secs ?? "—") + "s", "Duration")}</div>
+    <div class="card"><p class="small">${esc(x.initiator || "")} → ${esc(x.target || "")} <span class="mono">${esc(x.target_addr || "")}</span> · direction: ${esc(x.direction || "")}</p>
+      <p class="small muted">${esc(x.note || "")}</p></div>`;
 }
 
 async function diagLanding() {
@@ -6660,7 +6701,7 @@ async function diagReport(id) {
   let body;
   if (r.status === "failed") body = `<div class="card"><p class="status err">${esc(r.error || "The test failed.")}</p></div>`;
   else if (!x) body = `<div class="card"><p class="muted">Running… the report will fill in as data comes in.${r.progress ? ` (${Math.round(r.progress * 100)}%)` : ""}</p></div>`;
-  else body = r.kind === "torch" ? diagTorchReport(x, running, r.progress) : diagSpeedReport(x);
+  else body = r.kind === "torch" ? diagTorchReport(x, running, r.progress) : r.kind === "link" ? diagLinkReport(x) : diagSpeedReport(x);
   const cancel = running ? `<div class="actions"><button class="btn" type="button" id="dCancel">Stop test</button></div>` : "";
   const share = r.status === "done" ? `<div class="actions"><a class="btn" href="/api/diag/runs/${r.id}/csv">Download CSV</a>
       <button class="btn" type="button" id="dEmail">Email report</button></div>
