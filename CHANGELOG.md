@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.4.0-beta.5 - 2026-11-04
+
+- **Client Microsoft sign-in is now a choice of mode** (Admin > Settings), not just on/off:
+  - **Guests in our tenant** - you B2B-invite the client user into your own Azure AD; they sign in **through your tenant**,
+    so your **Conditional Access and access reviews govern them**. A single-tenant app is fine.
+  - **Their own Microsoft** - they sign in from their own tenant (needs the app registration set to multi-tenant).
+  Either way you still invite the user in TikManager first (Users tab > Microsoft sign-in), matched by email and locked to
+  its domain. Off by default; staff sign-in unchanged.
+
 ## 3.4.0-beta.4 - 2026-11-04
 
 - **Client users can sign in with Microsoft (optional, off by default).** Turn on "Let client users sign in with Microsoft"

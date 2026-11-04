@@ -2340,11 +2340,14 @@ async function adminSystem() {
       <div class="grid2">${f("cfTenant", "Directory (tenant) ID", s.entra_tenant_id, { ph: "00000000-0000-0000-0000-000000000000" })}
         ${f("cfClient", "Application (client) ID", s.entra_client_id, { ph: "00000000-0000-0000-0000-000000000000" })}
         <label class="field">Client secret <input id="cfSecret" type="password" autocomplete="new-password" placeholder="${s.entra_client_secret_set ? "saved - leave blank to keep" : ""}"></label></div>
-      <label class="chk"><input type="checkbox" id="cfMulti" ${s.entra_multitenant ? "checked" : ""}> Let client (customer) users sign in with Microsoft</label>
-      <p class="small muted">Off by default - only your own staff use Microsoft; clients use a password + authenticator. To turn on, first set the
-        app registration to <b>multi-tenant</b> ("Accounts in any organizational directory") in Entra. Then invite client users with the
-        "Microsoft sign-in" option on the Users tab - each is matched to their email and locked to its domain, whether they're a guest in your
-        tenant or sign in from their own Microsoft. Your staff sign-in is unchanged either way.</p>
+      <label class="field">Client (customer) Microsoft sign-in <select id="cfMsMode">
+        <option value="off" ${!s.client_ms_mode || s.client_ms_mode === "off" ? "selected" : ""}>Off - clients use a password + authenticator</option>
+        <option value="guest" ${s.client_ms_mode === "guest" ? "selected" : ""}>Guests in our tenant - they sign in through your tenant</option>
+        <option value="multi" ${s.client_ms_mode === "multi" ? "selected" : ""}>Their own Microsoft - needs a multi-tenant app</option></select></label>
+      <p class="small muted">Off by default (only your staff use Microsoft). Either way you first invite the client user on the Users tab with the
+        "Microsoft sign-in" option (matched to their email, locked to its domain). <b>Guests in our tenant:</b> B2B-invite them into your Azure AD;
+        they sign in through your tenant, so your Conditional Access and access reviews apply (single-tenant app is fine). <b>Their own Microsoft:</b>
+        set the app registration to multi-tenant; they sign in from their own tenant. Your staff sign-in is unchanged.</p>
       <h3>Routers</h3>
       <div class="grid2">${f("cfEndpoint", "WireGuard address routers connect to", s.wg_endpoint, { ph: "tikmanager.example.com:51820" })}
         ${f("cfPing", "Latency test target", s.ping_target, { ph: "1.1.1.1" })}</div>
@@ -2375,7 +2378,7 @@ async function adminSystem() {
   $("cfSave").addEventListener("click", async () => {
     try {
       await post("/api/admin/settings", { tech_domains: $("cfDomains").value, tech_admins: $("cfAdmins").value, entra_tenant_id: $("cfTenant").value,
-        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, entra_multitenant: $("cfMulti").checked, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value });
+        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, client_ms_mode: $("cfMsMode").value, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value });
       await adminSystem(); say("cfStatus", "Saved.", true);
     } catch (e) { say("cfStatus", e.message); }
   });

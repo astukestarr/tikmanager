@@ -3273,7 +3273,7 @@ class Handler(BaseHTTPRequestHandler):
         user = db.one("SELECT * FROM users WHERE entra_oid=?", (who["oid"],)) or db.one("SELECT * FROM users WHERE email=?", (email,))
         # Client (customer) users may sign in with Microsoft only when it's turned on and the account is set up for it.
         if user and user["kind"] == "client":
-            if not (settings.entra_multitenant and user["ms_login"]):
+            if not (settings.client_ms_mode in ("guest", "multi") and user["ms_login"]):
                 raise HttpError(403, "That address belongs to a client account - sign in with your password instead.")
             dom = (user["ms_domain"] or "").strip().lower()
             if dom and not (email.endswith("@" + dom) or (who.get("tid") or "").lower() == dom):
@@ -3450,7 +3450,7 @@ class Handler(BaseHTTPRequestHandler):
             db.run("INSERT INTO users (email, name, kind, role, org_id, created_at, ms_login, ms_domain) VALUES (?,?,?,?,?,?,1,?)",
                    (email, str(b.get("name") or "")[:120], "client", role, org_id, now(), dom))
             db.audit(s["email"], "user invited (Microsoft sign-in)", email, self.client_ip(), org_id=org_id, detail=role)
-            return self.json({"ok": True, "ms": True, "email": email, "domain": dom, "enabled": bool(settings.entra_multitenant)})
+            return self.json({"ok": True, "ms": True, "email": email, "domain": dom, "enabled": settings.client_ms_mode in ("guest", "multi")})
         t = token()
         db.run("INSERT INTO users (email, name, kind, role, org_id, invite_hash, invite_expires, created_at) VALUES (?,?,?,?,?,?,?,?)",
                (email, str(b.get("name") or "")[:120], "client", role, org_id, token_hash(t), now() + INVITE_TTL, now()))

@@ -12,7 +12,7 @@ import re
 
 FIELDS = {   # name -> secret?
     "tech_domains": False, "tech_admins": False,
-    "entra_tenant_id": False, "entra_client_id": False, "entra_client_secret": True, "entra_multitenant": False,
+    "entra_tenant_id": False, "entra_client_id": False, "entra_client_secret": True, "client_ms_mode": False,
     "wg_endpoint": False, "ping_target": False,
 }
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -78,7 +78,8 @@ class AppSettings:
             if v and not GUID.match(v):
                 raise ValueError("Microsoft tenant and client IDs look like 00000000-0000-0000-0000-000000000000.")
             clean[k] = v
-        clean["entra_multitenant"] = bool(data.get("entra_multitenant", cur.get("entra_multitenant", False)))
+        mode = str(data.get("client_ms_mode", cur.get("client_ms_mode", "off")) or "off")
+        clean["client_ms_mode"] = mode if mode in ("off", "guest", "multi") else "off"
         ep = str(data.get("wg_endpoint", cur.get("wg_endpoint", "")) or "").strip()
         if ep:
             host, _, port = ep.rpartition(":")

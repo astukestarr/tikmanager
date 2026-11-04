@@ -43,7 +43,7 @@ class Entra:
     @property
     def authority(self):
         # multi-tenant (client users can use their own Microsoft): /organizations accepts any work/school tenant
-        tenant = "organizations" if getattr(self.s, "entra_multitenant", False) else self.s.entra_tenant_id
+        tenant = "organizations" if getattr(self.s, "client_ms_mode", "off") == "multi" else self.s.entra_tenant_id
         return f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0"
 
     def begin(self, return_to="/"):
@@ -105,7 +105,8 @@ class Entra:
         except urllib.error.URLError as e:
             raise AuthError(f"Couldn't reach Microsoft: {e.reason}") from None
         c = _claims(tokens.get("id_token", ""))
-        multi = bool(getattr(self.s, "entra_multitenant", False))
+        mode = getattr(self.s, "client_ms_mode", "off")
+        multi = mode == "multi"
         tid = self.s.entra_tenant_id
         token_tid = str(c.get("tid") or "")
         if c.get("aud") != self.s.entra_client_id:
@@ -125,7 +126,7 @@ class Entra:
         idp = str(c.get("idp") or "")
         is_guest = token_tid == tid and bool(idp) and tid.lower() not in idp.lower()
         member = token_tid == tid and not is_guest   # a member of YOUR tenant - the only kind allowed to be a technician
-        if not multi and is_guest:
+        if mode == "off" and is_guest:   # guests are allowed only when client Microsoft sign-in is turned on
             raise AuthError("Guest accounts can't sign in to TikManager - use an account from your own organization.")
         email = (c.get("preferred_username") or c.get("email") or "").lower()
         return {"email": email, "name": c.get("name") or email, "oid": c["oid"], "tid": token_tid,
