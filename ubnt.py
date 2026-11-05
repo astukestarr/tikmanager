@@ -621,6 +621,47 @@ class Ubnt:
                                                "name": c.get("name") or c.get("hostname") or ""})
         return out
 
+    def integration_probe(self, org_id):
+        """Diagnostic (tech-only, read-only): for a client's first few UniFi consoles, try the Network integration API via
+        the connector and report the raw results/errors, the host record, and a raw network object - so we can see WHY
+        integration_data gets a 403 'host not found' and what the subnet field is actually called."""
+        out = {"org_id": org_id, "consoles": []}
+        rows = self.db.q("SELECT s.id, s.name, s.internal, s.console, s.account_id FROM net_sites s "
+                         "JOIN net_accounts a ON a.id=s.account_id WHERE s.org_id=? AND a.kind='unifi' ORDER BY s.id", (org_id,))
+        by = {}
+        for r in rows:
+            by.setdefault((r["account_id"], (r["id"] or "").split(":")[0]), []).append(r)
+        for (account_id, host), sites in list(by.items())[:3]:
+            a = self.db.one("SELECT * FROM net_accounts WHERE id=?", (account_id,))
+            if not a:
+                continue
+            cl = self.client(a)
+            entry = {"host_id": host, "console": sites[0]["console"], "sites_in_db": len(sites)}
+            try:
+                hosts = cl._all("/v1/hosts")
+                h = next((x for x in hosts if x.get("id") == host), None)
+                entry["host_record"] = {k: (h or {}).get(k) for k in ("id", "type", "ipAddress", "isBlocked")} if h else f"NOT in /v1/hosts ({len(hosts)} hosts visible)"
+            except NetError as e:
+                entry["hosts_error"] = str(e)
+            base = f"/v1/connector/consoles/{urllib.parse.quote(host)}/proxy/network/integration/v1/sites"
+            try:
+                r = cl._call(base, {"limit": "50"}, timeout=25)
+                isites = (r or {}).get("data") or []
+                entry["integration_sites"] = [{"id": s.get("id"), "name": s.get("name"), "internalReference": s.get("internalReference")} for s in isites[:5]]
+                if isites:
+                    sid = urllib.parse.quote(str(isites[0].get("id")))
+                    try:
+                        nr = cl._call(f"{base}/{sid}/networks", {"limit": "50"}, timeout=25)
+                        nets = (nr or {}).get("data") or []
+                        entry["networks_count"] = len(nets)
+                        entry["networks_sample"] = nets[:2]
+                    except NetError as e:
+                        entry["networks_error"] = str(e)
+            except NetError as e:
+                entry["integration_sites_error"] = str(e)
+            out["consoles"].append(entry)
+        return out
+
     def unplaced(self):
         return self.db.q("""SELECT d.id, d.name, d.model, d.mac, d.ip, d.status, d.version, d.update_available, d.host AS console, a.name AS account
                             FROM net_devices d JOIN net_accounts a ON a.id = d.account_id WHERE d.site_key IS NULL ORDER BY a.name, d.host, d.name""")

@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.7 - 2026-11-04
+
+- **IPAM: a UniFi integration-API probe** (`GET /api/ipam/unifi-probe?org=<id>`, technician-only, read-only). For a
+  client's first few UniFi consoles it reports the host record, the raw result/error of the Network integration API
+  calls, and a sample network object - a diagnostic for why a client's real networks don't come in (e.g. the 403
+  "host not found" seen on some consoles).
+
 ## 3.7.0-beta.6 - 2026-11-04
 
 - **IPAM: pull the real networks (and clients) from UniFi - every site, not just ones with a gateway.** The UniFi sync

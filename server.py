@@ -852,6 +852,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(ipam.tree())
             if path == "/api/ipam/orgs":
                 return self.json({"orgs": ipam.syncable_orgs()})
+            if path == "/api/ipam/unifi-probe":   # diagnostic: raw UniFi integration API response for a client
+                if not getattr(ipam, "unifi", None):
+                    raise HttpError(400, "No UniFi connection configured.")
+                return self.json(ipam.unifi.integration_probe(int(q.get("org") or 0)))
             if path == "/api/ipam/subnets":
                 return self.json({"subnets": ipam.subnets(q.get("org_id"), q.get("section_id"), q.get("q"))})
             if m := re.fullmatch(r"/api/ipam/subnets/(\d+)", path):
