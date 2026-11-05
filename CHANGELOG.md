@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.21 - 2026-11-05
+
+The merged Network-menu entry that opens the IPAM workspace is now labeled **Subnets (IPAM)** - keeping the familiar
+word while naming the workspace - instead of just "IPAM".
+
 ## 3.7.0-beta.20 - 2026-11-05
 
 The old read-only **Subnets** page is folded into the **IPAM** workspace, removing the confusing duplicate in the
