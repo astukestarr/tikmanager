@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.2 - 2026-11-04
+
+- **IPAM: "Sync from routers" now reads routers in parallel.** On a client with many routers (e.g. 30+), the sync read
+  each router's live tables one after another, which could run past the reverse-proxy timeout and never finish. It now
+  reads up to 8 routers at once (subnet discovery from cached data stays instant; only the live reads are parallelised),
+  so a large client syncs in a fraction of the time. Database writes are still serialised, and the reconciliation is
+  unchanged. (Same fix the ConnectWise billing "All clients" view got in 3.5.1.)
+
 ## 3.7.0-beta.1 - 2026-11-04
 
 **IPAM: a new IP Address Management workspace (Network > IPAM).** A separated workspace at `/ipam` in the spirit of

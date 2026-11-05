@@ -14,6 +14,7 @@ import ipaddress
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 
 class IpamError(ValueError):
@@ -277,17 +278,32 @@ class Ipam:
             summary = {"routers": 0, "offline": 0, "subnets_added": 0, "subnets_seen": 0,
                        "addresses_added": 0, "addresses_updated": 0}
             now = self._now()
-            for d in self.db.q("SELECT * FROM devices WHERE org_id=? AND state='adopted'", (org_id,)):
+            devices = self.db.q("SELECT * FROM devices WHERE org_id=? AND state='adopted'", (org_id,))
+            # 1) subnets from each router's cached networks (fast, DB-only) -> per-device {cidr: (id, netobj)}
+            per_device = {}
+            for d in devices:
                 summary["routers"] += 1
-                sub_by_net = self._sync_subnets(org_id, d, now, summary)
-                if not d.get("online"):
-                    summary["offline"] += 1
-                    continue
+                per_device[d["id"]] = (d, self._sync_subnets(org_id, d, now, summary))
+            # 2) read each ONLINE router's live tables IN PARALLEL - the slow part (many RouterOS calls over the tunnel);
+            #    done sequentially this timed out on big clients (30+ routers) past the reverse proxy's limit.
+            online = [d for d in devices if d.get("online")]
+            summary["offline"] = len(devices) - len(online)
+
+            def read(d):
                 try:
-                    topo = self.client_for(d).topology()
+                    return d["id"], self.client_for(d).topology()
                 except Exception:
+                    return d["id"], None
+            results = []
+            if online:
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    results = list(pool.map(read, online))
+            # 3) overlay live usage (DB writes are serialized by the shared connection lock)
+            for did, topo in results:
+                if topo is None:
                     summary["offline"] += 1
                     continue
+                d, sub_by_net = per_device[did]
                 self._sync_addresses(d, topo, sub_by_net, now, summary)
             return summary
         finally:
