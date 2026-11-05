@@ -7186,7 +7186,8 @@ async function unifiPage() {
     <div class="card"><div class="row">
       ${tech ? `<select id="uOrg" aria-label="Client"><option value="">All clients</option><option value="none">Not assigned</option>${(x.orgs || []).map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>` : ""}
       ${tech ? `<select id="uMatch" aria-label="Match"><option value="">All sites</option><option value="matched">Matched to a client</option>
-        <option value="auto">Matched automatically</option><option value="manual">Chosen by hand</option><option value="none">Not matched</option></select>` : ""}
+        <option value="auto">Matched automatically</option><option value="manual">Chosen by hand</option><option value="none">Not matched</option>
+        <option value="nomk">No MikroTik attached</option></select>` : ""}
       <input id="uQ" type="search" placeholder="Search sites, consoles, devices" value="${esc(uView.q)}" aria-label="Search">
       <label class="chk"><input type="checkbox" id="uProb" ${uView.problems ? "checked" : ""}> Offline or updates only</label><span class="spacer"></span>
       ${tech ? (x.accounts || []).filter((a) => a.last && !a.last.ok).map((a) => `<span class="small status err" title="${esc(a.last.detail)}">${esc(a.name)}: sync failed</span>`).join(" ") : ""}</div>
@@ -7203,13 +7204,13 @@ async function unifiPage() {
   if ($("uMatch")) $("uMatch").value = uView.match;
   // matched = the site is linked to a client: automatically (by name ...) or chosen by hand on this page
   const byMatch = (s) => !uView.match || (uView.match === "none" ? !s.org_id : uView.match === "matched" ? !!s.org_id
-    : uView.match === "manual" ? !!s.org_id && !!s.manual : !!s.org_id && !s.manual);
+    : uView.match === "manual" ? !!s.org_id && !!s.manual : uView.match === "nomk" ? s.has_gateway && !!s.org_id && !s.has_mikrotik : !!s.org_id && !s.manual);
   const draw = () => {
     const q = uView.q.toLowerCase();
     const rows = x.sites.filter((s) => (!uView.org || (uView.org === "none" ? !s.org_id : String(s.org_id) === uView.org))
       && (!q || `${s.name} ${s.internal} ${s.console || ""} ${s.account || ""} ${s.org || ""} ${s.isp || ""} ${s.address || ""}`.toLowerCase().includes(q))
       && (!uView.problems || s.offline || s.updates) && byMatch(s));
-    $("uRows").innerHTML = rows.map((s) => `<tr class="click" data-usite="${esc(s.id)}"><td><b>${esc(s.name)}</b>${s.type === "endpoint" ? ` <span class="pill">subscriber</span>` : ""}${s.internet_issues ? ` <span class="pill up-failed">internet issues</span>` : ""}
+    $("uRows").innerHTML = rows.map((s) => `<tr class="click" data-usite="${esc(s.id)}"><td><b>${esc(s.name)}</b>${s.type === "endpoint" ? ` <span class="pill">subscriber</span>` : ""}${s.internet_issues ? ` <span class="pill up-failed">internet issues</span>` : ""}${s.has_gateway && s.org_id && !s.has_mikrotik ? ` <span class="pill" title="UniFi gateway here, but this client has no MikroTik managed in TikManager">no MikroTik</span>` : ""}
         ${s.address ? `<div class="small muted">${esc(s.address)}</div>` : ""}${s.wan_ip ? `<div class="small muted mono" title="Public IP">${esc(s.wan_ip)}</div>` : ""}</td>
       ${tech ? `<td class="noclick">${canWrite() && !s.own_account ? `<select data-uassign="${esc(s.id)}" aria-label="Client for ${esc(s.name)}">
           <option value="auto">${s.manual ? "↺ Match automatically" : "— automatic —"}</option><option value="" ${s.manual && !s.org_id ? "selected" : ""}>— not assigned —</option>${(x.orgs || []).map((o) =>

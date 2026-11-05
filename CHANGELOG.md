@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.3 - 2026-11-04
+
+- **UniFi / UISP: find UniFi routers with no MikroTik.** The Match filter on the UniFi page gains a **"No MikroTik
+  attached"** option: it lists UniFi sites that have a UniFi gateway/router but whose client has **no** MikroTik managed
+  in TikManager - the gaps where you're running UniFi routing without a TikManager-managed router. Such sites also show a
+  small **"no MikroTik"** badge in the list. ("Attached" is judged per client: a site counts as covered when its
+  assigned client has at least one adopted MikroTik.)
+
 ## 3.7.0-beta.2 - 2026-11-04
 
 - **IPAM: "Sync from routers" now reads routers in parallel.** On a client with many routers (e.g. 30+), the sync read

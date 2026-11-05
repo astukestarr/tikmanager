@@ -513,6 +513,7 @@ class Ubnt:
         by = {}
         for d in devs:
             by.setdefault(d["site_key"], []).append(d)
+        mk_orgs = {r["org_id"] for r in self.db.q("SELECT DISTINCT org_id FROM devices WHERE state='adopted' AND org_id IS NOT NULL")}
         out = []
         for r in rows:
             st, mine = json.loads(r["stats"] or "{}"), by.get(r["id"], [])
@@ -524,7 +525,9 @@ class Ubnt:
                         "offline_since": min([d["offline_since"] for d in off if d["offline_since"]], default=None),
                         "wifi_clients": st.get("wifi_clients"), "wired_clients": st.get("wired_clients"), "isp": st.get("isp"),
                         "wan_uptime": st.get("wan_uptime"), "internet_issues": st.get("internet_issues") or 0, "address": st.get("address"),
-                        "seen_at": r["seen_at"], "wan_ip": r["wan_ip"], "matched": r["matched"], "manual": bool(r["org_manual"])})
+                        "seen_at": r["seen_at"], "wan_ip": r["wan_ip"], "matched": r["matched"], "manual": bool(r["org_manual"]),
+                        "has_mikrotik": r["org_id"] in mk_orgs,   # does this site's client have a managed MikroTik?
+                        "has_gateway": bool(r["gateway_mac"])})   # does this site have a UniFi gateway/router (vs switch/AP only)?
         return out
 
     def devices(self, site_key):
