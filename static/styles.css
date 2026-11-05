@@ -63,10 +63,10 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
 .nav-name { color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-role { color: var(--nav-muted); font-size: 12px; }
 .nav-items { flex: 1; padding: 8px 10px; }
-.nav-items button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 12px; margin: 1px 0;
+.nav-items button, .nav-items a.nav-item { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 12px; margin: 1px 0;
   border-radius: 8px; cursor: pointer; color: var(--nav-text); font-weight: 500; }
 .nav-items button svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--nav-muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.nav-items button:hover, .nav-items button:focus-visible { background: rgba(255, 255, 255, .08); color: #fff; }
+.nav-items button:hover, .nav-items button:focus-visible, .nav-items a.nav-item:hover, .nav-items a.nav-item:focus-visible { background: rgba(255, 255, 255, .08); color: #fff; }
 .nav-items button:hover svg { stroke: #fff; }
 .nav-items button.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .nav-items button.active svg { stroke: var(--on-accent); }
@@ -82,8 +82,8 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
 .nav-group.open > .nav-cat .chev { transform: rotate(90deg); }
 .nav-sub { display: none; margin: 2px 0 6px 21px; padding-left: 8px; border-left: 1px solid rgba(255, 255, 255, .14); }
 .nav-group.open .nav-sub { display: block; }
-.nav-items .nav-sub button { padding: 6px 10px; font-size: 13px; color: var(--nav-muted); font-weight: 500; }
-.nav-items .nav-sub button:hover { color: #fff; }
+.nav-items .nav-sub button, .nav-items .nav-sub a.nav-item { padding: 6px 10px; font-size: 13px; color: var(--nav-muted); font-weight: 500; }
+.nav-items .nav-sub button:hover, .nav-items .nav-sub a.nav-item:hover { color: #fff; }
 .nav-items .nav-sub button.active { color: var(--on-accent); font-weight: 600; }
 .nav-version { flex: none; padding: 10px 22px 14px; font-size: 12px; color: var(--nav-muted); }
 .content { min-width: 0; display: flex; flex-direction: column; }
