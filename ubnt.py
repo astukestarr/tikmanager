@@ -579,7 +579,7 @@ class Ubnt:
                          "JOIN net_accounts a ON a.id=s.account_id WHERE s.org_id=? AND a.kind='unifi'", (org_id,))
         by = {}
         for r in rows:
-            by.setdefault((r["account_id"], (r["id"] or "").split(":")[0]), []).append(r)
+            by.setdefault((r["account_id"], (r["id"] or "").rsplit(":", 1)[0]), []).append(r)
         for (account_id, host), sites in by.items():
             if not host:
                 continue
@@ -630,7 +630,7 @@ class Ubnt:
                          "JOIN net_accounts a ON a.id=s.account_id WHERE s.org_id=? AND a.kind='unifi' ORDER BY s.id", (org_id,))
         by = {}
         for r in rows:
-            by.setdefault((r["account_id"], (r["id"] or "").split(":")[0]), []).append(r)
+            by.setdefault((r["account_id"], (r["id"] or "").rsplit(":", 1)[0]), []).append(r)
         for (account_id, host), sites in list(by.items())[:3]:
             a = self.db.one("SELECT * FROM net_accounts WHERE id=?", (account_id,))
             if not a:

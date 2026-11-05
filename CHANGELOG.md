@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.8 - 2026-11-04
+
+- **IPAM: fix the UniFi real-networks pull (403 "host not found").** The UniFi console id was taken from the wrong part
+  of the stored site id. A site id is `hostId:siteId`, but the hostId itself contains colons
+  (`1:<hex>:<num>`), so splitting on the *first* colon yielded just `"1"` - not a real console - and the Network
+  integration API returned 403. It now splits on the *last* colon, so the real networks (CIDR + VLAN) come through for
+  UniFi sites.
+
 ## 3.7.0-beta.7 - 2026-11-04
 
 - **IPAM: a UniFi integration-API probe** (`GET /api/ipam/unifi-probe?org=<id>`, technician-only, read-only). For a
