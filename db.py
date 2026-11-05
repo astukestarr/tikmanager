@@ -330,6 +330,64 @@ CREATE TABLE IF NOT EXISTS api_keys (                 -- outbound read API token
   created_by TEXT, created_at REAL NOT NULL, last_used REAL, last_ip TEXT, calls INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS api_keys_hash ON api_keys(token_hash);
+-- IPAM (IP Address Management): a separated workspace at /ipam. Subnets/addresses are discovered live from the
+-- managed routers and overlaid on manual records. A subnet can belong to a client (org_id) and/or a free-form section.
+CREATE TABLE IF NOT EXISTS ipam_sections (            -- free-form folders for shared / infrastructure space (nested)
+  id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES ipam_sections(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, description TEXT, pos INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS ipam_vlans (
+  id INTEGER PRIMARY KEY, number INTEGER NOT NULL, name TEXT, l2domain TEXT NOT NULL DEFAULT 'default',
+  org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, section_id INTEGER REFERENCES ipam_sections(id) ON DELETE SET NULL,
+  notes TEXT, created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS ipam_vrfs (
+  id INTEGER PRIMARY KEY, rd TEXT NOT NULL, name TEXT NOT NULL, description TEXT,
+  org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS ipam_subnets (            -- the core CIDR records (nested supernet/subnet tree)
+  id INTEGER PRIMARY KEY, cidr TEXT NOT NULL, family INTEGER NOT NULL DEFAULT 4,
+  parent_id INTEGER REFERENCES ipam_subnets(id) ON DELETE SET NULL,
+  org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, section_id INTEGER REFERENCES ipam_sections(id) ON DELETE SET NULL,
+  vlan_id INTEGER REFERENCES ipam_vlans(id) ON DELETE SET NULL, vrf_id INTEGER REFERENCES ipam_vrfs(id) ON DELETE SET NULL,
+  device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,   -- the MikroTik this was discovered on / is gatewayed by
+  interface TEXT, name TEXT, gateway TEXT, is_pool INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual',               -- 'manual' | 'discovered'
+  mark_full INTEGER NOT NULL DEFAULT 0, threshold INTEGER, locked INTEGER NOT NULL DEFAULT 0,
+  notes TEXT, custom TEXT NOT NULL DEFAULT '{}', first_seen REAL, last_seen REAL,
+  created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
+CREATE INDEX IF NOT EXISTS ipam_subnets_org ON ipam_subnets(org_id);
+CREATE INDEX IF NOT EXISTS ipam_subnets_section ON ipam_subnets(section_id);
+CREATE INDEX IF NOT EXISTS ipam_subnets_parent ON ipam_subnets(parent_id);
+CREATE TABLE IF NOT EXISTS ipam_device_types (        -- catalog of IPAM device types (router, switch, AP, ...)
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, icon TEXT, builtin INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS ipam_locations (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, address TEXT, lat REAL, lon REAL,
+  org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, notes TEXT, created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS ipam_devices (             -- IPAM's own inventory of non-managed endpoints (phpIPAM "devices")
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, type_id INTEGER REFERENCES ipam_device_types(id) ON DELETE SET NULL,
+  location_id INTEGER REFERENCES ipam_locations(id) ON DELETE SET NULL, org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL,
+  device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,   -- optional link to a managed MikroTik
+  management_ip TEXT, description TEXT, notes TEXT, custom TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS ipam_addresses (           -- individual host records / the live-usage overlay
+  id INTEGER PRIMARY KEY, subnet_id INTEGER NOT NULL REFERENCES ipam_subnets(id) ON DELETE CASCADE,
+  ip TEXT NOT NULL, ip_sort INTEGER,                   -- integer form of the IP for ordered range queries (IPv4; IPv6 is TEXT-ordered)
+  status TEXT NOT NULL DEFAULT 'used',                 -- used | reserved | dhcp | offline | gateway
+  hostname TEXT, mac TEXT, device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+  ipam_device_id INTEGER REFERENCES ipam_devices(id) ON DELETE SET NULL, owner TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',               -- manual | arp | lease | neighbor | address
+  dns_name TEXT, ptr TEXT, notes TEXT, custom TEXT NOT NULL DEFAULT '{}', last_seen REAL,
+  created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
+CREATE INDEX IF NOT EXISTS ipam_addresses_subnet ON ipam_addresses(subnet_id, ip_sort);
+CREATE INDEX IF NOT EXISTS ipam_addresses_device ON ipam_addresses(device_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ipam_addresses_uq ON ipam_addresses(subnet_id, ip);
 """
 
 

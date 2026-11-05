@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.1 - 2026-11-04
+
+**IPAM: a new IP Address Management workspace (Network > IPAM).** A separated workspace at `/ipam` in the spirit of
+phpIPAM, but built into TikManager and aware of your routers. Organise address space **by client and by free-form
+sections**, with nested subnets, each subnet's usage %, and a **visual subnet map** - a grid of every IP coloured by
+status (used, reserved, DHCP, gateway, free), with a /24-block heatmap and drill-down for large subnets. Add and edit
+subnets and addresses by hand, split a subnet, search across every IP / subnet / hostname / MAC, and a built-in subnet
+calculator. Technician-only, gated by a new **IPAM** permission (Admin > Technicians > Roles); every technician can view.
+
+- **Discovers subnets and live usage from your routers.** **Sync from routers** reads a client's managed MikroTiks and
+  fills the IPAM automatically: the LAN subnets on each router, and who is actually using each address - from the
+  router's own interface addresses (gateway), DHCP leases (with MAC and host name), ARP, and discovered neighbours.
+  Discovered records carry a "discovered" badge; a re-sync **never overwrites anything you entered by hand** (manual
+  subnets and addresses keep their name, notes, owner and forced status), and TikManager's own management range
+  (`10.77.0.0/16`) is left alone. Works against the dev simulator out of the box.
+- IPv4 now; the data model is IPv6-ready (live IPv6 discovery, VLANs/VRFs, IPAM devices/locations and CSV import follow
+  in later betas).
+
 ## 3.6.0-beta.1 - 2026-11-04
 
 **Outbound API: let other systems pull data from TikManager.** A new **Admin > API access** page creates read-only bearer

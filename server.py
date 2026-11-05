@@ -36,6 +36,7 @@ from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from wgbuild import WgBuilds, WgError
 from diagnostics import Diagnostics
+from ipam import Ipam, IpamError
 from ipsecbuild import IpsecBuilds, IpsecError
 from firewall import Firewall, FirewallError
 from ports import Ports, PortsError
@@ -131,6 +132,7 @@ vpns = Vpns(db, poller.client, backups)
 wgbuilds = WgBuilds(db, poller.client, backups)   # Router Wizard > WireGuard Builder: point-to-point tunnel between two routers
 ipsecbuilds = IpsecBuilds(db, poller.client, backups, backups.vault)   # Router Wizard > IPsec Tunnel: MikroTik to any-brand far end
 diag = Diagnostics(db, poller.client, settings, poller.api_password)   # Diagnostics: Traffic Watch, Speed Test, Link test
+ipam = Ipam(db, poller.client, settings)   # IPAM: separated /ipam workspace - subnets/addresses discovered from routers + manual
 remote = RemoteAccess(db, poller.client, backups)   # Router page > Remote access (WireGuard for Windows into a router)
 remote.start()   # automatic revoke at each person's expiry date
 vpninv.SHOW_TM_VPN = not settings.managed_vpn   # while managed VPNs are off, their tunnels show read-only under Existing VPNs
@@ -842,6 +844,57 @@ class Handler(BaseHTTPRequestHandler):
                 "wan_ip": r["public_ip"] or None, "tunnel_ip": r["tunnel_ip"] or None,
                 "last_seen": r["last_seen"], "first_seen": r["first_seen"]}
 
+    def ipam_get(self, path, q):
+        self.require(tech=True)   # any technician may view IPAM; writes need the 'ipam' permission
+        try:
+            if path == "/api/ipam/tree":
+                return self.json(ipam.tree())
+            if path == "/api/ipam/orgs":
+                return self.json({"orgs": ipam.syncable_orgs()})
+            if path == "/api/ipam/subnets":
+                return self.json({"subnets": ipam.subnets(q.get("org_id"), q.get("section_id"), q.get("q"))})
+            if m := re.fullmatch(r"/api/ipam/subnets/(\d+)", path):
+                return self.json(ipam.subnet(int(m.group(1))))
+            if m := re.fullmatch(r"/api/ipam/subnets/(\d+)/first-free", path):
+                return self.json(ipam.first_free(int(m.group(1))))
+            if path == "/api/ipam/search":
+                return self.json(ipam.search(q.get("q")))
+        except IpamError as e:
+            raise HttpError(400, str(e)) from None
+        raise HttpError(404, "Not found.")
+
+    def ipam_post(self, path, q):
+        s = self.require(tech=True, write=True)   # RULES maps /api/ipam -> the 'ipam' permission
+        who = s["email"]
+        b = self.body()
+        try:
+            if path == "/api/ipam/sections":
+                return self.json({"id": ipam.section_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/sections/(\d+)/delete", path):
+                ipam.section_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/subnets":
+                return self.json({"id": ipam.subnet_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/subnets/(\d+)/delete", path):
+                ipam.subnet_delete(int(m.group(1))); return self.json({"ok": True})
+            if m := re.fullmatch(r"/api/ipam/subnets/(\d+)/split", path):
+                return self.json(ipam.subnet_split(int(m.group(1)), b.get("prefix"), who))
+            if m := re.fullmatch(r"/api/ipam/subnets/(\d+)/scan", path):
+                sub = ipam.subnet(int(m.group(1)))
+                if not sub.get("org_id"):
+                    raise IpamError("This subnet isn't tied to a client, so there's no router to scan it from.")
+                return self.json(ipam.sync(sub["org_id"], who))
+            if path == "/api/ipam/addresses":
+                return self.json({"id": ipam.address_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/addresses/(\d+)/delete", path):
+                ipam.address_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/sync":
+                if not b.get("org_id"):
+                    raise IpamError("Pick a client to sync.")
+                return self.json(ipam.sync(int(b["org_id"]), who))
+        except IpamError as e:
+            raise HttpError(400, str(e)) from None
+        raise HttpError(404, "Not found.")
+
     def route_get(self, path, q):
         if path == "/api/v1" or path.startswith("/api/v1/"):
             return self.route_api_v1(path, q)
@@ -851,6 +904,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.static("index.html")
         if path == "/login":
             return self.static("login.html")
+        if path == "/ipam":   # the separated IPAM workspace (its own page; ipam.js/ipam.css are auto-served below)
+            self.require(tech=True)
+            return self.static("ipam.html")
+        if path.startswith("/api/ipam/"):
+            return self.ipam_get(path, q)
         if re.fullmatch(r"/invite/[A-Za-z0-9_-]{20,80}", path):
             return self.static("invite.html")
         if m := re.fullmatch(r"/map/(base|detail)\.json", path):   # built-in map data (public domain, tools/build_map.py)
@@ -1942,6 +2000,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"ok": True})
         if s.get("viewing_as") and path != "/api/logout":   # "View as" is look-only: nothing can be changed in the user's name
             raise HttpError(403, f"You're viewing as {s['email']} - read-only. Stop viewing to make changes.")
+        if path.startswith("/api/ipam/"):
+            return self.ipam_post(path, q)
         if m := re.fullmatch(r"/api/users/(\d+)/view-as", path):   # administrators: see TikManager exactly as this client user does
             s = self.require(tech=True, admin=True)
             u = db.one("SELECT * FROM users WHERE id=?", (int(m.group(1)),))

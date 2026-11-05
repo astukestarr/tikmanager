@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "3.6.0"    # the release these slides describe (its betas included)
-SINCE = "3.5.0"      # the full release before it
+RELEASE = "3.7.0"    # the release these slides describe (its betas included)
+SINCE = "3.6.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -203,12 +203,22 @@ SLIDES_3_6 = [
              "with its own scopes, shown once when you create it and revokable any time. It's read-only: nothing in the API can change "
              "a router or a setting. See the endpoints and examples in the README's \"Outbound API\" section."},
 ]
-SLIDES = SLIDES_3_6   # 3.6.0's own slides (3.5.0 was released, so only the new work shows)
+SLIDES_3_7 = [
+    {"id": "ipam", "title": "IPAM: IP Address Management", "img": None, "view": None, "who": "tech",
+     "text": "A new IPAM workspace (Network > IPAM) in the spirit of phpIPAM, but it knows your routers. Organise address space "
+             "by client and by free-form sections, with nested subnets and a visual map of every IP - used, reserved, DHCP, "
+             "gateway or free - at a glance. IPv4 now; IPv6 is coming."},
+    {"id": "ipam-sync", "title": "IPAM discovers subnets from your routers", "img": None, "view": None, "who": "tech",
+     "text": "Sync from routers reads a client's managed MikroTiks and fills the IPAM in automatically: the subnets on each router "
+             "and who's actually using each address - from the router's own addresses, DHCP leases, ARP and discovered neighbours. "
+             "It never overwrites anything you typed by hand, and leaves TikManager's own management range alone."},
+]
+SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")

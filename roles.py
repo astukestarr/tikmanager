@@ -25,6 +25,7 @@ PERMS = [
     ("vpn", "Routers", "Site-to-site VPNs: create, apply, disable and delete"),
     ("tasks", "Routers", "Scripts, router groups and scheduled tasks; the community script library"),
     ("flows", "Routers", "Turn Flows on and off on routers"),
+    ("ipam", "IPAM", "IP Address Management: create and edit sections, subnets, addresses; sync from routers"),
     ("blocking", "Security", "Block and unblock addresses; region blocking, known bad networks and auto-block settings"),
     ("clients", "Clients", "Add and edit clients, invite client users, client Winbox / VPN access, View as a client"),
     ("techs", "Admin", "Technicians and roles: change people's roles, disable accounts, reset sign-in"),
@@ -38,7 +39,7 @@ BUILTIN = {
     ADMIN: {"id": ADMIN, "name": "Administrator", "perms": PERM_IDS, "builtin": True,
             "about": "Everything, including this page. Can't be changed."},
     "tech": {"id": "tech", "name": "Technician", "builtin": True, "about": "Manage, upgrade and back up routers, security and clients - not the Admin pages.",
-             "perms": ["devices", "config", "winbox", "upgrades", "backups", "remote", "vpn", "tasks", "flows", "blocking", "clients"]},
+             "perms": ["devices", "config", "winbox", "upgrades", "backups", "remote", "vpn", "tasks", "flows", "ipam", "blocking", "clients"]},
     "readonly": {"id": "readonly", "name": "Read-only", "perms": [], "builtin": True, "about": "Looks at everything, changes nothing (Winbox read-only)."},
 }
 NO_ACCESS = {"id": NONE, "name": "No access (waiting)", "perms": [], "builtin": True, "about": "Signed in, but can't use TikManager until an administrator gives them a role."}
@@ -56,6 +57,7 @@ RULES = [(re.compile(p), perm) for p, perm in [
     (r"^/api/upgrades", "upgrades"),
     (r"^/api/(scripts|groups|tasks|library)", "tasks"),
     (r"^/api/(region|security/(autoblock|unban))", "blocking"),
+    (r"^/api/ipam", "ipam"),
     (r"^/api/orgs", "clients"),
     (r"^/api/users/(invite|\d+/(view-as|resend|disable|enable|reset-mfa))", "clients"),   # technician accounts also need techs (user_action)
     (r"^/api/(roles|users/\d+/role)", "techs"),

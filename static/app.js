@@ -7124,7 +7124,7 @@ const NAV = [
     { view: "unifi", label: "UniFi / UISP", count: "unifi", who: "unifi" }] },
   { group: "Network", icon: "network", items: [
     { view: "sites", label: "Site map" }, { view: "isps", label: "ISPs" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
-    { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
+    { link: "/ipam", label: "IPAM", who: "tech" }, { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
     { view: "health", label: "Router health", who: "tech" }, { view: "checks", label: "Critical checks", who: "tech" },
     { view: "alerts", label: "Alerts", who: "tech", count: "alerts" },
@@ -7155,7 +7155,9 @@ function renderNav() {
     }
     return `<div class="nav-group ${open.has(n.group) ? "open" : ""}" data-group="${esc(n.group)}">
       <button type="button" class="nav-cat" data-toggle="${esc(n.group)}" aria-expanded="${open.has(n.group)}">${icon(n.icon)}<span class="nav-label">${esc(n.group)}</span>${cnt(n.count)}${CHEV}</button>
-      <div class="nav-sub">${items.map((i) => `<button type="button" class="nav-item" data-view="${i.view}"${i.arg ? ` data-arg="${i.arg}"` : ""}>
+      <div class="nav-sub">${items.map((i) => i.link
+        ? `<a class="nav-item" href="${esc(i.link)}"><span class="nav-label">${esc(i.label)}</span></a>`
+        : `<button type="button" class="nav-item" data-view="${i.view}"${i.arg ? ` data-arg="${i.arg}"` : ""}>
         <span class="nav-label">${esc(i.label)}</span>${cnt(i.count)}</button>`).join("")}</div></div>`;
   }).join("");
   navActive();

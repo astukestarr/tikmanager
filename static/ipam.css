@@ -1,0 +1,106 @@
+/* IPAM workspace. Reuses styles.css tokens so it tracks light/dark. */
+:root {
+  --st-free: color-mix(in srgb, var(--border) 60%, var(--panel));
+  --st-used: var(--info); --st-reserved: var(--warn); --st-dhcp: var(--good);
+  --st-offline: var(--muted); --st-gateway: var(--accent);
+}
+body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+.ipam-top { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--nav-bg); color: var(--nav-text); flex: none; }
+.ipam-home { color: var(--nav-text); text-decoration: none; font-size: 20px; padding: 0 6px; border-radius: 6px; }
+.ipam-home:hover { background: rgba(255,255,255,.1); }
+.ipam-word { height: 22px; }
+.ipam-title { font-weight: 700; letter-spacing: .04em; }
+.ipam-search { flex: 1; max-width: 460px; }
+.ipam-search input { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid transparent; background: rgba(255,255,255,.12); color: #fff; }
+.ipam-search input::placeholder { color: var(--nav-muted); }
+.ipam-top-actions { display: flex; gap: 8px; margin-left: auto; }
+
+.ipam-body { display: flex; flex: 1; min-height: 0; }
+.ipam-side { width: 260px; flex: none; border-right: 1px solid var(--border); background: var(--panel); overflow-y: auto; }
+.side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel); }
+.tree { padding: 6px 0; }
+.tree-group { margin: 8px 0; }
+.tree-label { padding: 4px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.tree-item { display: flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; font-size: 14px; }
+.tree-item:hover { background: var(--accent-soft); }
+.tree-item.active { background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-count { font-size: 12px; color: var(--muted); background: var(--bg); border-radius: 10px; padding: 0 7px; }
+.tree-edit { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; opacity: 0; }
+.tree-item:hover .tree-edit { opacity: 1; }
+.tree-empty { padding: 4px 12px; font-size: 13px; }
+
+.ipam-main { flex: 1; overflow-y: auto; padding: 16px 20px; min-width: 0; }
+.pad { padding: 12px 0; }
+.main-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.main-head h1 { font-size: 20px; margin: 0; }
+.main-head-actions { display: flex; gap: 8px; margin-left: auto; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.chip { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 13px; }
+.chip b { color: var(--muted); font-weight: 600; }
+
+.ipam-table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+.ipam-table th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.ipam-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
+.ipam-table tr:last-child td { border-bottom: none; }
+.sub-row { cursor: pointer; }
+.sub-row:hover { background: var(--accent-soft); }
+.cidr { color: var(--accent); font-weight: 600; cursor: pointer; text-decoration: none; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.usebar { position: relative; width: 120px; height: 16px; background: var(--bg); border-radius: 8px; overflow: hidden; display: inline-block; vertical-align: middle; }
+.usebar-fill { position: absolute; inset: 0 auto 0 0; background: var(--good); }
+.usebar-fill.warm { background: var(--warn); } .usebar-fill.hot { background: var(--bad); }
+.usebar-txt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+
+.pill { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); }
+.pill.disc { background: color-mix(in srgb, var(--info) 15%, var(--panel)); color: var(--info); border-color: transparent; }
+.pill.man { background: var(--bg); color: var(--muted); }
+.pill.reserved { background: color-mix(in srgb, var(--warn) 18%, var(--panel)); color: var(--warn); border-color: transparent; margin-left: 6px; }
+.pill.st-used { background: var(--st-used); color: #fff; border: none; } .pill.st-reserved { background: var(--st-reserved); color: #fff; border: none; }
+.pill.st-dhcp { background: var(--st-dhcp); color: #fff; border: none; } .pill.st-offline { background: var(--st-offline); color: #fff; border: none; }
+.pill.st-gateway { background: var(--st-gateway); color: #fff; border: none; } .pill.st-free { background: var(--st-free); }
+
+.map-wrap { margin-bottom: 18px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.dot-free { background: var(--st-free); } .dot-used { background: var(--st-used); } .dot-reserved { background: var(--st-reserved); }
+.dot-dhcp { background: var(--st-dhcp); } .dot-offline { background: var(--st-offline); } .dot-gateway { background: var(--st-gateway); }
+.ipgrid { display: grid; grid-template-columns: repeat(auto-fill, 16px); gap: 3px; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+.cell { width: 16px; height: 16px; border-radius: 3px; background: var(--panel); cursor: pointer; border: 1px solid var(--border); box-sizing: border-box; }
+.cell:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cell-used { background: var(--st-used); border-color: transparent; } .cell-reserved { background: var(--st-reserved); border-color: transparent; }
+.cell-dhcp { background: var(--st-dhcp); border-color: transparent; } .cell-offline { background: var(--st-offline); border-color: transparent; }
+.cell-gateway { background: var(--st-gateway); border-color: transparent; }
+.heatblocks { display: grid; grid-template-columns: repeat(auto-fill, 54px); gap: 4px; }
+.heatcell { width: 54px; height: 30px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; cursor: pointer; background: var(--st-free); color: var(--text); }
+.heat-0 { background: var(--st-free); } .heat-1 { background: color-mix(in srgb, var(--info) 30%, var(--panel)); }
+.heat-2 { background: color-mix(in srgb, var(--info) 55%, var(--panel)); } .heat-3 { background: color-mix(in srgb, var(--info) 80%, var(--panel)); color:#fff; }
+.heat-4 { background: var(--bad); color: #fff; }
+.block-drill { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.result { display: block; padding: 6px 0; color: var(--text); text-decoration: none; cursor: pointer; border-bottom: 1px solid var(--border); }
+.result:hover { color: var(--accent); }
+
+.ipam-dlg { border: none; border-radius: 12px; padding: 0; background: var(--panel); color: var(--text); box-shadow: var(--shadow); max-width: 460px; width: 92%; }
+.ipam-dlg::backdrop { background: rgba(10, 16, 28, .45); }
+.ipam-dlg form { padding: 18px; }
+.ipam-dlg h2 { margin: 0 0 12px; font-size: 17px; }
+.ipam-dlg .field { display: block; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+.ipam-dlg .field input, .ipam-dlg .field select { display: block; width: 100%; margin-top: 3px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); box-sizing: border-box; }
+.ipam-dlg .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.ipam-dlg .btn.danger { margin-right: auto; }
+.calc-out { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 13px; white-space: pre; margin-top: 8px; }
+
+.btn.tiny { padding: 3px 8px; font-size: 12px; }
+.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--text); color: var(--panel); padding: 10px 18px; border-radius: 10px; opacity: 0; transition: .2s; pointer-events: none; font-size: 14px; z-index: 50; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@media (max-width: 720px) {
+  .ipam-side { position: absolute; z-index: 10; height: calc(100% - 46px); box-shadow: var(--shadow); }
+  .ipam-search { max-width: none; }
+}

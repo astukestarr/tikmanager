@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPAM · TikManager</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#13233a">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/ipam.css">
+</head>
+<body class="ipam">
+  <header class="ipam-top">
+    <a class="ipam-home" href="/" title="Back to TikManager">&larr;</a>
+    <img class="brand-logo brand-wordmark ipam-word" src="/wordmark.svg" alt="TikManager">
+    <span class="ipam-title">IPAM</span>
+    <div class="ipam-search"><input id="search" type="search" placeholder="Search IP, subnet, host, MAC…" autocomplete="off"></div>
+    <div class="ipam-top-actions">
+      <button class="btn" id="calcBtn" type="button">Subnet calculator</button>
+      <button class="btn" id="syncBtn" type="button">Sync from routers</button>
+    </div>
+  </header>
+  <div class="ipam-body">
+    <aside class="ipam-side">
+      <div class="side-head">
+        <span>Sections &amp; clients</span>
+        <button class="btn tiny" id="newSection" type="button" title="New section">+ Section</button>
+      </div>
+      <div id="tree" class="tree"></div>
+    </aside>
+    <main class="ipam-main" id="main">
+      <p class="muted pad">Loading…</p>
+    </main>
+  </div>
+
+  <dialog id="dlg" class="ipam-dlg">
+    <form method="dialog" id="dlgForm">
+      <h2 id="dlgTitle">Edit</h2>
+      <div id="dlgBody"></div>
+      <p class="status hidden" id="dlgMsg"></p>
+      <div class="actions">
+        <button class="btn" value="cancel" type="submit">Cancel</button>
+        <button class="btn primary" id="dlgSave" value="save" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/brand.js"></script>
+  <script src="/ipam.js"></script>
+</body>
+</html>
