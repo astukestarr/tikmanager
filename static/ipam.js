@@ -752,7 +752,7 @@ function rackElevation(r) {
       td.appendChild(el("span", "rack-dev-info", (d.rack_height || 1) + "U" + (d.type ? " · " + d.type : "") + (d.management_ip ? " · " + d.management_ip : "")));
       if (!readonly) { const x = el("button", "rack-remove", "×"); x.dataset.unplace = d.id; x.title = "Remove from rack"; td.appendChild(x); }
       tr.appendChild(td);
-    } else if (!covered[u]) tr.appendChild(el("td", "rack-slot"));
+    } else if (!covered[u]) { const s = el("td", "rack-slot"); s.dataset.dropu = u; tr.appendChild(s); }
     tb.appendChild(tr);
   }
   tbl.appendChild(tb); wrap.appendChild(tbl); return wrap;
@@ -778,8 +778,55 @@ async function showRack(id) {
   if (r.org) meta.appendChild(chip("Client", r.org));
   m.appendChild(meta);
   if (r.description) m.appendChild(el("p", "muted", r.description));
-  if (!(r.units || []).length) m.appendChild(el("p", "muted small", "Nothing placed yet — use “Place device”."));
-  m.appendChild(rackElevation(r));
+
+  let avail = [];
+  if (!readonly) { try { avail = (await api("/api/ipam/racks/" + id + "/placeable")).devices; } catch (e) { avail = []; } }
+  const layout = el("div", "rack-layout");
+  const elev = rackElevation(r); layout.appendChild(elev);
+  if (!readonly) layout.appendChild(devicePalette(avail));
+  m.appendChild(layout);
+
+  if (!readonly) {   // drag a device chip from the palette onto a free unit to place it there
+    const place = async (deviceId, h, u) => {
+      try { await post("/api/ipam/racks/place", { rack_id: id, device_id: deviceId, rack_u: u, rack_height: h }); await showRack(id); }
+      catch (e) { toast(e.message); }
+    };
+    layout.addEventListener("dragstart", (e) => {
+      const grip = e.target.closest(".pal-grip"); if (!grip) return;
+      const chip = grip.closest(".pal-dev");
+      e.dataTransfer.setData("text/plain", JSON.stringify({ id: +chip.dataset.dev, h: +(chip.querySelector(".pal-h")?.value || 1) }));
+      e.dataTransfer.effectAllowed = "move"; chip.classList.add("dragging");
+    });
+    layout.addEventListener("dragend", (e) => { const chip = e.target.closest(".pal-dev"); if (chip) chip.classList.remove("dragging"); });
+    elev.addEventListener("dragover", (e) => { const s = e.target.closest(".rack-slot[data-dropu]"); if (s) { e.preventDefault(); s.classList.add("drop-hi"); } });
+    elev.addEventListener("dragleave", (e) => { const s = e.target.closest(".rack-slot[data-dropu]"); if (s) s.classList.remove("drop-hi"); });
+    elev.addEventListener("drop", (e) => {
+      const s = e.target.closest(".rack-slot[data-dropu]"); if (!s) return;
+      e.preventDefault(); s.classList.remove("drop-hi");
+      let d; try { d = JSON.parse(e.dataTransfer.getData("text/plain")); } catch (x) { return; }
+      if (d && d.id) place(d.id, d.h || 1, +s.dataset.dropu);
+    });
+  }
+}
+// The palette of unplaced devices beside the elevation: drag a chip onto a free unit (set its height on the chip first).
+function devicePalette(devices) {
+  const box = el("div", "rack-palette");
+  box.appendChild(el("div", "rack-palette-head", "Devices"));
+  if (!devices.length) {
+    box.appendChild(el("p", "muted small", "No unplaced devices for this rack. Add some on the Devices tab (or assign them to this rack's client)."));
+    return box;
+  }
+  box.appendChild(el("p", "muted small", "Drag a device onto a free unit. Set its height first if it's taller than 1U."));
+  devices.forEach((d) => {
+    const chip = el("div", "pal-dev"); chip.dataset.dev = d.id;
+    const grip = el("span", "pal-grip", "⠿"); grip.draggable = true; grip.title = "Drag onto the rack"; chip.appendChild(grip);
+    const nm = el("span", "pal-main"); nm.appendChild(el("span", "pal-name", d.name));
+    if (d.type) nm.appendChild(el("span", "muted small", d.type)); chip.appendChild(nm);
+    const h = el("select", "pal-h"); [1, 2, 3, 4, 6, 8, 10, 12].forEach((n) => { const o = el("option", null, n + "U"); o.value = n; h.appendChild(o); });
+    h.title = "Height in rack units"; chip.appendChild(h);
+    box.appendChild(chip);
+  });
+  return box;
 }
 function rackDialog(k) {
   const box = el("div");

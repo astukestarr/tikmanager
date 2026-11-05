@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.19 - 2026-11-05
+
+IPAM racks: a **device palette** now sits beside the rack elevation listing the client's unplaced devices, and you can
+**drag a device straight onto a free unit** to place it — set its height (1U-12U) on the chip first for taller gear.
+The "Place device" dialog is still there for precise entry, and a free unit highlights as you drag over it.
+
 ## 3.7.0-beta.18 - 2026-11-05
 
 IPAM gains **Racks** (like phpIPAM's rack management). A new Racks tab lists your equipment racks (size in U, how full,
