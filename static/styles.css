@@ -159,6 +159,15 @@ dialog { border: 0; border-radius: 14px; padding: 20px; width: min(560px, 94vw);
 dialog::backdrop { background: rgba(10, 15, 25, .5); }
 .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
 
+/* UniFi local console keys (Integrations editor) */
+.na-local { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.na-local h4 { margin: 0 0 4px; }
+.na-console { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.na-console:last-child { border-bottom: none; }
+.na-console .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.na-console .naLKey { min-width: 16rem; flex: 1 1 16rem; max-width: 28rem; }
+.na-lresult { margin-top: 6px; line-height: 1.5; }
+
 /* sign-in pages */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
 .auth .box { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }

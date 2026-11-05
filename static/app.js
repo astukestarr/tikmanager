@@ -2061,11 +2061,17 @@ async function wireNetAccounts(r) {
         <label class="chk na-uisp"><input type="checkbox" id="naPin" ${a.pinned ? "checked" : ""}> Trust this server's certificate (self-signed)</label></div>
       <p class="small muted na-uisp">Only tick this for a UISP server with a self-signed certificate: TikManager records the certificate's fingerprint now and refuses the
         connection if it ever changes. A normal (e.g. Let's Encrypt) certificate needs nothing.</p>
-      <div class="actions"><button class="btn primary" type="button" id="naSave">Save and sync</button><button class="btn" type="button" id="naCancel">Cancel</button></div>`;
+      <div class="actions"><button class="btn primary" type="button" id="naSave">Save and sync</button><button class="btn" type="button" id="naCancel">Cancel</button></div>
+      ${a.id ? `<div class="na-local" id="naLocal"><h4>Consoles you don't own — local API keys</h4>
+        <p class="small muted">A console that returns <b>“not the owner” (403)</b> can still be read with a <b>local</b> API key created on it
+          (in UniFi: the console → Settings → Integrations → Create New API Key; use a <b>View&nbsp;Only</b> admin). Paste it here, then
+          <b>Test transports</b> to see which path reaches it.</p>
+        <div id="naLocalList" class="small muted">Loading consoles…</div></div>` : ""}`;
     $("naKind").value = a.kind;
     const kindUi = () => { const uisp = $("naKind").value === "uisp"; document.querySelectorAll(".na-uisp").forEach((el) => el.classList.toggle("hidden", !uisp));
-      $("naKeyLabel").textContent = uisp ? "API token" : "API key"; };
+      $("naKeyLabel").textContent = uisp ? "API token" : "API key"; if ($("naLocal")) $("naLocal").classList.toggle("hidden", uisp); };
     $("naKind").addEventListener("change", kindUi); kindUi();
+    if (a.id && a.kind === "unifi") loadLocalKeys(a.id);
     $("naCancel").addEventListener("click", () => { $("naForm").innerHTML = ""; });
     $("naSave").addEventListener("click", async () => {
       say("Saving...", true);
@@ -2088,6 +2094,41 @@ async function wireNetAccounts(r) {
       await adminIntegrations(); say(act === "sync" ? (x.last && !x.last.ok ? x.last.detail : "Synced.") : "Removed.", !(x.last && !x.last.ok));
     } catch (e) { say(e.message); }
   }));
+}
+// Per-console local API keys for a UniFi connection: paste a key for a console you don't own, then test which transport reaches it.
+async function loadLocalKeys(aid) {
+  const box = $("naLocalList"); if (!box) return;
+  let cs;
+  try { cs = (await api(`/api/net/accounts/${aid}/consoles`)).consoles; } catch (e) { box.innerHTML = `<span class="status err">${esc(e.message)}</span>`; return; }
+  if (!cs.length) { box.textContent = "No consoles found on this connection yet — sync it first."; return; }
+  box.innerHTML = cs.map((c) => `<div class="na-console" data-host="${esc(c.host)}">
+      <div class="row"><b>${esc(c.name)}</b>${c.key_set ? ` <span class="status ok small">local key saved</span>` : ""}${c.public ? "" : ` <span class="muted small">(no public address — direct read not possible)</span>`}</div>
+      <div class="row"><input type="password" class="naLKey" autocomplete="new-password" placeholder="${c.key_set ? "saved — paste a new one to replace" : "local API key"}" spellcheck="false">
+        <button class="btn" type="button" data-lk="save">Save key</button>${c.key_set ? `<button class="btn" type="button" data-lk="clear">Remove</button>` : ""}
+        <button class="btn" type="button" data-lk="test">Test transports</button></div>
+      <div class="na-lresult small"></div></div>`).join("");
+  box.querySelectorAll(".na-console").forEach((row) => {
+    const host = row.dataset.host, out = row.querySelector(".na-lresult"), keyIn = row.querySelector(".naLKey");
+    const on = (act, fn) => row.querySelector(`[data-lk="${act}"]`)?.addEventListener("click", fn);
+    on("save", async () => {
+      if (!keyIn.value.trim()) { out.innerHTML = `<span class="status err">Paste a key first.</span>`; return; }
+      out.textContent = "Saving…";
+      try { await post(`/api/net/accounts/${aid}/local-key`, { host, key: keyIn.value.trim() }); keyIn.value = ""; await loadLocalKeys(aid); }
+      catch (e) { out.innerHTML = `<span class="status err">${esc(e.message)}</span>`; }
+    });
+    on("clear", async () => {
+      out.textContent = "Removing…";
+      try { await post(`/api/net/accounts/${aid}/local-key`, { host, key: "" }); await loadLocalKeys(aid); }
+      catch (e) { out.innerHTML = `<span class="status err">${esc(e.message)}</span>`; }
+    });
+    on("test", async () => {
+      out.textContent = "Testing transports…";
+      try {
+        const r = await api(`/api/net/accounts/${aid}/local-probe?host=${encodeURIComponent(host)}`);
+        out.innerHTML = r.transports.map((t) => `${t.ok ? "✅" : "❌"} ${esc(t.name)} — ${t.ok ? `reached, ${t.sites} site(s)` : esc(t.error)}`).join("<br>");
+      } catch (e) { out.innerHTML = `<span class="status err">${esc(e.message)}</span>`; }
+    });
+  });
 }
 
 // Which ConnectWise company types count as customers: saved on the server; first time, everything except the usual

@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.15 - 2026-11-05
+
+Groundwork for reading **UniFi consoles you don't own**. The Site Manager cloud API only returns networks/VLANs for a
+console the API key's account owns (others 403 with "not the owner of this host"), but UniFi lets a non-owner read a
+console with a **local** API key created on it (the console → Settings → Integrations → Create New API Key; use a
+View&nbsp;Only admin). A UniFi connection can now store a local API key per console (sealed in the connection's
+encrypted secret, never shown again), and a new **Test transports** button on each console reports, read-only, which
+path actually reaches it — the cloud connector proxy with the account's Site Manager key (the current path), or the
+same proxy carrying the local key. This settles, per console, whether a stored local key is enough or a direct read is
+needed. Found under **Admin → Integrations → UniFi & UISP → Edit a connection**. Nothing changes for consoles that
+already sync.
+
 ## 3.7.0-beta.14 - 2026-11-05
 
 IPAM sync now explains *why* a client's UniFi networks and VLANs didn't come in, instead of flashing a bare "404".

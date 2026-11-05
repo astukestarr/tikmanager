@@ -1111,6 +1111,18 @@ class Handler(BaseHTTPRequestHandler):
             if not site or (s["kind"] == "client" and site["org_id"] != s["org_id"]):
                 raise HttpError(404, "Site not found.")
             return self.json({"devices": unifi.devices(key)})
+        if m := re.fullmatch(r"/api/net/accounts/(\d+)/consoles", path):   # consoles under a UniFi connection (for local keys)
+            self.require(tech=True)
+            try:
+                return self.json({"consoles": unifi.consoles(int(m.group(1)))})
+            except NetError as e:
+                raise HttpError(400, str(e)) from None
+        if m := re.fullmatch(r"/api/net/accounts/(\d+)/local-probe", path):   # which transport reaches a console (read-only)
+            self.require(tech=True)
+            try:
+                return self.json(unifi.local_probe(int(m.group(1)), q.get("host") or ""))
+            except NetError as e:
+                raise HttpError(400, str(e)) from None
         if path == "/api/integrations/cw/companies":   # PSA companies next to the TikManager clients they are linked to
             self.require(tech=True, admin=True)
             try:
@@ -2417,6 +2429,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self.json({"ok": False, "detail": str(e)})
             res = unifi.sync(s["email"], a["id"])
             return self.json({"ok": True, "last": (res or [None])[0]})
+        if m := re.fullmatch(r"/api/net/accounts/(\d+)/local-key", path):   # {host, key}: local API key for one console
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            try:
+                r = unifi.set_local_key(int(m.group(1)), str(b.get("host") or ""), str(b.get("key") or ""))
+            except NetError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "UniFi local console key " + ("saved" if r["key_set"] else "cleared"),
+                     r["host"], self.client_ip())   # the key itself is never logged
+            return self.json({"ok": True, **r})
         if path == "/api/unifi/sync":   # read every connection now
             s = self.require(tech=True)
             return self.json({"ok": True, "results": unifi.sync(s["email"]) or []})

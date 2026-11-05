@@ -115,10 +115,10 @@ class UnifiClient:
     def __init__(self, key, demo=False):
         self.key, self.demo = key, demo
 
-    def _call(self, path, params=None, timeout=30):
+    def _call(self, path, params=None, timeout=30, key=None):
         url = UNIFI_API + path + ("?" + urllib.parse.urlencode(params, doseq=True) if params else "")
         for attempt in range(3):
-            req = urllib.request.Request(url, headers={"X-API-Key": self.key, "Accept": "application/json"})
+            req = urllib.request.Request(url, headers={"X-API-Key": key or self.key, "Accept": "application/json"})
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as r:
                     return json.loads(r.read() or b"null")
@@ -166,6 +166,10 @@ class UnifiClient:
             for d in devs:
                 out[macnorm(d.get("macAddress") or d.get("mac"))] = site["ext"]
         return out
+
+    def hosts(self):
+        """The console list (/v1/hosts), demo-aware so the Integrations UI and local-key probe work in dev too."""
+        return _demo_unifi()[0] if self.demo else self._all("/v1/hosts")
 
     def fetch(self):
         if self.demo:
@@ -721,6 +725,101 @@ class Ubnt:
                     except NetError as e:
                         entry["integration_error"] = str(e)
                 out["consoles"].append(entry)
+        return out
+
+    # ---- local API keys: for consoles the Site Manager account doesn't own -----------------------------------------
+    # The Site Manager cloud connector gates on console ownership (a 403 "not the owner of this host"), so a console
+    # TikManager manages but doesn't own returns no networks/VLANs. UniFi lets a non-owner read that console with a
+    # LOCAL API key created under the console's Network > Integrations. A local key can be stored per console (sealed
+    # in the connection's secret), and local_probe() settles which transport actually reaches the console with it.
+
+    def _unifi_account(self, account_id):
+        a = self.db.one("SELECT * FROM net_accounts WHERE id=? AND kind='unifi'", (account_id,))
+        if not a:
+            raise NetError("UniFi connection not found.")
+        return a
+
+    def consoles(self, account_id):
+        """The distinct consoles this UniFi connection has sites on: {host, name, key_set, public}. `host` is the
+        /v1/hosts id; `key_set` is whether a local API key is stored for it; `public` is whether its address is
+        reachable from the internet (needed for a direct-to-console read)."""
+        a = self._unifi_account(account_id)
+        keys = self._secret(a).get("local_keys") or {}
+        hosts = self.client(a).hosts()
+        site_ids = [r["id"] for r in self.db.q("SELECT id FROM net_sites WHERE account_id=?", (account_id,))]
+
+        def hname(h):
+            rs = h.get("reportedState") or {}
+            return rs.get("hostname") or rs.get("name") or h.get("ipAddress") or h.get("id")
+
+        out = []
+        for h in hosts:
+            hid = h.get("id")
+            if hid and any(hid in sid for sid in site_ids):   # only consoles this connection actually uses
+                out.append({"host": hid, "name": hname(h), "key_set": bool(keys.get(hid)), "public": bool(public(h.get("ipAddress")))})
+        return sorted(out, key=lambda c: (c["name"] or "").lower())
+
+    def set_local_key(self, account_id, host, key):
+        """Store (or clear, if key is blank) the local API key for one console, sealed in the connection's secret."""
+        a = self._unifi_account(account_id)
+        host = str(host or "").strip()
+        if not host:
+            raise NetError("Which console?")
+        sec = self._secret(a)
+        keys = dict(sec.get("local_keys") or {})
+        key = str(key or "").strip()[:500]
+        if key:
+            keys[host] = key
+        else:
+            keys.pop(host, None)
+        sec["local_keys"] = keys
+        blob, enc = self.vault.seal(json.dumps(sec).encode(), f"netacct:{account_id}")
+        self.db.run("UPDATE net_accounts SET secret=? WHERE id=?",
+                    (json.dumps({"data": base64.b64encode(blob).decode(), "enc": enc}), account_id))
+        return {"host": host, "key_set": bool(key)}
+
+    def local_probe(self, account_id, host):
+        """Read-only: settle which transport reaches a console's Network Integration API. Tries, in order:
+          1) the cloud connector proxy with the account's Site Manager key (the current path - expected 403 when the
+             account doesn't own the console);
+          2) the same connector proxy but carrying the stored LOCAL key (does the connector pass a local key through,
+             or gate on ownership first?).
+        A third transport - the console directly at its public address with the local key - needs the console's
+        self-signed certificate to be accepted, so it is built separately once this probe shows it's needed."""
+        a = self._unifi_account(account_id)
+        host = str(host or "").strip()
+        local_key = (self._secret(a).get("local_keys") or {}).get(host)
+        cl = self.client(a)
+        h = next((x for x in cl.hosts() if x.get("id") == host), None)
+        if not h:
+            raise NetError("That console isn't in this connection's host list.")
+        rs = h.get("reportedState") or {}
+        name = rs.get("hostname") or rs.get("name") or host
+        ip = public(h.get("ipAddress"))
+        base = f"/v1/connector/consoles/{urllib.parse.quote(host)}/proxy/network/integration/v1/sites"
+        out = {"host": host, "console": name, "public_ip": bool(ip), "local_key_set": bool(local_key), "transports": []}
+
+        if cl.demo:   # simulate a console the account doesn't own: the current path 403s, a stored local key gets through
+            c1 = "Cloud connector proxy + Site Manager key (current path)"
+            c2 = "Cloud connector proxy + local key"
+            out["transports"].append({"name": c1, "ok": False, "error": "HTTP 403 (the key's account can't see this): not the owner of this host"})
+            out["transports"].append({"name": c2, "ok": True, "sites": 2} if local_key
+                                      else {"name": c2, "ok": False, "error": "No local API key stored for this console yet - add one above, then test."})
+            return out
+
+        def via_connector(key, label):
+            try:
+                data = (cl._call(base, {"limit": "5"}, timeout=25, key=key) or {}).get("data") or []
+                return {"name": label, "ok": True, "sites": len(data)}
+            except NetError as e:
+                return {"name": label, "ok": False, "error": str(e)}
+
+        out["transports"].append(via_connector(None, "Cloud connector proxy + Site Manager key (current path)"))
+        if local_key:
+            out["transports"].append(via_connector(local_key, "Cloud connector proxy + local key"))
+        else:
+            out["transports"].append({"name": "Cloud connector proxy + local key", "ok": False,
+                                      "error": "No local API key stored for this console yet - add one above, then test."})
         return out
 
     def unplaced(self):
