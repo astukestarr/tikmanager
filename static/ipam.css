@@ -49,6 +49,11 @@ body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex;
 
 .ipam-table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
 .ipam-table th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.ipam-table th .th-sort { background: none; border: none; padding: 0; margin: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.ipam-table th .th-sort:hover { color: var(--text); }
+.ipam-table th .th-sort.sorted { color: var(--accent); }
+.ipam-table th .th-arrow { font-size: 10px; }
+.row-actions { display: inline-flex; gap: 6px; }
 .ipam-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
 .ipam-table tr:last-child td { border-bottom: none; }
 .sub-row { cursor: pointer; }

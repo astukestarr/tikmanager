@@ -432,24 +432,65 @@ function table(cols, rows, rowFn) {
   const th = el("thead"); th.appendChild(tr); tbl.appendChild(th); const tb = el("tbody");
   rows.forEach((r) => tb.appendChild(rowFn(r))); tbl.appendChild(tb); return tbl;
 }
+// A table whose columns can be clicked to sort. `columns` = [{label, cls?, cell(row)->string|Node, sort?(row)->value}].
+// A column with a `sort` accessor gets a clickable header (first click ascending, then toggles). The chosen column and
+// direction are remembered per `key`, so a re-render (e.g. after an edit) keeps the same order.
+const sortState = {};
+function sortableTable(key, columns, rows) {
+  const st = sortState[key] || (sortState[key] = { col: null, dir: 1 });
+  const wrap = el("div");
+  const val = (v) => (v == null ? "" : v);
+  const cmp = (a, b) => (typeof a === "number" && typeof b === "number"
+    ? a - b : String(val(a)).localeCompare(String(val(b)), undefined, { numeric: true, sensitivity: "base" }));
+  const draw = () => {
+    wrap.textContent = "";
+    const tbl = el("table", "ipam-table"); const head = el("thead"); const tr = el("tr");
+    columns.forEach((c, i) => {
+      const th = el("th", c.cls);
+      if (c.sort) {
+        const b = el("button", "th-sort" + (st.col === i ? " sorted" : ""), c.label); b.type = "button";
+        if (st.col === i) b.appendChild(el("span", "th-arrow", st.dir > 0 ? "▲" : "▼"));
+        b.addEventListener("click", () => { if (st.col === i) st.dir = -st.dir; else { st.col = i; st.dir = 1; } draw(); });
+        th.appendChild(b);
+      } else th.textContent = c.label;
+      tr.appendChild(th);
+    });
+    head.appendChild(tr); tbl.appendChild(head); const tb = el("tbody");
+    let data = rows;
+    if (st.col != null && columns[st.col] && columns[st.col].sort) {
+      const sf = columns[st.col].sort; data = rows.slice().sort((a, b) => cmp(sf(a), sf(b)) * st.dir);
+    }
+    data.forEach((r) => {
+      const row = el("tr");
+      columns.forEach((c) => { const td = el("td", c.cls); const v = c.cell(r); if (v instanceof Node) td.appendChild(v); else if (v != null) td.textContent = String(v); row.appendChild(td); });
+      tb.appendChild(row);
+    });
+    tbl.appendChild(tb); wrap.appendChild(tbl);
+  };
+  draw();
+  return wrap;
+}
+// The Edit / Delete buttons shared by the VLAN / VRF / Device / Location rows (wired by delegation on #main via data-*).
+function rowActions(editAttr, delAttr, id, delLabel) {
+  const span = el("span", "row-actions");
+  const e = el("button", "btn tiny", "Edit"); e.dataset[editAttr] = id; span.appendChild(e);
+  const d = el("button", "btn tiny danger", delLabel || "Delete"); d.dataset[delAttr] = id; span.appendChild(d);
+  return span;
+}
 async function showVlans() {
   const m = $("main"); m.textContent = "Loading…";
   let r; try { r = await api("/api/ipam/vlans"); } catch (e) { m.textContent = e.message; return; }
   vlansCache = r.vlans; m.textContent = ""; m.appendChild(listHead("VLANs", "+ VLAN", "newvlan"));
   if (!r.vlans.length) { m.appendChild(el("p", "muted pad", "No VLANs yet — add one, or they appear as Sync discovers them from routers and UniFi.")); return; }
-  m.appendChild(table(["VLAN", "Name", "L2 domain", "Client", "Subnets", ...(readonly ? [] : [""])], r.vlans, (v) => {
-    const row = el("tr");
-    row.appendChild(el("td", "mono", String(v.number)));
-    row.appendChild(el("td", null, v.name || ""));
-    row.appendChild(el("td", "muted", v.l2domain));
-    row.appendChild(el("td", null, v.org || ""));
-    row.appendChild(el("td", null, String(v.subnets)));
-    if (!readonly) {
-      const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editvlan = v.id; last.appendChild(e);
-      const d = el("button", "btn tiny danger", "Delete"); d.dataset.delvlan = v.id; last.appendChild(d); row.appendChild(last);
-    }
-    return row;
-  }));
+  const cols = [
+    { label: "VLAN", cls: "mono", cell: (v) => String(v.number), sort: (v) => v.number },
+    { label: "Name", cell: (v) => v.name || "", sort: (v) => (v.name || "").toLowerCase() },
+    { label: "L2 domain", cls: "muted", cell: (v) => v.l2domain, sort: (v) => (v.l2domain || "").toLowerCase() },
+    { label: "Client", cell: (v) => v.org || "", sort: (v) => (v.org || "").toLowerCase() },
+    { label: "Subnets", cell: (v) => String(v.subnets), sort: (v) => v.subnets },
+  ];
+  if (!readonly) cols.push({ label: "", cell: (v) => rowActions("editvlan", "delvlan", v.id) });
+  m.appendChild(sortableTable("vlans", cols, r.vlans));
 }
 function vlanDialog(v) {
   const box = el("div");
@@ -500,20 +541,21 @@ async function showDevices() {
   m.textContent = ""; m.appendChild(listHead("Devices", "+ Device", "newdevice"));
   m.appendChild(el("p", "muted small pad", "Infrastructure — routers, switches, access points, gateways and the like. Sync adds managed MikroTiks and UniFi devices automatically; add others by hand."));
   if (!r.devices.length) { m.appendChild(el("p", "muted pad", "No devices yet — add one, or Sync a client to discover its infrastructure.")); return; }
-  m.appendChild(table(["Device", "Type", "Management IP", "Location", "Client", "Source", ...(readonly ? [] : [""])], r.devices, (d) => {
-    const row = el("tr");
-    row.appendChild(el("td", null, d.name + (d.linked_device ? "" : "")));
-    row.appendChild(el("td", null, d.type || "—"));
-    row.appendChild(el("td", "mono", d.management_ip || ""));
-    row.appendChild(el("td", null, d.location || ""));
-    row.appendChild(el("td", null, d.org || ""));
-    const cs = el("td"); cs.appendChild(el("span", "pill " + (d.source_auto ? "disc" : "man"), d.source_auto ? "discovered" : "manual")); row.appendChild(cs);
-    if (!readonly) {
-      const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editdevice = d.id; last.appendChild(e);
-      const x = el("button", "btn tiny danger", "Delete"); x.dataset.deldevice = d.id; last.appendChild(x); row.appendChild(last);
-    }
-    return row;
-  }));
+  const cols = [
+    { label: "Device", cell: (d) => d.name, sort: (d) => (d.name || "").toLowerCase() },
+    { label: "Type", cell: (d) => d.type || "—", sort: (d) => (d.type || "").toLowerCase() },
+    { label: "Management IP", cls: "mono", cell: (d) => d.management_ip || "", sort: (d) => ipKey(d.management_ip) },
+    { label: "Location", cell: (d) => d.location || "", sort: (d) => (d.location || "").toLowerCase() },
+    { label: "Client", cell: (d) => d.org || "", sort: (d) => (d.org || "").toLowerCase() },
+    { label: "Source", cell: (d) => el("span", "pill " + (d.source_auto ? "disc" : "man"), d.source_auto ? "discovered" : "manual"), sort: (d) => (d.source_auto ? "discovered" : "manual") },
+  ];
+  if (!readonly) cols.push({ label: "", cell: (d) => rowActions("editdevice", "deldevice", d.id) });
+  m.appendChild(sortableTable("devices", cols, r.devices));
+}
+// Sort key for an IPv4 address so .10 sorts after .9 (empty sorts last).
+function ipKey(ip) {
+  const m = String(ip || "").match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/);
+  return m ? (((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4]) : Number.MAX_SAFE_INTEGER;
 }
 function deviceDialog(d) {
   const box = el("div");

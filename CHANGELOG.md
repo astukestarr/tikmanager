@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.16 - 2026-11-05
+
+IPAM: the **VLANs** and **Devices** tables are now **sortable** — click any column header to sort (click again to
+reverse), including **Client**. Management IP sorts in numeric address order (so .10 follows .9, not .1), and the
+chosen order is kept when the table re-renders after an edit.
+
 ## 3.7.0-beta.15 - 2026-11-05
 
 Groundwork for reading **UniFi consoles you don't own**. The Site Manager cloud API only returns networks/VLANs for a
