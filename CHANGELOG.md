@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.20 - 2026-11-05
+
+The old read-only **Subnets** page is folded into the **IPAM** workspace, removing the confusing duplicate in the
+Network menu. The Network group now lists IPAM instead of both; opening the old Subnets link (or an old `#subnets`
+bookmark) sends anyone who can use IPAM straight there. A client without IPAM access still sees the old read-only
+subnet list - give a client IPAM access (Admin > Clients) for them to use the full workspace.
+
 ## 3.7.0-beta.19 - 2026-11-05
 
 IPAM racks: a **device palette** now sits beside the rack elevation listing the client's unplaced devices, and you can

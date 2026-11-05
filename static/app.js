@@ -5000,6 +5000,9 @@ async function discoveredPage() {
 }
 
 async function subnetsPage() {
+  // Subnets now live in the IPAM workspace. Anyone who can open IPAM goes straight there (a stale #subnets link or
+  // old habit lands in the right place); a client without IPAM access keeps this read-only view.
+  if (isTech() || (me.kind === "client" && me.client_ipam)) { location.href = "/ipam"; return; }
   const rows = await api("/api/sites");   // the same client-scoped data as the site map
   const list = rows.flatMap((d) => d.networks.map((n) => {
     const [first, last] = cidrRange(n.network), bits = Number(n.network.split("/")[1]);
@@ -7167,7 +7170,7 @@ const NAV = [
     { view: "routers", arg: "router", label: "Routers", count: "router" }, { view: "routers", arg: "switch", label: "Switches", count: "switch" },
     { view: "unifi", label: "UniFi / UISP", count: "unifi", who: "unifi" }] },
   { group: "Network", icon: "network", items: [
-    { view: "sites", label: "Site map" }, { view: "isps", label: "ISPs" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
+    { view: "sites", label: "Site map" }, { view: "isps", label: "ISPs" }, { view: "discovered", label: "Discovered", who: "tech" },
     { link: "/ipam", label: "IPAM", who: "ipam" }, { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
     { view: "health", label: "Router health", who: "tech" }, { view: "checks", label: "Critical checks", who: "tech" },
