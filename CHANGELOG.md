@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.14 - 2026-11-05
+
+IPAM sync now explains *why* a client's UniFi networks and VLANs didn't come in, instead of flashing a bare "404".
+When the UniFi Network integration API can't read a console, the sync says which consoles failed and why - a **403**
+means the API key's UniFi account doesn't own/admin that console (the console is managed but not owned), and a **404**
+means the console wasn't found or is offline. The message distinguishes "none of this client's consoles could be read -
+no networks or VLANs imported" from "2 of 20 couldn't be read; the other 18 synced", and stays on screen long enough to
+read. Consoles that answer are still synced regardless of the ones that don't - the integration path itself works
+(confirmed live against consoles the key owns). The 403 case is fixed in UniFi, by giving the key's account owner/admin
+access to that console; TikManager now just tells you that's what's needed.
+
 ## 3.7.0-beta.13 - 2026-11-05
 
 Mobile polish for the IPAM workspace. On a phone the sections & clients list is now a slide-in drawer (a ☰ button in

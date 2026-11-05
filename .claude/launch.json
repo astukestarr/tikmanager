@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tikmanager-dev",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["server.py"],
+      "port": 8801,
+      "env": { "TM_DEV": "1", "TM_PORT": "8801" }
+    }
+  ]
+}

@@ -360,8 +360,8 @@ async function syncOrg(orgId, label) {
     let msg = `Synced ${r.routers} router(s): +${r.subnets_added} subnets, +${r.addresses_added} addresses`;
     if (r.unifi) msg += ` (${r.unifi} from UniFi${r.unifi_networks ? ", " + r.unifi_networks + " networks" : ""})`;
     if (r.offline) msg += `, ${r.offline} offline`;
-    if (r.unifi_error) msg += ` — UniFi API: ${r.unifi_error}`;
-    toast(msg + ".");
+    if (r.unifi_error) msg += ` — UniFi: ${r.unifi_error}`;
+    toast(msg + ".", r.unifi_error ? 12000 : 4000);   // leave an actionable UniFi note up long enough to read
     await reload();
   } catch (e) { toast(e.message); }
 }
@@ -392,9 +392,9 @@ async function doSearch(q) {
 
 // ---- toast --------------------------------------------------------------------------------------------------
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms) {
   let t = $("toast"); if (!t) { t = el("div", "toast"); t.id = "toast"; document.body.appendChild(t); }
-  t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 4000);
+  t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), ms || 4000);
 }
 
 // ---- tabs: VLANs / VRFs / Devices / Locations ---------------------------------------------------------------

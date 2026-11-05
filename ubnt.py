@@ -575,6 +575,21 @@ class Ubnt:
         cloud connector - the same proxy used for device-to-site mapping). Works for ANY site, gateway or not. Returns
         {"networks": [{site,name,vlan,cidr}], "clients": [{ip,mac,name}], "error": str|None}. UISP accounts are skipped."""
         out = {"networks": [], "clients": [], "error": None}
+        consoles_tried = 0            # consoles we attempted the integration API on
+        consoles_ok = 0              # consoles that answered (networks may still be empty)
+        forbidden = 0                # 403: the API key's UniFi account doesn't own/admin that console
+        unreachable = 0             # 404 / connection failures: console not found or offline
+        other_err = None            # first error that is neither 403 nor 404
+
+        def classify(msg):           # bucket a NetError message by what it tells the operator
+            nonlocal forbidden, unreachable, other_err
+            if "HTTP 403" in msg:
+                forbidden += 1
+            elif "HTTP 404" in msg or "reach" in msg.lower() or "DNS" in msg or "timed out" in msg.lower():
+                unreachable += 1
+            else:
+                other_err = other_err or msg
+
         rows = self.db.q("SELECT s.id, s.name, s.internal, s.account_id FROM net_sites s "
                          "JOIN net_accounts a ON a.id=s.account_id WHERE s.org_id=? AND a.kind='unifi'", (org_id,))
         by_acct = {}
@@ -588,7 +603,7 @@ class Ubnt:
             try:
                 host_ids = [h.get("id") for h in cl._all("/v1/hosts") if h.get("id")]
             except NetError as e:
-                out["error"] = out["error"] or str(e)
+                other_err = other_err or str(e)
                 continue
             # the real console id for the connector is the /v1/hosts id embedded in the stored site id
             # (site id = "1:<hostId>:<siteId>", while /v1/hosts gives just "<hostId>")
@@ -599,12 +614,14 @@ class Ubnt:
                 if real:
                     by_host.setdefault(real, []).append(s)
             for host, sites in by_host.items():
+                consoles_tried += 1
                 base = f"/v1/connector/consoles/{urllib.parse.quote(host)}/proxy/network/integration/v1/sites"
                 try:
                     isites = (cl._call(base, timeout=25) or {}).get("data") or []
                 except NetError as e:
-                    out["error"] = out["error"] or str(e)
+                    classify(str(e))
                     continue
+                consoles_ok += 1
                 for isite in isites:
                     match = next((s for s in sites if s["internal"] and s["internal"] == isite.get("internalReference")), None) \
                         or next((s for s in sites if s["name"] == isite.get("name")), None)
@@ -614,7 +631,7 @@ class Ubnt:
                     try:
                         nets = (cl._call(f"{base}/{sid}/networks", {"limit": "200"}, timeout=25) or {}).get("data") or []
                     except NetError as e:
-                        out["error"] = out["error"] or str(e)
+                        other_err = other_err or str(e)
                         nets = []
                     for n in nets:
                         cidr = self._first_cidr(n)
@@ -624,13 +641,36 @@ class Ubnt:
                     try:
                         clients = (cl._call(f"{base}/{sid}/clients", {"limit": "500"}, timeout=25) or {}).get("data") or []
                     except NetError as e:
-                        out["error"] = out["error"] or str(e)
+                        other_err = other_err or str(e)
                         clients = []
                     for c in clients:
                         ip = str(c.get("ipAddress") or c.get("ip") or "").strip()
                         if ip:
                             out["clients"].append({"ip": ip, "mac": macnorm(c.get("macAddress") or c.get("mac")),
                                                    "name": c.get("name") or c.get("hostname") or ""})
+        # Compose one honest summary instead of whichever error happened to be first. A 403 means the API key's UniFi
+        # account isn't the owner/admin of that console (the MSP manages it but doesn't own it); a 404/unreachable means
+        # the console wasn't found or is offline. Consoles that answered are still synced - the rest are just missing.
+        out["consoles_tried"] = consoles_tried
+        out["consoles_ok"] = consoles_ok
+        failed = forbidden + unreachable + (1 if other_err else 0)
+        if consoles_tried and consoles_ok < consoles_tried:
+            why = []
+            if forbidden:
+                why.append(f"{forbidden} not owned by the API key's UniFi account (403)")
+            if unreachable:
+                why.append(f"{unreachable} not found or offline (404)")
+            if other_err and not (forbidden or unreachable):
+                why.append(other_err)
+            reason = "; ".join(why) if why else (other_err or "unknown error")
+            if consoles_ok == 0:
+                out["error"] = (f"None of the {consoles_tried} UniFi console(s) for this client could be read "
+                                f"({reason}). No configured networks or VLANs were imported.")
+            else:
+                out["error"] = (f"{consoles_tried - consoles_ok} of {consoles_tried} UniFi console(s) couldn't be read "
+                                f"({reason}); networks/VLANs from those are missing. The other {consoles_ok} synced.")
+        elif other_err and not consoles_tried:
+            out["error"] = other_err
         return out
 
     def integration_probe(self, org_id):
