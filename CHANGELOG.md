@@ -3,6 +3,31 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.12 - 2026-11-04
+
+The IPAM workspace fills out: VLANs, VRFs, Devices, Locations, DNS/PTR, CSV import/export, and read access for
+clients. (Deploy note: this adds two columns - `orgs.client_ipam` and `ipam_devices.source_auto` - both applied
+automatically on first start.)
+
+- **VLANs & VRFs.** A VLANs tab and a VRFs tab, each with create / edit / delete, plus VLAN and VRF pickers on the
+  subnet editor. Sync now **auto-populates VLANs** from what it discovers - RouterOS `/interface/vlan` and UniFi
+  network VLAN ids - and links each subnet to its VLAN. (A discovered subnet's stored interface is the VLAN
+  interface's *name*, e.g. `vlan20-guest`, so it's matched to the VLAN by name, not by the parent bridge - otherwise
+  the bridge LANs were mis-tagged and the real VLAN subnets missed.)
+- **Devices & Locations.** A Devices tab (infrastructure inventory - routers, switches, APs, gateways, ...) and a
+  Locations tab, each with create / edit / delete and built-in device types. Sync **auto-populates** the inventory:
+  each managed MikroTik and each UniFi / UISP AP, switch and gateway becomes a device (typed from its model and
+  linked back to the managed record), and each UniFi site becomes a location. Client workstations are never added, and
+  a manual rename is never overwritten.
+- **DNS / PTR.** Addresses gain an editable PTR (reverse-DNS) field alongside the DNS name.
+- **CSV import / export.** Export the current view (subnets or IP addresses) as CSV with phpIPAM-compatible headers.
+  Import a CSV (phpIPAM headers or TikManager's own export columns are both recognised) with a preview first; import is
+  **add-only** - it never changes or removes anything you already have, and addresses are matched into their subnet by
+  containment.
+- **Clients can view their own IPAM.** A new per-client **IPAM** access toggle (Admin > Clients). When on, that
+  client's users may open the IPAM workspace **read-only**, scoped to their own organization - only their own subnets,
+  addresses, VLANs, VRFs, devices and locations, with every editing control hidden. All changes stay technician-only.
+
 ## 3.7.0-beta.11 - 2026-11-04
 
 - **Updates: survive GitHub's API rate limit.** The update check uses GitHub's API, which allows only 60 requests/hour

@@ -214,6 +214,20 @@ SLIDES_3_7 = [
              "It also reads a client's UniFi networks (the real subnets and VLANs, for every site - gateway or not) and places "
              "its UniFi devices and connected clients into them. "
              "It never overwrites anything you typed by hand, and leaves TikManager's own management range alone."},
+    {"id": "ipam-vlans-vrfs", "title": "IPAM: VLANs & VRFs", "img": None, "view": None, "who": "tech",
+     "text": "IPAM now has VLANs and VRFs tabs, and you can tie a subnet to a VLAN or VRF. Sync fills VLANs in for you - "
+             "from the routers' VLAN interfaces and from UniFi's network VLAN ids - and links each subnet to its VLAN automatically."},
+    {"id": "ipam-devices", "title": "IPAM: Devices & Locations", "img": None, "view": None, "who": "tech",
+     "text": "New Devices and Locations tabs hold your infrastructure - routers, switches, access points, gateways - and the sites "
+             "they live at. Sync adds them for you: each managed MikroTik and each UniFi AP, switch and gateway becomes a device, "
+             "and each UniFi site becomes a location. Add anything else by hand."},
+    {"id": "ipam-csv", "title": "IPAM: import and export CSV", "img": None, "view": None, "who": "tech",
+     "text": "Export subnets or IP addresses as CSV (phpIPAM-compatible), and import a CSV with a preview first. Import only ever "
+             "adds new rows - it never changes or removes anything you already have. Addresses also gained a reverse-DNS (PTR) field."},
+    {"id": "ipam-client-access", "title": "IPAM: let clients see their own", "img": None, "view": "clients", "who": "techadmin",
+     "text": "A new per-client IPAM toggle in Admin > Clients. Turn it on and that client's users can open IPAM read-only, scoped to "
+             "just their own organisation - their subnets, addresses, VLANs and devices, with no editing. Everything stays "
+             "technician-only to change."},
 ]
 SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
