@@ -420,6 +420,7 @@ function setTab(t) {
   else if (t === "vlans") showVlans();
   else if (t === "vrfs") showVrfs();
   else if (t === "devices") showDevices();
+  else if (t === "racks") showRacks();
   else if (t === "locations") showLocations();
 }
 // Jump to a subnet's detail from anywhere (e.g. a dashboard widget): switch to the Subnets tab, then open it.
@@ -522,6 +523,7 @@ async function showDashboard() {
   stats.appendChild(dashStat("VLANs", c.vlans, "vlans"));
   stats.appendChild(dashStat("VRFs", c.vrfs, "vrfs"));
   stats.appendChild(dashStat("Devices", c.devices, "devices"));
+  stats.appendChild(dashStat("Racks", c.racks, "racks"));
   stats.appendChild(dashStat("Locations", c.locations, "locations"));
   grid.appendChild(dashCard("Statistics", stats));
 
@@ -711,6 +713,103 @@ function locationDialog(l) {
   });
 }
 
+// ---- racks --------------------------------------------------------------------------------------------------
+let rackOpen = null;   // the rack id whose elevation is showing (so edits/placements re-render it)
+async function showRacks() {
+  rackOpen = null;
+  const m = $("main"); m.textContent = "Loading…";
+  let r; try { r = await api("/api/ipam/racks"); } catch (e) { m.textContent = e.message; return; }
+  m.textContent = ""; m.appendChild(listHead("Racks", "+ Rack", "newrack"));
+  m.appendChild(el("p", "muted small pad", "Equipment racks. Open a rack to see its elevation and place devices (from the Devices inventory) into rack units."));
+  if (!r.racks.length) { m.appendChild(el("p", "muted pad", "No racks yet — add one, then place devices into it.")); return; }
+  const cols = [
+    { label: "Rack", cell: (k) => { const a = el("a", "cidr", k.name); a.dataset.openrack = k.id; return a; }, sort: (k) => (k.name || "").toLowerCase() },
+    { label: "Size", cls: "mono", cell: (k) => k.size_u + "U", sort: (k) => k.size_u },
+    { label: "Filled", cell: (k) => k.used_u + " / " + k.size_u + "U", sort: (k) => k.used_u },
+    { label: "Devices", cell: (k) => String(k.devices), sort: (k) => k.devices },
+    { label: "Location", cell: (k) => k.location || "", sort: (k) => (k.location || "").toLowerCase() },
+    { label: "Client", cell: (k) => k.org || "", sort: (k) => (k.org || "").toLowerCase() },
+    { label: "Description", cell: (k) => k.description || "", sort: (k) => (k.description || "").toLowerCase() },
+  ];
+  if (!readonly) cols.push({ label: "", cell: (k) => rowActions("editrack", "delrack", k.id) });
+  m.appendChild(sortableTable("racks", cols, r.racks));
+}
+// A rack elevation drawn as a table: one row per U (top-numbered down to 1); a device is a cell spanning its height
+// with rowspan, so no dynamic inline styles are needed. Covered units below a device emit no slot cell.
+function rackElevation(r) {
+  const byTop = {}, covered = {};
+  (r.units || []).forEach((d) => {
+    const h = Math.max(1, d.rack_height || 1), top = d.rack_u + h - 1;
+    byTop[top] = d; for (let u = d.rack_u; u <= top; u++) covered[u] = d;
+  });
+  const wrap = el("div", "rack-wrap"); const tbl = el("table", "rack"); const tb = el("tbody");
+  for (let u = r.size_u; u >= 1; u--) {
+    const tr = el("tr");
+    tr.appendChild(el("td", "rack-u", String(u)));
+    if (byTop[u]) {
+      const d = byTop[u]; const td = el("td", "rack-dev"); td.rowSpan = Math.max(1, d.rack_height || 1);
+      td.appendChild(el("span", "rack-dev-name", d.name));
+      td.appendChild(el("span", "rack-dev-info", (d.rack_height || 1) + "U" + (d.type ? " · " + d.type : "") + (d.management_ip ? " · " + d.management_ip : "")));
+      if (!readonly) { const x = el("button", "rack-remove", "×"); x.dataset.unplace = d.id; x.title = "Remove from rack"; td.appendChild(x); }
+      tr.appendChild(td);
+    } else if (!covered[u]) tr.appendChild(el("td", "rack-slot"));
+    tb.appendChild(tr);
+  }
+  tbl.appendChild(tb); wrap.appendChild(tbl); return wrap;
+}
+async function showRack(id) {
+  const m = $("main"); m.textContent = "Loading…";
+  let r; try { r = await api("/api/ipam/racks/" + id); } catch (e) { m.textContent = e.message; return; }
+  rackOpen = r.id; m.textContent = "";
+  const head = el("div", "main-head");
+  const back = el("button", "btn", "← Racks"); back.dataset.racksback = "1"; head.appendChild(back);
+  head.appendChild(el("h1", null, r.name));
+  const acts = el("div", "main-head-actions");
+  if (!readonly) {
+    const place = el("button", "btn primary", "+ Place device"); place.dataset.placedev = r.id; acts.appendChild(place);
+    const ed = el("button", "btn", "Edit rack"); ed.dataset.editrack = r.id; acts.appendChild(ed);
+  }
+  head.appendChild(acts); m.appendChild(head);
+  const meta = el("div", "meta-row");
+  const chip = (label, val) => { const c = el("span", "chip"); c.appendChild(el("b", null, label + " ")); c.appendChild(document.createTextNode(val)); return c; };
+  const usedU = (r.units || []).reduce((s, d) => s + (d.rack_height || 1), 0);
+  meta.appendChild(chip("Size", r.size_u + "U")); meta.appendChild(chip("Filled", usedU + " / " + r.size_u + "U"));
+  if (r.location) meta.appendChild(chip("Location", r.location));
+  if (r.org) meta.appendChild(chip("Client", r.org));
+  m.appendChild(meta);
+  if (r.description) m.appendChild(el("p", "muted", r.description));
+  if (!(r.units || []).length) m.appendChild(el("p", "muted small", "Nothing placed yet — use “Place device”."));
+  m.appendChild(rackElevation(r));
+}
+function rackDialog(k) {
+  const box = el("div");
+  box.appendChild(field("Name", inp("f_name", k?.name || "")));
+  box.appendChild(field("Size (U)", inp("f_size", k?.size_u || 42, "e.g. 42")));
+  const locOpts = [{ value: "", label: "(none)" }, ...locsCache.map((l) => ({ value: l.id, label: l.name }))];
+  box.appendChild(field("Location", sel("f_loc", locOpts, k?.location_id || "")));
+  box.appendChild(field("Client", sel("f_org", clientOpts(), k?.org_id || "")));
+  box.appendChild(field("Description", inp("f_desc", k?.description || "")));
+  box.appendChild(field("Notes", inp("f_notes", k?.notes || "")));
+  openDlg(k?.id ? "Edit rack" : "New rack", box, async () => {
+    await post("/api/ipam/racks", { id: k?.id, name: $("f_name").value, size_u: +$("f_size").value, location_id: $("f_loc").value || null,
+      org_id: $("f_org").value || null, description: $("f_desc").value, notes: $("f_notes").value });
+    if (rackOpen) await showRack(rackOpen); else await showRacks();
+  });
+}
+async function placeDialog(rackId) {
+  let avail; try { avail = (await api("/api/ipam/racks/" + rackId + "/placeable")).devices; } catch (e) { toast(e.message); return; }
+  const box = el("div");
+  if (!avail.length) { box.appendChild(el("p", "muted small", "No unplaced devices for this rack. Add devices on the Devices tab first (or assign them to this rack's client).")); openDlg("Place device", box, null); return; }
+  const devOpts = avail.map((d) => ({ value: d.id, label: d.name + (d.type ? " (" + d.type + ")" : "") }));
+  box.appendChild(field("Device", sel("f_dev", devOpts, "")));
+  box.appendChild(field("Bottom unit (U)", inp("f_u", "1", "lowest U it occupies")));
+  box.appendChild(field("Height (U)", inp("f_h", "1", "how many U tall")));
+  openDlg("Place device", box, async () => {
+    await post("/api/ipam/racks/place", { rack_id: rackId, device_id: +$("f_dev").value, rack_u: +$("f_u").value, rack_height: +$("f_h").value });
+    await showRack(rackId);
+  });
+}
+
 // ---- load / route -------------------------------------------------------------------------------------------
 async function reload() { tree = await api("/api/ipam/tree"); renderTree(); if (tab !== "subnets") return setTab(tab); if (current?.subnet) await showSubnet(current.subnet); else showSubnets(); }
 
@@ -765,7 +864,16 @@ async function init() {
     // read-only client: ignore every write/edit affordance (map cells open the address editor otherwise)
     if (readonly && (t.classList.contains("cell") || ["newvlan", "editvlan", "delvlan", "newvrf", "editvrf", "delvrf",
       "newsubnet", "editsubnet", "splitsubnet", "newaddr", "syncorg", "delsubnet", "editaddr", "deladdr",
-      "newdevice", "editdevice", "deldevice", "newlocation", "editlocation", "dellocation"].some((k) => t.dataset[k] != null))) return;
+      "newdevice", "editdevice", "deldevice", "newlocation", "editlocation", "dellocation",
+      "newrack", "editrack", "delrack", "placedev", "unplace"].some((k) => t.dataset[k] != null))) return;
+    // Racks
+    if (t.dataset.openrack != null) return showRack(+t.dataset.openrack);
+    if (t.dataset.racksback != null) return showRacks();
+    if (t.dataset.newrack != null) return rackDialog(null);
+    if (t.dataset.editrack != null) { const k = await api("/api/ipam/racks/" + t.dataset.editrack); return rackDialog(k); }
+    if (t.dataset.delrack != null) { if (confirm("Delete this rack? Devices in it are kept but unplaced.")) { await post("/api/ipam/racks/" + t.dataset.delrack + "/delete"); await showRacks(); } return; }
+    if (t.dataset.placedev != null) return placeDialog(+t.dataset.placedev);
+    if (t.dataset.unplace != null) { await post("/api/ipam/racks/unplace", { device_id: +t.dataset.unplace }); if (rackOpen) await showRack(rackOpen); return; }
     // Dashboard widgets
     if (t.dataset.gotab != null) return setTab(t.dataset.gotab);
     if (t.dataset.dashsubnet != null) return openSubnet(+t.dataset.dashsubnet);

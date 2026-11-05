@@ -897,6 +897,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"locations": ipam.locations(org or q.get("org"))})
             if path == "/api/ipam/devices":
                 return self.json({"devices": ipam.devices_list(org or q.get("org"))})
+            if path == "/api/ipam/racks":
+                return self.json({"racks": ipam.racks(org or q.get("org"))})
+            if m := re.fullmatch(r"/api/ipam/racks/(\d+)", path):
+                return self.json(ipam.rack(int(m.group(1))))
+            if m := re.fullmatch(r"/api/ipam/racks/(\d+)/placeable", path):
+                return self.json({"devices": ipam.rack_placeable(int(m.group(1)))})
             if path == "/api/ipam/export.csv":
                 kind = "addresses" if q.get("kind") == "addresses" else "subnets"
                 csvtext = ipam.export_csv(kind, org if org is not None else q.get("org"))
@@ -947,6 +953,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"id": ipam.device_save(b, who)})
             if m := re.fullmatch(r"/api/ipam/devices/(\d+)/delete", path):
                 ipam.device_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/racks":
+                return self.json({"id": ipam.rack_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/racks/(\d+)/delete", path):
+                ipam.rack_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/racks/place":
+                return self.json(ipam.rack_place(b))
+            if path == "/api/ipam/racks/unplace":
+                ipam.rack_unplace(int(b.get("device_id") or 0)); return self.json({"ok": True})
             if path == "/api/ipam/import":
                 kind = "addresses" if b.get("kind") == "addresses" else "subnets"
                 return self.json(ipam.import_csv(kind, b.get("csv"), b.get("org_id"), bool(b.get("commit")), who))

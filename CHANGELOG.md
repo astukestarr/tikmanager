@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.18 - 2026-11-05
+
+IPAM gains **Racks** (like phpIPAM's rack management). A new Racks tab lists your equipment racks (size in U, how full,
+device count, location, client), and opening one shows a **visual rack elevation** — units numbered top to bottom, with
+each device drawn as a block spanning its height. Create racks, then **place devices** from the Devices inventory at a
+chosen unit and height; placements can't overlap or run past the top of the rack, and a device's client scopes which
+rack it can go in. Remove a device from a rack with the × on its block. Racks are also counted on the Dashboard.
+(Deploy note: adds the `ipam_racks` table and three columns on `ipam_devices` - `rack_id`, `rack_u`, `rack_height` -
+applied automatically on first start.)
+
 ## 3.7.0-beta.17 - 2026-11-05
 
 IPAM now opens on a **Dashboard** — a phpIPAM-style overview and the new landing tab. It shows **Statistics**

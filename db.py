@@ -369,12 +369,20 @@ CREATE TABLE IF NOT EXISTS ipam_locations (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, address TEXT, lat REAL, lon REAL,
   org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL, notes TEXT, created_by TEXT, created_at REAL NOT NULL, updated_at REAL
 );
+CREATE TABLE IF NOT EXISTS ipam_racks (               -- equipment racks (phpIPAM "Racks"): a frame of N rack units
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, size_u INTEGER NOT NULL DEFAULT 42,
+  org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL,
+  location_id INTEGER REFERENCES ipam_locations(id) ON DELETE SET NULL,
+  description TEXT, notes TEXT, created_by TEXT, created_at REAL NOT NULL, updated_at REAL
+);
 CREATE TABLE IF NOT EXISTS ipam_devices (             -- IPAM's own inventory of non-managed endpoints (phpIPAM "devices")
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, type_id INTEGER REFERENCES ipam_device_types(id) ON DELETE SET NULL,
   location_id INTEGER REFERENCES ipam_locations(id) ON DELETE SET NULL, org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL,
   device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,   -- optional link to a managed MikroTik
   management_ip TEXT, description TEXT, notes TEXT, custom TEXT NOT NULL DEFAULT '{}',
   source_auto INTEGER NOT NULL DEFAULT 0,               -- 1: created by Sync (discovered infrastructure), 0: added by hand
+  rack_id INTEGER REFERENCES ipam_racks(id) ON DELETE SET NULL,  -- placement: which rack, starting unit, height in U
+  rack_u INTEGER, rack_height INTEGER NOT NULL DEFAULT 1,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL
 );
 CREATE TABLE IF NOT EXISTS ipam_addresses (           -- individual host records / the live-usage overlay
@@ -418,6 +426,11 @@ class DB:
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS orgs_cw ON orgs(cw_id)")
         if "ipam_devices" in tables and "source_auto" not in {r[1] for r in c.execute("PRAGMA table_info(ipam_devices)")}:
             c.execute("ALTER TABLE ipam_devices ADD COLUMN source_auto INTEGER NOT NULL DEFAULT 0")
+        if "ipam_devices" in tables:
+            idcols = {r[1] for r in c.execute("PRAGMA table_info(ipam_devices)")}
+            for col, ddl in (("rack_id", "INTEGER"), ("rack_u", "INTEGER"), ("rack_height", "INTEGER NOT NULL DEFAULT 1")):
+                if col not in idcols:
+                    c.execute(f"ALTER TABLE ipam_devices ADD COLUMN {col} {ddl}")
         if "users" in tables and "entra_oid" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
             c.execute("ALTER TABLE users ADD COLUMN entra_oid TEXT")
         if "users" in tables and "prefs" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:

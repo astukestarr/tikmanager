@@ -174,6 +174,7 @@ class Ipam:
             "vlans": one(f"SELECT COUNT(*) AS n FROM ipam_vlans{sw}", sa),
             "vrfs": one(f"SELECT COUNT(*) AS n FROM ipam_vrfs{sw}", sa),
             "devices": one(f"SELECT COUNT(*) AS n FROM ipam_devices{sw}", sa),
+            "racks": one(f"SELECT COUNT(*) AS n FROM ipam_racks{sw}", sa),
             "locations": one(f"SELECT COUNT(*) AS n FROM ipam_locations{sw}", sa),
             "sections": 0 if oid else one("SELECT COUNT(*) AS n FROM ipam_sections"),
             "clients": 1 if oid else one("SELECT COUNT(DISTINCT org_id) AS n FROM ipam_subnets WHERE org_id IS NOT NULL"),
@@ -471,6 +472,87 @@ class Ipam:
 
     def device_delete(self, did):
         self.db.run("DELETE FROM ipam_devices WHERE id=?", (int(did),))
+
+    # --- racks --------------------------------------------------------------------------------------------------
+    def racks(self, org_id=None):
+        where = "WHERE r.org_id=?" if org_id else ""
+        args = (int(org_id),) if org_id else ()
+        return self.db.q(f"""SELECT r.*, l.name AS location, o.name AS org,
+            (SELECT COUNT(*) FROM ipam_devices d WHERE d.rack_id=r.id AND d.rack_u IS NOT NULL) AS devices,
+            (SELECT COALESCE(SUM(d.rack_height), 0) FROM ipam_devices d WHERE d.rack_id=r.id AND d.rack_u IS NOT NULL) AS used_u
+            FROM ipam_racks r LEFT JOIN ipam_locations l ON l.id=r.location_id LEFT JOIN orgs o ON o.id=r.org_id
+            {where} ORDER BY r.name""", args)
+
+    def rack(self, rid):
+        r = self.db.one("""SELECT r.*, l.name AS location, o.name AS org FROM ipam_racks r
+            LEFT JOIN ipam_locations l ON l.id=r.location_id LEFT JOIN orgs o ON o.id=r.org_id WHERE r.id=?""", (int(rid),))
+        if not r:
+            raise IpamError("That rack doesn't exist.")
+        out = dict(r)
+        out["units"] = self.db.q("""SELECT d.id, d.name, d.rack_u, d.rack_height, d.management_ip, t.name AS type
+            FROM ipam_devices d LEFT JOIN ipam_device_types t ON t.id=d.type_id
+            WHERE d.rack_id=? AND d.rack_u IS NOT NULL ORDER BY d.rack_u DESC""", (int(rid),))
+        return out
+
+    def rack_save(self, b, user):
+        name = str(b.get("name") or "").strip()[:120]
+        if not name:
+            raise IpamError("Give the rack a name.")
+        size_u = int(b.get("size_u") or 42)
+        if not 1 <= size_u <= 100:
+            raise IpamError("Rack size must be 1-100 U.")
+        now = self._now()
+        fields = dict(name=name, size_u=size_u,
+                      org_id=int(b["org_id"]) if b.get("org_id") else None,
+                      location_id=int(b["location_id"]) if b.get("location_id") else None,
+                      description=str(b.get("description") or "")[:300] or None,
+                      notes=str(b.get("notes") or "")[:2000] or None, updated_at=now)
+        if b.get("id"):
+            top = self.db.one("SELECT MAX(rack_u + rack_height - 1) AS t FROM ipam_devices WHERE rack_id=? AND rack_u IS NOT NULL", (int(b["id"]),))
+            if top and top["t"] and top["t"] > size_u:
+                raise IpamError(f"A device reaches U{top['t']} - move it before shrinking the rack to {size_u}U.")
+            cols = ", ".join(f"{k}=?" for k in fields)
+            self.db.run(f"UPDATE ipam_racks SET {cols} WHERE id=?", (*fields.values(), int(b["id"])))
+            return int(b["id"])
+        return self.db.run("INSERT INTO ipam_racks (name, size_u, org_id, location_id, description, notes, created_by, created_at, updated_at) "
+                           "VALUES (?,?,?,?,?,?,?,?,?)",
+                           (name, size_u, fields["org_id"], fields["location_id"], fields["description"], fields["notes"], user, now, now))
+
+    def rack_delete(self, rid):
+        self.db.run("UPDATE ipam_devices SET rack_id=NULL, rack_u=NULL WHERE rack_id=?", (int(rid),))
+        self.db.run("DELETE FROM ipam_racks WHERE id=?", (int(rid),))
+
+    def rack_place(self, b):
+        rid, did = int(b.get("rack_id") or 0), int(b.get("device_id") or 0)
+        r = self.db.one("SELECT * FROM ipam_racks WHERE id=?", (rid,))
+        d = self.db.one("SELECT * FROM ipam_devices WHERE id=?", (did,))
+        if not r or not d:
+            raise IpamError("Rack or device not found.")
+        u, h = int(b.get("rack_u") or 0), int(b.get("rack_height") or 1)
+        if not 1 <= h <= r["size_u"]:
+            raise IpamError(f"Height must be 1-{r['size_u']} U.")
+        if u < 1 or u + h - 1 > r["size_u"]:
+            raise IpamError(f"A {h}U device at U{u} won't fit in a {r['size_u']}U rack.")
+        for o in self.db.q("SELECT name, rack_u, rack_height FROM ipam_devices WHERE rack_id=? AND rack_u IS NOT NULL AND id!=?", (rid, did)):
+            lo, hi = o["rack_u"], o["rack_u"] + o["rack_height"] - 1
+            if not (u + h - 1 < lo or u > hi):
+                raise IpamError(f"U{u}-U{u + h - 1} overlaps {o['name']} (U{lo}-U{hi}).")
+        self.db.run("UPDATE ipam_devices SET rack_id=?, rack_u=?, rack_height=?, updated_at=? WHERE id=?", (rid, u, h, self._now(), did))
+        return {"id": did}
+
+    def rack_unplace(self, did):
+        self.db.run("UPDATE ipam_devices SET rack_id=NULL, rack_u=NULL WHERE id=?", (int(did),))
+
+    def rack_placeable(self, rid):
+        """Devices that can be put into this rack: not already placed, and (if the rack belongs to a client) that
+        client's own devices or unassigned ones."""
+        r = self.db.one("SELECT * FROM ipam_racks WHERE id=?", (int(rid),))
+        if not r:
+            raise IpamError("That rack doesn't exist.")
+        og = "AND (d.org_id=? OR d.org_id IS NULL)" if r["org_id"] else ""
+        oa = (r["org_id"],) if r["org_id"] else ()
+        return self.db.q(f"""SELECT d.id, d.name, t.name AS type FROM ipam_devices d
+            LEFT JOIN ipam_device_types t ON t.id=d.type_id WHERE d.rack_u IS NULL {og} ORDER BY d.name""", oa)
 
     # --- CSV import / export (phpIPAM-compatible headers, native fallback; import is ADD-ONLY, never overwrites) ---
     _ADDR_HEADERS = {"ip address": "ip", "ip": "ip", "address": "ip", "state": "status", "status": "status",

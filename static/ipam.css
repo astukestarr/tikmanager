@@ -140,6 +140,18 @@ body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex;
 .w-35{width:35%}.w-40{width:40%}.w-45{width:45%}.w-50{width:50%}.w-55{width:55%}.w-60{width:60%}.w-65{width:65%}
 .w-70{width:70%}.w-75{width:75%}.w-80{width:80%}.w-85{width:85%}.w-90{width:90%}.w-95{width:95%}.w-100{width:100%}
 
+/* Rack elevation (one row per U; a device cell spans its height via rowspan) */
+.rack-wrap { max-width: 440px; margin: 6px 0 18px; }
+.rack { width: 100%; border-collapse: collapse; table-layout: fixed; border: 3px solid color-mix(in srgb, var(--text) 55%, var(--panel)); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.rack td { height: 22px; }
+.rack-u { width: 2.6rem; text-align: right; padding: 0 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--panel); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); user-select: none; }
+.rack-slot { border-bottom: 1px solid var(--border); background: repeating-linear-gradient(var(--panel), var(--panel) 10px, var(--bg) 10px, var(--bg) 11px); }
+.rack-dev { border: 1px solid var(--accent); background: var(--accent-soft); vertical-align: middle; padding: 2px 8px; position: relative; }
+.rack-dev-name { display: block; font-weight: 600; font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rack-dev-info { display: block; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rack-remove { position: absolute; top: 3px; right: 4px; border: none; background: none; color: var(--bad); font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; }
+.rack-dev:hover .rack-remove { opacity: 1; }
+
 @media (max-width: 720px) {
   /* top bar wraps; search drops to its own full-width row */
   .ipam-top { flex-wrap: wrap; row-gap: 8px; }
