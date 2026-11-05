@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.17 - 2026-11-05
+
+IPAM now opens on a **Dashboard** — a phpIPAM-style overview and the new landing tab. It shows **Statistics**
+(sections, clients, subnets, tracked addresses, VLANs, VRFs, devices, locations, each a link to its tab), the
+**busiest subnets** by utilization with usage bars, the **most recently seen / discovered subnets**, and any **hosts
+currently marked offline**. Every subnet on it links straight to its detail, and a client user sees the figures for
+their own space only. The Subnets tab and the rest are unchanged, one click away.
+
 ## 3.7.0-beta.16 - 2026-11-05
 
 IPAM: the **VLANs** and **Devices** tables are now **sortable** — click any column header to sort (click again to

@@ -865,6 +865,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(404, "Not found.")
             return d
         try:
+            if path == "/api/ipam/dashboard":
+                return self.json(ipam.dashboard(org))
             if path == "/api/ipam/tree":
                 return self.json(ipam.tree(org))
             if path == "/api/ipam/orgs":

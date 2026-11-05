@@ -157,6 +157,56 @@ class Ipam:
               OR EXISTS (SELECT 1 FROM net_sites s WHERE s.org_id=o.id))
             ORDER BY o.name""")
 
+    def dashboard(self, org=None):
+        """A phpIPAM-style overview: headline counts, the busiest subnets by utilization, the most recently
+        seen/discovered subnets, and the hosts currently marked offline. Scoped to one client when `org` is set."""
+        oid = int(org) if org else None
+        sw, sa = (" WHERE org_id=?", (oid,)) if oid else ("", ())
+
+        def one(sql, args=()):
+            r = self.db.one(sql, args)
+            return (r["n"] if r and r["n"] is not None else 0)
+
+        counts = {
+            "subnets": one(f"SELECT COUNT(*) AS n FROM ipam_subnets{sw}", sa),
+            "addresses": one("SELECT COUNT(*) AS n FROM ipam_addresses a JOIN ipam_subnets s ON s.id=a.subnet_id"
+                             + (" WHERE s.org_id=?" if oid else ""), sa),
+            "vlans": one(f"SELECT COUNT(*) AS n FROM ipam_vlans{sw}", sa),
+            "vrfs": one(f"SELECT COUNT(*) AS n FROM ipam_vrfs{sw}", sa),
+            "devices": one(f"SELECT COUNT(*) AS n FROM ipam_devices{sw}", sa),
+            "locations": one(f"SELECT COUNT(*) AS n FROM ipam_locations{sw}", sa),
+            "sections": 0 if oid else one("SELECT COUNT(*) AS n FROM ipam_sections"),
+            "clients": 1 if oid else one("SELECT COUNT(DISTINCT org_id) AS n FROM ipam_subnets WHERE org_id IS NOT NULL"),
+        }
+        # busiest subnets: the used count per subnet in one query, usable computed from the CIDR (no per-subnet query)
+        util = []
+        uq = ("SELECT s.id, s.cidr, s.name, s.org_id, COUNT(a.id) AS used FROM ipam_subnets s "
+              "JOIN ipam_addresses a ON a.subnet_id=s.id" + (" WHERE s.org_id=?" if oid else "") + " GROUP BY s.id")
+        for r in self.db.q(uq, sa):
+            try:
+                netobj = ipaddress.ip_network(r["cidr"], strict=False)
+            except ValueError:
+                continue
+            usable = (netobj.num_addresses - (2 if netobj.prefixlen <= 30 else 0)) if netobj.version == 4 \
+                else min(netobj.num_addresses, 1 << 24)
+            if usable <= 0:
+                continue
+            util.append({"id": r["id"], "cidr": r["cidr"], "name": r["name"], "org": self._org_name(r["org_id"]),
+                         "used": r["used"], "usable": usable, "usage": round(100 * r["used"] / usable)})
+        util.sort(key=lambda x: (x["usage"], x["used"]), reverse=True)
+        # the most recently seen / discovered subnets
+        rq = ("SELECT id, cidr, name, org_id, source, COALESCE(last_seen, first_seen, created_at) AS seen "
+              "FROM ipam_subnets" + (" WHERE org_id=?" if oid else "") + " ORDER BY seen DESC LIMIT 8")
+        recent = [{"id": r["id"], "cidr": r["cidr"], "name": r["name"], "org": self._org_name(r["org_id"]),
+                   "source": r["source"], "seen": r["seen"]} for r in self.db.q(rq, sa)]
+        # hosts currently marked offline (seen before, absent now)
+        oq = ("SELECT a.ip, a.hostname, a.last_seen, a.subnet_id, s.cidr, s.org_id FROM ipam_addresses a "
+              "JOIN ipam_subnets s ON s.id=a.subnet_id WHERE a.status='offline'" + (" AND s.org_id=?" if oid else "")
+              + " ORDER BY a.last_seen DESC LIMIT 10")
+        offline = [{"ip": r["ip"], "hostname": r["hostname"], "subnet": r["cidr"], "subnet_id": r["subnet_id"],
+                    "org": self._org_name(r["org_id"]), "last_seen": r["last_seen"]} for r in self.db.q(oq, sa)]
+        return {"counts": counts, "utilization": util[:8], "recent": recent, "offline": offline, "scoped": bool(oid)}
+
     def section_save(self, b, user):
         name = str(b.get("name") or "").strip()[:80]
         if not name:

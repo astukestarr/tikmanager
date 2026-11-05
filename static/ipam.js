@@ -398,7 +398,7 @@ function toast(msg, ms) {
 }
 
 // ---- tabs: VLANs / VRFs / Devices / Locations ---------------------------------------------------------------
-let tab = "subnets";
+let tab = "dashboard";
 let allOrgs = [], vlansCache = [], vrfsCache = [], typesCache = [], locsCache = [];
 function clientOpts(selId) { return [{ value: "", label: "(none)" }, ...allOrgs.map((o) => ({ value: o.id, label: o.name }))]; }
 async function loadLookups() {
@@ -416,10 +416,19 @@ function setTab(t) {
   body.classList.toggle("no-side", t !== "subnets");
   body.classList.remove("side-open");   // close the mobile drawer on any tab switch
   if (t === "subnets") { current = { kind: "all" }; renderTree(); showSubnets(); }
+  else if (t === "dashboard") showDashboard();
   else if (t === "vlans") showVlans();
   else if (t === "vrfs") showVrfs();
   else if (t === "devices") showDevices();
   else if (t === "locations") showLocations();
+}
+// Jump to a subnet's detail from anywhere (e.g. a dashboard widget): switch to the Subnets tab, then open it.
+function openSubnet(id) {
+  tab = "subnets";
+  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === "subnets"));
+  document.body.classList.add("tab-subnets");
+  const body = $("side").closest(".ipam-body"); body.classList.remove("no-side", "side-open");
+  current = { kind: "all" }; renderTree(); showSubnet(id);
 }
 function listHead(title, addLabel, addAttr) {
   const head = el("div", "main-head"); head.appendChild(el("h1", null, title));
@@ -476,6 +485,103 @@ function rowActions(editAttr, delAttr, id, delLabel) {
   const e = el("button", "btn tiny", "Edit"); e.dataset[editAttr] = id; span.appendChild(e);
   const d = el("button", "btn tiny danger", delLabel || "Delete"); d.dataset[delAttr] = id; span.appendChild(d);
   return span;
+}
+// ---- dashboard ----------------------------------------------------------------------------------------------
+function dashCard(title, bodyNode, wide) {
+  const c = el("div", "dash-card" + (wide ? " wide" : "")); c.appendChild(el("div", "dash-head", title));
+  const b = el("div", "dash-body"); if (bodyNode) b.appendChild(bodyNode); c.appendChild(b); return c;
+}
+function dashStat(label, value, gotab) {
+  const row = el("div", "dash-stat"); const name = el("span", "dash-stat-label", label);
+  if (gotab != null && value) { name.dataset.gotab = gotab; name.classList.add("dash-link"); }
+  row.appendChild(name); row.appendChild(el("span", "dash-stat-n", String(value ?? 0))); return row;
+}
+function cidrLink(id, cidr) { const a = el("a", "cidr", cidr); a.dataset.dashsubnet = id; return a; }
+function fmtAgo(ts) {
+  if (!ts) return "—";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 90) return "just now";
+  const m = s / 60; if (m < 90) return Math.round(m) + "m ago";
+  const h = m / 60; if (h < 36) return Math.round(h) + "h ago";
+  const d = h / 24; if (d < 45) return Math.round(d) + "d ago";
+  return Math.round(d / 30) + "mo ago";
+}
+async function showDashboard() {
+  const m = $("main"); m.textContent = "Loading…";
+  let r; try { r = await api("/api/ipam/dashboard"); } catch (e) { m.textContent = e.message; return; }
+  m.textContent = "";
+  const head = el("div", "main-head"); head.appendChild(el("h1", null, "Dashboard"));
+  m.appendChild(head);
+  const grid = el("div", "dash-grid");
+
+  // Statistics
+  const c = r.counts; const stats = el("div", "dash-stats");
+  if (!r.scoped) { stats.appendChild(dashStat("Sections", c.sections)); stats.appendChild(dashStat("Clients", c.clients)); }
+  stats.appendChild(dashStat("Subnets", c.subnets, "subnets"));
+  stats.appendChild(dashStat("Addresses tracked", c.addresses, "subnets"));
+  stats.appendChild(dashStat("VLANs", c.vlans, "vlans"));
+  stats.appendChild(dashStat("VRFs", c.vrfs, "vrfs"));
+  stats.appendChild(dashStat("Devices", c.devices, "devices"));
+  stats.appendChild(dashStat("Locations", c.locations, "locations"));
+  grid.appendChild(dashCard("Statistics", stats));
+
+  // Utilization — busiest subnets
+  if (r.utilization.length) {
+    const ul = el("div", "dash-util");
+    r.utilization.forEach((s) => {
+      const row = el("div", "dash-util-row");
+      const top = el("div", "dash-util-top"); top.appendChild(cidrLink(s.id, s.cidr));
+      if (s.name) top.appendChild(el("span", "muted small ellip", s.name));
+      top.appendChild(el("span", "dash-util-pct", s.usage + "%")); row.appendChild(top);
+      const bar = el("div", "dash-bar");
+      const bucket = Math.round(Math.min(100, Math.max(0, s.usage)) / 5) * 5;   // 5% steps -> a CSS width class (CSP-safe)
+      bar.appendChild(el("div", "dash-bar-fill w-" + bucket + (s.usage >= 90 ? " hot" : s.usage >= 75 ? " warm" : "")));
+      row.appendChild(bar);
+      row.appendChild(el("div", "muted small", s.used + " of " + s.usable + " used" + (!r.scoped && s.org ? " · " + s.org : "")));
+      ul.appendChild(row);
+    });
+    grid.appendChild(dashCard("Utilization — busiest subnets", ul));
+  } else {
+    grid.appendChild(dashCard("Utilization — busiest subnets",
+      el("p", "muted small", "No subnet has tracked addresses yet — run Sync, or add addresses to a subnet.")));
+  }
+
+  // Recently seen / discovered subnets
+  const recentBody = el("div");
+  if (r.recent.length) {
+    const t = el("table", "ipam-table dash-table"); const thead = el("thead"), tr = el("tr");
+    ["Subnet", "Name", ...(r.scoped ? [] : ["Client"]), "Source", "Seen"].forEach((h) => tr.appendChild(el("th", null, h)));
+    thead.appendChild(tr); t.appendChild(thead); const tb = el("tbody");
+    r.recent.forEach((s) => {
+      const row = el("tr");
+      const c0 = el("td"); c0.appendChild(cidrLink(s.id, s.cidr)); row.appendChild(c0);
+      row.appendChild(el("td", "small", s.name || "—"));
+      if (!r.scoped) row.appendChild(el("td", "small", s.org || "—"));
+      const src = el("td"); src.appendChild(el("span", "pill " + (s.source === "discovered" ? "disc" : "man"), s.source === "discovered" ? "discovered" : "manual")); row.appendChild(src);
+      row.appendChild(el("td", "muted small", fmtAgo(s.seen))); tb.appendChild(row);
+    });
+    t.appendChild(tb); recentBody.appendChild(t);
+  } else recentBody.appendChild(el("p", "muted small", "No subnets yet."));
+  grid.appendChild(dashCard("Recently seen subnets", recentBody));
+
+  // Hosts currently offline
+  const offBody = el("div");
+  if (r.offline.length) {
+    const t = el("table", "ipam-table dash-table"); const thead = el("thead"), tr = el("tr");
+    ["Address", "Hostname", "Subnet", "Last seen"].forEach((h) => tr.appendChild(el("th", null, h)));
+    thead.appendChild(tr); t.appendChild(thead); const tb = el("tbody");
+    r.offline.forEach((a) => {
+      const row = el("tr");
+      row.appendChild(el("td", "mono small", a.ip));
+      row.appendChild(el("td", "small ellip", a.hostname || "—"));
+      const sc = el("td"); sc.appendChild(cidrLink(a.subnet_id, a.subnet)); row.appendChild(sc);
+      row.appendChild(el("td", "muted small", fmtAgo(a.last_seen))); tb.appendChild(row);
+    });
+    t.appendChild(tb); offBody.appendChild(t);
+  } else offBody.appendChild(el("p", "muted small", "No hosts are marked offline. 🎉"));
+  grid.appendChild(dashCard("Hosts offline", offBody));
+
+  m.appendChild(grid);
 }
 async function showVlans() {
   const m = $("main"); m.textContent = "Loading…";
@@ -615,7 +721,7 @@ async function init() {
   if (window.BRAND && window.BRAND.company) document.title = "IPAM · " + window.BRAND.company;
   current = { kind: "all" };
   try { tree = await api("/api/ipam/tree"); } catch (e) { $("main").textContent = e.message; return; }
-  renderTree(); showSubnets();
+  renderTree(); setTab("dashboard");
   loadLookups();
 
   // tabs
@@ -660,6 +766,9 @@ async function init() {
     if (readonly && (t.classList.contains("cell") || ["newvlan", "editvlan", "delvlan", "newvrf", "editvrf", "delvrf",
       "newsubnet", "editsubnet", "splitsubnet", "newaddr", "syncorg", "delsubnet", "editaddr", "deladdr",
       "newdevice", "editdevice", "deldevice", "newlocation", "editlocation", "dellocation"].some((k) => t.dataset[k] != null))) return;
+    // Dashboard widgets
+    if (t.dataset.gotab != null) return setTab(t.dataset.gotab);
+    if (t.dataset.dashsubnet != null) return openSubnet(+t.dataset.dashsubnet);
     // Devices / Locations
     if (t.dataset.newdevice != null) return deviceDialog(null);
     if (t.dataset.editdevice != null) { const r = await api("/api/ipam/devices"); return deviceDialog((r.devices || []).find((x) => x.id === +t.dataset.editdevice)); }
