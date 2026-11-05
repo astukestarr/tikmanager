@@ -113,10 +113,16 @@ class Ipam:
         return {"sections": secs, "subnets": subs, "clients": clients}
 
     def syncable_orgs(self):
-        """Clients that have at least one adopted router - what the Sync picker offers (even before any IPAM subnets exist)."""
-        return self.db.q("SELECT o.id, o.name, COUNT(d.id) AS routers, "
-                        "SUM(CASE WHEN d.online=1 THEN 1 ELSE 0 END) AS online FROM orgs o "
-                        "JOIN devices d ON d.org_id=o.id AND d.state='adopted' WHERE o.active=1 GROUP BY o.id ORDER BY o.name")
+        """Clients the Sync picker offers: any with an adopted MikroTik OR a UniFi / UISP site (so a UniFi-only client
+        with no MikroTik can still be synced - that's the whole point of the UniFi overlay)."""
+        return self.db.q("""SELECT o.id, o.name,
+            (SELECT COUNT(*) FROM devices d WHERE d.org_id=o.id AND d.state='adopted') AS routers,
+            (SELECT COUNT(*) FROM devices d WHERE d.org_id=o.id AND d.state='adopted' AND d.online=1) AS online,
+            (SELECT COUNT(*) FROM net_sites s WHERE s.org_id=o.id) AS unifi_sites
+            FROM orgs o WHERE o.active=1 AND (
+              EXISTS (SELECT 1 FROM devices d WHERE d.org_id=o.id AND d.state='adopted')
+              OR EXISTS (SELECT 1 FROM net_sites s WHERE s.org_id=o.id))
+            ORDER BY o.name""")
 
     def section_save(self, b, user):
         name = str(b.get("name") or "").strip()[:80]

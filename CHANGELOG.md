@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.5 - 2026-11-04
+
+- **IPAM: fix a crash (frozen tab) when opening a 192.168.x / 172.x subnet.** Opening the subnet map computed the
+  network address with a bitwise `&`, which in JavaScript returns a *signed* 32-bit integer - so for any subnet whose
+  first octet is 128 or higher (192.168.x, 172.16-31.x) the start address went negative and the per-IP map loop tried to
+  run billions of times, freezing the browser tab. The address is now coerced to unsigned, so every subnet opens
+  instantly. (10.x subnets were unaffected, which is why it looked intermittent.)
+- **IPAM: you can now sync a UniFi-only client.** The "Sync from routers" picker listed only clients with an adopted
+  MikroTik, so a UniFi-only client (no MikroTik) couldn't be selected at all - even though the sync can pull its UniFi
+  devices. The picker now also lists clients that have a UniFi / UISP site (shown as "(UniFi)").
+
 ## 3.7.0-beta.4 - 2026-11-04
 
 - **IPAM: Sync also pulls in UniFi / UISP devices.** "Sync from routers" now places a client's UniFi and UISP devices

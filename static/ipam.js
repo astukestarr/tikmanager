@@ -23,7 +23,9 @@ function parseCidr(cidr) {
   const [base, pfxs] = String(cidr).split("/");
   const pfx = +pfxs;
   if (base.includes(":")) return { v6: true, cidr, pfx };            // IPv6: no grid math in beta.1
-  const net = ipToInt(base) & (pfx === 0 ? 0 : (0xffffffff << (32 - pfx)) >>> 0);
+  // `&` returns a SIGNED 32-bit int, so for a first octet >= 128 (192.168.x, 172.x) net goes negative and the grid
+  // loop `for (n=first; n<=last; …)` would run billions of times - coerce back to unsigned with >>> 0.
+  const net = (ipToInt(base) & (pfx === 0 ? 0 : (0xffffffff << (32 - pfx)) >>> 0)) >>> 0;
   return { v6: false, pfx, net, size: pfx >= 32 ? 1 : 2 ** (32 - pfx), first: net, last: (net + (pfx >= 32 ? 0 : 2 ** (32 - pfx) - 1)) >>> 0 };
 }
 
@@ -321,7 +323,7 @@ async function syncPicker() {
   let orgs = [];
   try { orgs = (await api("/api/ipam/orgs")).orgs || []; } catch (e) { /* fall back to clients already in IPAM */ }
   if (!orgs.length) orgs = tree.clients.map((c) => ({ id: c.id, name: c.name, routers: "" }));
-  const opts = orgs.length ? orgs.map((o) => ({ value: o.id, label: o.name + (o.routers ? ` (${o.routers} router${o.routers === 1 ? "" : "s"})` : "") }))
+  const opts = orgs.length ? orgs.map((o) => ({ value: o.id, label: o.name + (o.routers ? ` (${o.routers} router${o.routers === 1 ? "" : "s"})` : o.unifi_sites ? " (UniFi)" : "") }))
     : [{ value: "", label: "(no clients with routers)" }];
   box.appendChild(field("Client", sel("f_org", opts)));
   openDlg("Sync from routers", box, async () => { const id = $("f_org").value; if (id) await syncOrg(+id); });
