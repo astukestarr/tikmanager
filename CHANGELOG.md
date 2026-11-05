@@ -3,6 +3,26 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.23 - 2026-11-05
+
+A completely rebuilt **IPAM Dashboard** - an operations overview for running many clients' networks at a glance:
+
+- **Hero KPI row:** clients, subnets, overall IP utilization, addresses tracked (with "new this week"), devices,
+  and an "Attention" tile that sums everything needing a look.
+- **IP capacity** gauge: a donut of used vs free across every subnet, with the real usable-address totals.
+- **Subnet health:** a stacked bar placing every subnet into Empty / Light / Moderate / High / Critical / Full bands.
+- **Address status** donut: used / DHCP / reserved / gateway / offline across all tracked hosts.
+- **Alerts:** over-threshold, full, offline-host and stale-subnet counts, plus the list of subnets past their
+  threshold with a utilization bar - the things to act on.
+- **Clients by footprint:** a per-client rollup (subnets, IPs used, utilization bar, devices); click a client to
+  jump straight to its subnets.
+- **Devices by type**, **Subnet sizes** (by prefix length), and **Discovery vs manual** (how much came from Sync vs
+  was entered by hand, for both subnets and addresses).
+- The existing **Busiest subnets**, **Recently seen** and **Hosts offline** panels, refreshed.
+
+All charts are drawn inline (SVG + CSS), so there's nothing new to load and it stays within the strict CSP. Scopes
+to a single client for client users viewing their own IPAM.
+
 ## 3.7.0-beta.22 - 2026-11-05
 
 The "Subnets (IPAM)" menu entry now looks like the other items in the Network group - it was rendering as a plain

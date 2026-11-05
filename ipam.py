@@ -157,11 +157,24 @@ class Ipam:
               OR EXISTS (SELECT 1 FROM net_sites s WHERE s.org_id=o.id))
             ORDER BY o.name""")
 
+    def _usable(self, netobj):
+        """Assignable host count for a network: IPv4 minus network+broadcast for /30 and larger; IPv6 capped so a
+        huge prefix doesn't dominate utilization math."""
+        if netobj.version == 4:
+            return netobj.num_addresses - (2 if netobj.prefixlen <= 30 else 0)
+        return min(netobj.num_addresses, 1 << 24)
+
     def dashboard(self, org=None):
-        """A phpIPAM-style overview: headline counts, the busiest subnets by utilization, the most recently
-        seen/discovered subnets, and the hosts currently marked offline. Scoped to one client when `org` is set."""
+        """A rich operations overview for someone running many clients' networks: headline counts, overall IP capacity
+        and utilization, a health breakdown of every subnet, the address-status and discovery mix, a per-client
+        rollup, device inventory by type, subnet-size spread, actionable alerts (near-full / over-threshold / stale /
+        offline), the busiest subnets, what changed recently, and the hosts currently offline. Scoped to one client
+        when `org` is set. One pass over subnets drives most of it; a few small GROUP BY queries do the rest."""
         oid = int(org) if org else None
         sw, sa = (" WHERE org_id=?", (oid,)) if oid else ("", ())
+        now = self._now()
+        week_ago, stale_cut = now - 7 * 86400, now - 30 * 86400
+        org_names = {r["id"]: r["name"] for r in self.db.q("SELECT id, name FROM orgs")}
 
         def one(sql, args=()):
             r = self.db.one(sql, args)
@@ -179,34 +192,109 @@ class Ipam:
             "sections": 0 if oid else one("SELECT COUNT(*) AS n FROM ipam_sections"),
             "clients": 1 if oid else one("SELECT COUNT(DISTINCT org_id) AS n FROM ipam_subnets WHERE org_id IS NOT NULL"),
         }
-        # busiest subnets: the used count per subnet in one query, usable computed from the CIDR (no per-subnet query)
-        util = []
-        uq = ("SELECT s.id, s.cidr, s.name, s.org_id, COUNT(a.id) AS used FROM ipam_subnets s "
-              "JOIN ipam_addresses a ON a.subnet_id=s.id" + (" WHERE s.org_id=?" if oid else "") + " GROUP BY s.id")
-        for r in self.db.q(uq, sa):
+
+        # ---- single pass over every subnet (with its used count) drives capacity, health, per-client, sizes, alerts
+        main = self.db.q(
+            "SELECT s.id, s.cidr, s.name, s.org_id, s.source, s.threshold, s.mark_full, s.family, s.first_seen, "
+            "COALESCE(s.last_seen, s.first_seen, s.created_at) AS seen, "
+            "(SELECT COUNT(*) FROM ipam_addresses a WHERE a.subnet_id=s.id) AS used "
+            "FROM ipam_subnets s" + (" WHERE s.org_id=?" if oid else ""), sa)
+        total_used = total_usable = v6 = new_subnets = full_n = 0
+        bands = {"free": 0, "low": 0, "moderate": 0, "high": 0, "critical": 0, "full": 0}
+        per_client, prefix, srcmix = {}, {}, {"discovered": 0, "manual": 0}
+        util, over_threshold = [], []
+        for r in main:
+            srcmix[r["source"]] = srcmix.get(r["source"], 0) + 1
+            if r["first_seen"] and r["first_seen"] >= week_ago:
+                new_subnets += 1
             try:
                 netobj = ipaddress.ip_network(r["cidr"], strict=False)
             except ValueError:
                 continue
-            usable = (netobj.num_addresses - (2 if netobj.prefixlen <= 30 else 0)) if netobj.version == 4 \
-                else min(netobj.num_addresses, 1 << 24)
+            prefix[netobj.prefixlen] = prefix.get(netobj.prefixlen, 0) + 1
+            if netobj.version == 6:
+                v6 += 1
+            usable = self._usable(netobj)
             if usable <= 0:
                 continue
-            util.append({"id": r["id"], "cidr": r["cidr"], "name": r["name"], "org": self._org_name(r["org_id"]),
-                         "used": r["used"], "usable": usable, "usage": round(100 * r["used"] / usable)})
+            used, full = r["used"], bool(r["mark_full"])
+            pct = 100 if full else round(100 * used / usable)
+            total_used += used
+            total_usable += usable
+            if full or pct >= 100:
+                bands["full"] += 1; full_n += 1
+            elif pct >= 90:
+                bands["critical"] += 1
+            elif pct >= 75:
+                bands["high"] += 1
+            elif pct >= 50:
+                bands["moderate"] += 1
+            elif pct > 0:
+                bands["low"] += 1
+            else:
+                bands["free"] += 1
+            thr = r["threshold"] if r["threshold"] is not None else 80
+            row = {"id": r["id"], "cidr": r["cidr"], "name": r["name"], "org": org_names.get(r["org_id"]),
+                   "used": used, "usable": usable, "usage": pct}
+            util.append(row)
+            if not full and pct >= thr:
+                over_threshold.append({**row, "threshold": thr})
+            pc = per_client.setdefault(r["org_id"], {"org_id": r["org_id"], "name": org_names.get(r["org_id"]) or "Unassigned",
+                                                     "subnets": 0, "used": 0, "usable": 0, "devices": 0})
+            pc["subnets"] += 1; pc["used"] += used; pc["usable"] += usable
         util.sort(key=lambda x: (x["usage"], x["used"]), reverse=True)
-        # the most recently seen / discovered subnets
+        over_threshold.sort(key=lambda x: x["usage"], reverse=True)
+
+        # devices per client (fold into the rollup; a client with devices but no subnets still shows)
+        for r in self.db.q("SELECT org_id, COUNT(*) AS n FROM ipam_devices" + (" WHERE org_id=?" if oid else "") + " GROUP BY org_id", sa):
+            pc = per_client.get(r["org_id"])
+            if pc:
+                pc["devices"] = r["n"]
+            elif r["org_id"]:
+                per_client[r["org_id"]] = {"org_id": r["org_id"], "name": org_names.get(r["org_id"]) or "Unassigned",
+                                           "subnets": 0, "used": 0, "usable": 0, "devices": r["n"]}
+        clients = []
+        for pc in per_client.values():
+            pc["usage"] = round(100 * pc["used"] / pc["usable"]) if pc["usable"] else 0
+            clients.append(pc)
+        clients.sort(key=lambda x: (x["usable"], x["used"], x["subnets"]), reverse=True)
+
+        # address status + source mix, device types - small GROUP BYs
+        amix = (" JOIN ipam_subnets s ON s.id=a.subnet_id" + (" WHERE s.org_id=?" if oid else ""))
+        status_mix = {r["status"]: r["n"] for r in self.db.q(f"SELECT a.status, COUNT(*) AS n FROM ipam_addresses a{amix} GROUP BY a.status", sa)}
+        addr_src = {r["source"]: r["n"] for r in self.db.q(f"SELECT a.source, COUNT(*) AS n FROM ipam_addresses a{amix} GROUP BY a.source", sa)}
+        dev_types = [{"name": r["name"] or "Unspecified", "n": r["n"]} for r in self.db.q(
+            "SELECT t.name AS name, COUNT(*) AS n FROM ipam_devices d LEFT JOIN ipam_device_types t ON t.id=d.type_id"
+            + (" WHERE d.org_id=?" if oid else "") + " GROUP BY t.name ORDER BY n DESC", sa)]
+
+        # recently seen / discovered subnets, and hosts currently offline
         rq = ("SELECT id, cidr, name, org_id, source, COALESCE(last_seen, first_seen, created_at) AS seen "
               "FROM ipam_subnets" + (" WHERE org_id=?" if oid else "") + " ORDER BY seen DESC LIMIT 8")
-        recent = [{"id": r["id"], "cidr": r["cidr"], "name": r["name"], "org": self._org_name(r["org_id"]),
+        recent = [{"id": r["id"], "cidr": r["cidr"], "name": r["name"], "org": org_names.get(r["org_id"]),
                    "source": r["source"], "seen": r["seen"]} for r in self.db.q(rq, sa)]
-        # hosts currently marked offline (seen before, absent now)
         oq = ("SELECT a.ip, a.hostname, a.last_seen, a.subnet_id, s.cidr, s.org_id FROM ipam_addresses a "
               "JOIN ipam_subnets s ON s.id=a.subnet_id WHERE a.status='offline'" + (" AND s.org_id=?" if oid else "")
               + " ORDER BY a.last_seen DESC LIMIT 10")
         offline = [{"ip": r["ip"], "hostname": r["hostname"], "subnet": r["cidr"], "subnet_id": r["subnet_id"],
-                    "org": self._org_name(r["org_id"]), "last_seen": r["last_seen"]} for r in self.db.q(oq, sa)]
-        return {"counts": counts, "utilization": util[:8], "recent": recent, "offline": offline, "scoped": bool(oid)}
+                    "org": org_names.get(r["org_id"]), "last_seen": r["last_seen"]} for r in self.db.q(oq, sa)]
+
+        offline_n = one("SELECT COUNT(*) AS n FROM ipam_addresses a JOIN ipam_subnets s ON s.id=a.subnet_id "
+                        "WHERE a.status='offline'" + (" AND s.org_id=?" if oid else ""), sa)
+        stale_n = one("SELECT COUNT(*) AS n FROM ipam_subnets WHERE source='discovered' AND COALESCE(last_seen,0) < ?"
+                      + (" AND org_id=?" if oid else ""), ((stale_cut, oid) if oid else (stale_cut,)))
+        new_addr = one("SELECT COUNT(*) AS n FROM ipam_addresses a JOIN ipam_subnets s ON s.id=a.subnet_id "
+                       "WHERE a.created_at >= ?" + (" AND s.org_id=?" if oid else ""), ((week_ago, oid) if oid else (week_ago,)))
+
+        capacity = {"used": total_used, "usable": total_usable, "free": max(0, total_usable - total_used),
+                    "usage": round(100 * total_used / total_usable) if total_usable else 0, "v6_subnets": v6}
+        alerts = {"over_threshold": over_threshold[:8], "over_threshold_n": len(over_threshold),
+                  "full": full_n, "offline": offline_n, "stale": stale_n}
+        change = {"new_subnets": new_subnets, "new_addresses": new_addr}
+        return {"counts": counts, "capacity": capacity, "health": bands, "status_mix": status_mix,
+                "source_mix": {"subnets": srcmix, "addresses": addr_src}, "clients": clients[:12], "client_total": len(clients),
+                "devices_by_type": dev_types, "prefix_sizes": sorted(({"pfx": k, "n": v} for k, v in prefix.items()), key=lambda x: x["pfx"]),
+                "alerts": alerts, "change": change, "utilization": util[:8], "recent": recent, "offline": offline,
+                "scoped": bool(oid)}
 
     def section_save(self, b, user):
         name = str(b.get("name") or "").strip()[:80]

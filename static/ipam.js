@@ -498,6 +498,57 @@ function dashStat(label, value, gotab) {
   row.appendChild(name); row.appendChild(el("span", "dash-stat-n", String(value ?? 0))); return row;
 }
 function cidrLink(id, cidr) { const a = el("a", "cidr", cidr); a.dataset.dashsubnet = id; return a; }
+// ---- dashboard chart primitives (CSP-safe: SVG geometry via attributes, colour via classes, bar widths via .style) ----
+const SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs) { const e = document.createElementNS(SVGNS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); return e; }
+function fmtNum(n) { return (n == null ? 0 : n).toLocaleString(); }
+function fmtBig(n) {   // compact for hero tiles: 1.2k, 3.4M
+  n = n || 0; if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M";
+  if (n >= 1e4) return Math.round(n / 1e3) + "k"; if (n >= 1e3) return (n / 1e3).toFixed(1) + "k"; return String(n);
+}
+function donut(segments, total, opts) {
+  opts = opts || {}; const r = 52, cx = 64, cy = 64, C = 2 * Math.PI * r;
+  const svg = svgEl("svg", { viewBox: "0 0 128 128", class: "donut" });
+  svg.appendChild(svgEl("circle", { cx, cy, r, fill: "none", class: "donut-bg" }));
+  let off = 0;
+  if (total > 0) segments.forEach((s) => {
+    if (!s.value) return; const frac = s.value / total;
+    svg.appendChild(svgEl("circle", { cx, cy, r, fill: "none", class: "donut-seg " + s.cls,
+      "stroke-dasharray": (frac * C).toFixed(2) + " " + (C - frac * C).toFixed(2),
+      "stroke-dashoffset": (-off * C).toFixed(2), transform: "rotate(-90 " + cx + " " + cy + ")" }));
+    off += frac;
+  });
+  if (opts.center != null) { const t = svgEl("text", { x: cx, y: cy - 1, class: "donut-center", "text-anchor": "middle" }); t.textContent = opts.center; svg.appendChild(t); }
+  if (opts.sub != null) { const t = svgEl("text", { x: cx, y: cy + 17, class: "donut-sub", "text-anchor": "middle" }); t.textContent = opts.sub; svg.appendChild(t); }
+  return svg;
+}
+function legend(items) {
+  const L = el("div", "legend");
+  items.forEach((it) => { if (!it.value && it.hideZero) return;
+    const w = el("span", "legend-item"); w.appendChild(el("span", "legend-dot " + it.cls));
+    w.appendChild(el("span", "legend-txt", it.label + (it.value != null ? " · " + fmtNum(it.value) : ""))); L.appendChild(w); });
+  return L;
+}
+function segBar(parts, total) {
+  const bar = el("div", "seg-bar");
+  if (total > 0) parts.forEach((p) => { if (!p.value) return;
+    const s = el("div", "seg " + p.cls); s.style.width = (100 * p.value / total) + "%"; s.title = p.label + ": " + p.value; bar.appendChild(s); });
+  else bar.appendChild(el("div", "seg band-free w-100"));
+  return bar;
+}
+function hbarRow(label, value, max, cls, suffix, sub) {
+  const row = el("div", "hbar-row");
+  const lab = el("span", "hbar-label ellip", label); if (sub) lab.title = sub; row.appendChild(lab);
+  const track = el("div", "hbar-track"); const fill = el("div", "hbar-fill " + (cls || ""));
+  fill.style.width = (max ? Math.max(2, Math.round(100 * value / max)) : 0) + "%"; track.appendChild(fill); row.appendChild(track);
+  row.appendChild(el("span", "hbar-n", suffix != null ? suffix : fmtNum(value))); return row;
+}
+function heroTile(value, label, sub, tone, gotab) {
+  const t = el("div", "hero-tile" + (tone ? " " + tone : "")); if (gotab) { t.dataset.gotab = gotab; t.classList.add("clk"); }
+  t.appendChild(el("div", "hero-n", value)); t.appendChild(el("div", "hero-label", label));
+  if (sub != null) t.appendChild(el("div", "hero-sub", sub)); return t;
+}
+function utilTone(p) { return p >= 90 ? "hot" : p >= 75 ? "warm" : ""; }
 function fmtAgo(ts) {
   if (!ts) return "—";
   const s = Math.max(0, Date.now() / 1000 - ts);
@@ -511,23 +562,135 @@ async function showDashboard() {
   const m = $("main"); m.textContent = "Loading…";
   let r; try { r = await api("/api/ipam/dashboard"); } catch (e) { m.textContent = e.message; return; }
   m.textContent = "";
+  const c = r.counts, cap = r.capacity, al = r.alerts;
   const head = el("div", "main-head"); head.appendChild(el("h1", null, "Dashboard"));
+  head.appendChild(el("span", "muted small", r.scoped ? "This client" : fmtNum(c.clients) + " clients · " + fmtNum(c.subnets) + " subnets · " + fmtNum(cap.usable) + " addressable IPs"));
   m.appendChild(head);
+
+  // ---- Hero KPI row ----
+  const hero = el("div", "ipam-hero");
+  const alertN = al.over_threshold_n + al.full + al.offline + al.stale;
+  if (!r.scoped) hero.appendChild(heroTile(fmtNum(c.clients), "Clients", fmtNum(c.sections) + " sections", "", "subnets"));
+  hero.appendChild(heroTile(fmtNum(c.subnets), "Subnets", fmtNum(cap.v6_subnets) + " IPv6", "", "subnets"));
+  hero.appendChild(heroTile(cap.usage + "%", "IP utilization", fmtBig(cap.used) + " of " + fmtBig(cap.usable), cap.usage >= 85 ? "hot" : cap.usage >= 70 ? "warm" : "ok"));
+  hero.appendChild(heroTile(fmtNum(c.addresses), "Addresses tracked", (r.change.new_addresses ? "+" + fmtNum(r.change.new_addresses) + " this week" : "live overlay"), ""));
+  hero.appendChild(heroTile(fmtNum(c.devices), "Devices", fmtNum(c.vlans) + " VLANs · " + fmtNum(c.vrfs) + " VRFs", "", "devices"));
+  hero.appendChild(heroTile(fmtNum(alertN), "Attention", alertN ? "needs a look" : "all clear", alertN ? "hot" : "ok"));
+  m.appendChild(hero);
+
   const grid = el("div", "dash-grid");
 
-  // Statistics
-  const c = r.counts; const stats = el("div", "dash-stats");
-  if (!r.scoped) { stats.appendChild(dashStat("Sections", c.sections)); stats.appendChild(dashStat("Clients", c.clients)); }
-  stats.appendChild(dashStat("Subnets", c.subnets, "subnets"));
-  stats.appendChild(dashStat("Addresses tracked", c.addresses, "subnets"));
-  stats.appendChild(dashStat("VLANs", c.vlans, "vlans"));
-  stats.appendChild(dashStat("VRFs", c.vrfs, "vrfs"));
-  stats.appendChild(dashStat("Devices", c.devices, "devices"));
-  stats.appendChild(dashStat("Racks", c.racks, "racks"));
-  stats.appendChild(dashStat("Locations", c.locations, "locations"));
-  grid.appendChild(dashCard("Statistics", stats));
+  // ---- Capacity gauge ----
+  const capBody = el("div", "cap-wrap");
+  capBody.appendChild(donut([{ value: cap.used, cls: "seg-used" }, { value: cap.free, cls: "seg-free" }], cap.usable || 1,
+    { center: cap.usage + "%", sub: "used" }));
+  const capStats = el("div", "cap-stats");
+  const chip = (lab, val, cls) => { const d = el("div", "cap-chip " + (cls || "")); d.appendChild(el("div", "cap-chip-n", fmtNum(val))); d.appendChild(el("div", "cap-chip-l", lab)); return d; };
+  capStats.appendChild(chip("IPs in use", cap.used, "ok"));
+  capStats.appendChild(chip("Free", cap.free, ""));
+  capStats.appendChild(chip("Addressable", cap.usable, ""));
+  capBody.appendChild(capStats);
+  grid.appendChild(dashCard("IP capacity", capBody));
 
-  // Utilization — busiest subnets
+  // ---- Subnet health ----
+  const h = r.health, htot = Object.values(h).reduce((a, b) => a + b, 0);
+  const hBody = el("div");
+  hBody.appendChild(segBar([
+    { value: h.free, cls: "band-free", label: "Empty" }, { value: h.low, cls: "band-low", label: "Light" },
+    { value: h.moderate, cls: "band-moderate", label: "Moderate" }, { value: h.high, cls: "band-high", label: "High" },
+    { value: h.critical, cls: "band-critical", label: "Critical" }, { value: h.full, cls: "band-full", label: "Full" },
+  ], htot));
+  hBody.appendChild(legend([
+    { label: "Empty", value: h.free, cls: "band-free" }, { label: "Light <50%", value: h.low, cls: "band-low" },
+    { label: "Moderate", value: h.moderate, cls: "band-moderate" }, { label: "High 75%+", value: h.high, cls: "band-high" },
+    { label: "Critical 90%+", value: h.critical, cls: "band-critical" }, { label: "Full", value: h.full, cls: "band-full" },
+  ]));
+  grid.appendChild(dashCard("Subnet health · " + fmtNum(htot) + " subnets", hBody));
+
+  // ---- Address status mix ----
+  const sm = r.status_mix, smOrder = [["used", "seg-used", "Used"], ["dhcp", "seg-dhcp", "DHCP"],
+    ["reserved", "seg-reserved", "Reserved"], ["gateway", "seg-gateway", "Gateway"], ["offline", "seg-offline", "Offline"]];
+  const smTotal = Object.values(sm).reduce((a, b) => a + b, 0);
+  const smBody = el("div", "mix-wrap");
+  if (smTotal) {
+    smBody.appendChild(donut(smOrder.map(([k, cls]) => ({ value: sm[k] || 0, cls })), smTotal, { center: fmtBig(smTotal), sub: "hosts" }));
+    smBody.appendChild(legend(smOrder.map(([k, cls, lab]) => ({ label: lab, value: sm[k] || 0, cls, hideZero: true }))));
+  } else smBody.appendChild(el("p", "muted small", "No host records yet — run Sync or add addresses."));
+  grid.appendChild(dashCard("Address status", smBody));
+
+  // ---- Alerts ----
+  const aBody = el("div");
+  const aRow = el("div", "alert-tiles");
+  const aTile = (n, lab, cls) => { const d = el("div", "alert-tile " + (n ? cls : "ok")); d.appendChild(el("div", "alert-n", fmtNum(n))); d.appendChild(el("div", "alert-l", lab)); return d; };
+  aRow.appendChild(aTile(al.over_threshold_n, "Over threshold", "warn"));
+  aRow.appendChild(aTile(al.full, "Full", "hot"));
+  aRow.appendChild(aTile(al.offline, "Offline hosts", "warn"));
+  aRow.appendChild(aTile(al.stale, "Stale subnets", "warn"));
+  aBody.appendChild(aRow);
+  if (al.over_threshold.length) {
+    const t = el("table", "ipam-table dash-table"); const tb = el("tbody");
+    al.over_threshold.forEach((s) => {
+      const row = el("tr");
+      const c0 = el("td"); c0.appendChild(cidrLink(s.id, s.cidr)); if (!r.scoped && s.org) c0.appendChild(el("span", "muted small", " " + s.org)); row.appendChild(c0);
+      const bc = el("td", "nowrap"); const bar = el("div", "dash-bar mini"); const f = el("div", "dash-bar-fill " + utilTone(s.usage)); f.style.width = Math.min(100, s.usage) + "%"; bar.appendChild(f); bc.appendChild(bar); row.appendChild(bc);
+      row.appendChild(el("td", "mono small right", s.usage + "%")); tb.appendChild(row);
+    });
+    t.appendChild(tb); aBody.appendChild(t);
+  } else aBody.appendChild(el("p", "muted small", "Nothing over threshold. 🎉"));
+  grid.appendChild(dashCard("Alerts", aBody));
+
+  // ---- Top clients rollup (wide) ----
+  if (!r.scoped && r.clients.length) {
+    const cBody = el("div");
+    const t = el("table", "ipam-table dash-table"); const thead = el("thead"), tr = el("tr");
+    ["Client", "Subnets", "IPs used", "Utilization", "Devices"].forEach((hd, i) => tr.appendChild(el("th", i >= 1 ? "right" : null, hd)));
+    thead.appendChild(tr); t.appendChild(thead); const tb = el("tbody");
+    r.clients.forEach((cl) => {
+      const row = el("tr");
+      const nm = el("td"); const link = el("span", "dash-link", cl.name); link.dataset.gotabclient = cl.org_id || ""; nm.appendChild(link); row.appendChild(nm);
+      row.appendChild(el("td", "mono small right", fmtNum(cl.subnets)));
+      row.appendChild(el("td", "mono small right", fmtNum(cl.used) + " / " + fmtBig(cl.usable)));
+      const uc = el("td", "util-cell"); const wrap = el("div", "util-inline"); const bar = el("div", "dash-bar mini"); const f = el("div", "dash-bar-fill " + utilTone(cl.usage)); f.style.width = Math.min(100, cl.usage) + "%"; bar.appendChild(f); wrap.appendChild(bar); wrap.appendChild(el("span", "mono small", cl.usage + "%")); uc.appendChild(wrap); row.appendChild(uc);
+      row.appendChild(el("td", "mono small right", fmtNum(cl.devices))); tb.appendChild(row);
+    });
+    t.appendChild(tb); cBody.appendChild(t);
+    if (r.client_total > r.clients.length) cBody.appendChild(el("p", "muted small pad", "Showing the top " + r.clients.length + " of " + r.client_total + " clients by size."));
+    grid.appendChild(dashCard("Clients by footprint", cBody, true));
+  }
+
+  // ---- Devices by type ----
+  if (r.devices_by_type.length) {
+    const dBody = el("div", "hbars"); const dmax = Math.max(...r.devices_by_type.map((d) => d.n), 1);
+    r.devices_by_type.slice(0, 8).forEach((d) => dBody.appendChild(hbarRow(d.name, d.n, dmax, "bar-accent")));
+    grid.appendChild(dashCard("Devices by type", dBody));
+  }
+
+  // ---- Subnet size spread ----
+  if (r.prefix_sizes.length) {
+    const pBody = el("div", "hbars"); const pmax = Math.max(...r.prefix_sizes.map((p) => p.n), 1);
+    r.prefix_sizes.slice(-10).forEach((p) => pBody.appendChild(hbarRow("/" + p.pfx, p.n, pmax, "bar-info")));
+    grid.appendChild(dashCard("Subnet sizes", pBody));
+  }
+
+  // ---- Discovery mix ----
+  const sx = r.source_mix; const subT = (sx.subnets.discovered || 0) + (sx.subnets.manual || 0);
+  const adS = sx.addresses || {}; const adT = Object.values(adS).reduce((a, b) => a + b, 0);
+  const sxBody = el("div");
+  sxBody.appendChild(el("div", "mix-label", "Subnets"));
+  sxBody.appendChild(segBar([{ value: sx.subnets.discovered || 0, cls: "seg-disc", label: "Discovered" }, { value: sx.subnets.manual || 0, cls: "seg-man", label: "Manual" }], subT));
+  sxBody.appendChild(legend([{ label: "Discovered", value: sx.subnets.discovered || 0, cls: "seg-disc" }, { label: "Manual", value: sx.subnets.manual || 0, cls: "seg-man" }]));
+  sxBody.appendChild(el("div", "mix-label", "Addresses by source"));
+  sxBody.appendChild(segBar([
+    { value: adS.arp || 0, cls: "seg-used", label: "ARP" }, { value: adS.lease || 0, cls: "seg-dhcp", label: "DHCP lease" },
+    { value: adS.neighbor || 0, cls: "seg-gateway", label: "Neighbor" }, { value: adS.address || 0, cls: "seg-reserved", label: "Router addr" },
+    { value: adS.manual || 0, cls: "seg-man", label: "Manual" }], adT));
+  sxBody.appendChild(legend([
+    { label: "ARP", value: adS.arp || 0, cls: "seg-used", hideZero: true }, { label: "DHCP", value: adS.lease || 0, cls: "seg-dhcp", hideZero: true },
+    { label: "Neighbor", value: adS.neighbor || 0, cls: "seg-gateway", hideZero: true }, { label: "Router", value: adS.address || 0, cls: "seg-reserved", hideZero: true },
+    { label: "Manual", value: adS.manual || 0, cls: "seg-man", hideZero: true }]));
+  grid.appendChild(dashCard("Discovery vs manual", sxBody));
+
+  // ---- Busiest subnets ----
   if (r.utilization.length) {
     const ul = el("div", "dash-util");
     r.utilization.forEach((s) => {
@@ -535,24 +698,18 @@ async function showDashboard() {
       const top = el("div", "dash-util-top"); top.appendChild(cidrLink(s.id, s.cidr));
       if (s.name) top.appendChild(el("span", "muted small ellip", s.name));
       top.appendChild(el("span", "dash-util-pct", s.usage + "%")); row.appendChild(top);
-      const bar = el("div", "dash-bar");
-      const bucket = Math.round(Math.min(100, Math.max(0, s.usage)) / 5) * 5;   // 5% steps -> a CSS width class (CSP-safe)
-      bar.appendChild(el("div", "dash-bar-fill w-" + bucket + (s.usage >= 90 ? " hot" : s.usage >= 75 ? " warm" : "")));
-      row.appendChild(bar);
-      row.appendChild(el("div", "muted small", s.used + " of " + s.usable + " used" + (!r.scoped && s.org ? " · " + s.org : "")));
+      const bar = el("div", "dash-bar"); const f = el("div", "dash-bar-fill " + utilTone(s.usage)); f.style.width = Math.min(100, Math.max(0, s.usage)) + "%"; bar.appendChild(f); row.appendChild(bar);
+      row.appendChild(el("div", "muted small", fmtNum(s.used) + " of " + fmtNum(s.usable) + " used" + (!r.scoped && s.org ? " · " + s.org : "")));
       ul.appendChild(row);
     });
-    grid.appendChild(dashCard("Utilization — busiest subnets", ul));
-  } else {
-    grid.appendChild(dashCard("Utilization — busiest subnets",
-      el("p", "muted small", "No subnet has tracked addresses yet — run Sync, or add addresses to a subnet.")));
+    grid.appendChild(dashCard("Busiest subnets", ul));
   }
 
-  // Recently seen / discovered subnets
+  // ---- Recently seen subnets ----
   const recentBody = el("div");
   if (r.recent.length) {
     const t = el("table", "ipam-table dash-table"); const thead = el("thead"), tr = el("tr");
-    ["Subnet", "Name", ...(r.scoped ? [] : ["Client"]), "Source", "Seen"].forEach((h) => tr.appendChild(el("th", null, h)));
+    ["Subnet", "Name", ...(r.scoped ? [] : ["Client"]), "Source", "Seen"].forEach((hd) => tr.appendChild(el("th", null, hd)));
     thead.appendChild(tr); t.appendChild(thead); const tb = el("tbody");
     r.recent.forEach((s) => {
       const row = el("tr");
@@ -566,11 +723,11 @@ async function showDashboard() {
   } else recentBody.appendChild(el("p", "muted small", "No subnets yet."));
   grid.appendChild(dashCard("Recently seen subnets", recentBody));
 
-  // Hosts currently offline
+  // ---- Hosts offline ----
   const offBody = el("div");
   if (r.offline.length) {
     const t = el("table", "ipam-table dash-table"); const thead = el("thead"), tr = el("tr");
-    ["Address", "Hostname", "Subnet", "Last seen"].forEach((h) => tr.appendChild(el("th", null, h)));
+    ["Address", "Hostname", "Subnet", "Last seen"].forEach((hd) => tr.appendChild(el("th", null, hd)));
     thead.appendChild(tr); t.appendChild(thead); const tb = el("tbody");
     r.offline.forEach((a) => {
       const row = el("tr");
@@ -923,6 +1080,7 @@ async function init() {
     if (t.dataset.unplace != null) { await post("/api/ipam/racks/unplace", { device_id: +t.dataset.unplace }); if (rackOpen) await showRack(rackOpen); return; }
     // Dashboard widgets
     if (t.dataset.gotab != null) return setTab(t.dataset.gotab);
+    if (t.dataset.gotabclient != null) { const id = +t.dataset.gotabclient || null; setTab("subnets"); if (id) { current = { kind: "client", id }; renderTree(); showSubnets(); } return; }
     if (t.dataset.dashsubnet != null) return openSubnet(+t.dataset.dashsubnet);
     // Devices / Locations
     if (t.dataset.newdevice != null) return deviceDialog(null);

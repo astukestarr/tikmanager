@@ -228,6 +228,12 @@ SLIDES_3_7 = [
      "text": "A new per-client IPAM toggle in Admin > Clients. Turn it on and that client's users can open IPAM read-only, scoped to "
              "just their own organisation - their subnets, addresses, VLANs and devices, with no editing. Everything stays "
              "technician-only to change."},
+    {"id": "ipam-dashboard", "title": "IPAM: a real operations dashboard", "img": None, "view": None, "who": "tech",
+     "text": "The IPAM Dashboard is rebuilt for running many clients at once: hero tiles (clients, subnets, overall IP "
+             "utilization, devices, and what needs attention), an IP-capacity gauge, a subnet-health breakdown, an "
+             "address-status donut, actionable alerts (over-threshold, full, offline, stale), a per-client footprint rollup "
+             "you can click into, plus device-type, subnet-size and discovered-vs-manual charts. All drawn inline - nothing "
+             "extra to load."},
 ]
 SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
