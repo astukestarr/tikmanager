@@ -552,6 +552,75 @@ class Ubnt:
                            "ip": r["ip"], "status": "online" if online(r["status"]) else (r["status"] or "offline"), "version": r["version"],
                            "update": r["update_available"], "console": bool(r["is_console"]), "site": r["site"], "site_id": r["site_id"]} for r in rows}
 
+    @staticmethod
+    def _first_cidr(obj):
+        """Find a private IPv4 CIDR anywhere in a network object's string values (the subnet field name varies by
+        controller version, so we scan rather than guess a key)."""
+        if not isinstance(obj, dict):
+            return None
+        for v in obj.values():
+            if isinstance(v, str):
+                m = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})\b", v)
+                if m:
+                    try:
+                        net = ipaddress.ip_network(m.group(1), strict=False)
+                        if net.version == 4 and net.is_private:
+                            return str(net)
+                    except ValueError:
+                        pass
+        return None
+
+    def integration_data(self, org_id):
+        """Configured networks and connected clients for a client's UniFi sites, from the Network integration API (via the
+        cloud connector - the same proxy used for device-to-site mapping). Works for ANY site, gateway or not. Returns
+        {"networks": [{site,name,vlan,cidr}], "clients": [{ip,mac,name}], "error": str|None}. UISP accounts are skipped."""
+        out = {"networks": [], "clients": [], "error": None}
+        rows = self.db.q("SELECT s.id, s.name, s.internal, s.account_id FROM net_sites s "
+                         "JOIN net_accounts a ON a.id=s.account_id WHERE s.org_id=? AND a.kind='unifi'", (org_id,))
+        by = {}
+        for r in rows:
+            by.setdefault((r["account_id"], (r["id"] or "").split(":")[0]), []).append(r)
+        for (account_id, host), sites in by.items():
+            if not host:
+                continue
+            a = self.db.one("SELECT * FROM net_accounts WHERE id=?", (account_id,))
+            if not a:
+                continue
+            cl = self.client(a)
+            base = f"/v1/connector/consoles/{urllib.parse.quote(host)}/proxy/network/integration/v1/sites"
+            try:
+                isites = (cl._call(base, timeout=25) or {}).get("data") or []
+            except NetError as e:
+                out["error"] = out["error"] or str(e)
+                continue
+            for isite in isites:
+                match = next((s for s in sites if s["internal"] and s["internal"] == isite.get("internalReference")), None) \
+                    or next((s for s in sites if s["name"] == isite.get("name")), None)
+                if not match:
+                    continue
+                sid = urllib.parse.quote(str(isite.get("id")))
+                try:
+                    nets = (cl._call(f"{base}/{sid}/networks", {"limit": "200"}, timeout=25) or {}).get("data") or []
+                except NetError as e:
+                    out["error"] = out["error"] or str(e)
+                    nets = []
+                for n in nets:
+                    cidr = self._first_cidr(n)
+                    if cidr:
+                        out["networks"].append({"site": match["name"], "name": n.get("name") or "",
+                                                "vlan": n.get("vlanId") or n.get("vlan"), "cidr": cidr})
+                try:
+                    clients = (cl._call(f"{base}/{sid}/clients", {"limit": "500"}, timeout=25) or {}).get("data") or []
+                except NetError as e:
+                    out["error"] = out["error"] or str(e)
+                    clients = []
+                for c in clients:
+                    ip = str(c.get("ipAddress") or c.get("ip") or "").strip()
+                    if ip:
+                        out["clients"].append({"ip": ip, "mac": macnorm(c.get("macAddress") or c.get("mac")),
+                                               "name": c.get("name") or c.get("hostname") or ""})
+        return out
+
     def unplaced(self):
         return self.db.q("""SELECT d.id, d.name, d.model, d.mac, d.ip, d.status, d.version, d.update_available, d.host AS console, a.name AS account
                             FROM net_devices d JOIN net_accounts a ON a.id = d.account_id WHERE d.site_key IS NULL ORDER BY a.name, d.host, d.name""")

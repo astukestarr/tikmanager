@@ -211,7 +211,8 @@ SLIDES_3_7 = [
     {"id": "ipam-sync", "title": "IPAM discovers subnets from your routers", "img": None, "view": None, "who": "tech",
      "text": "Sync from routers reads a client's managed MikroTiks and fills the IPAM in automatically: the subnets on each router "
              "and who's actually using each address - from the router's own addresses, DHCP leases, ARP and discovered neighbours. "
-             "It also places the client's UniFi / UISP devices by their IP (inferring a subnet for a client that has no MikroTik). "
+             "It also reads a client's UniFi networks (the real subnets and VLANs, for every site - gateway or not) and places "
+             "its UniFi devices and connected clients into them. "
              "It never overwrites anything you typed by hand, and leaves TikManager's own management range alone."},
 ]
 SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)

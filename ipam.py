@@ -429,50 +429,98 @@ class Ipam:
     def _src_of(status):
         return {"gateway": "address", "dhcp": "lease", "used": "arp"}.get(status, "arp")
 
+    _GUESS = "Inferred from UniFi (no configured network found)"
+
     def _sync_unifi(self, org_id, now, summary):
-        """Place the client's UniFi / UISP devices (gateway, switches, APs) into IPAM by their LAN IP. UniFi's cloud API
-        gives device IPs but not the configured subnets, so an address lands in the matching subnet when one exists, and
-        otherwise a /24 is inferred (the only way to populate IPAM for a UniFi-only client with no MikroTik)."""
+        """Overlay the client's UniFi data onto IPAM, best source first:
+        1) CONFIGURED networks from UniFi's Network integration API - real CIDR + VLAN, for EVERY site (gateway or not);
+        2) connected clients and infrastructure devices, each placed into the most-specific matching subnet.
+        A /24 is inferred only when nothing covers an IP, and is marked so a later real network replaces it. Manual
+        records are never overwritten."""
         unifi = getattr(self, "unifi", None)
         if not unifi:
             return
         try:
-            devs = unifi.known_for_org(org_id) or {}
+            data = unifi.integration_data(org_id)
         except Exception:
-            return
-        subs = []   # (subnet_id, netobj) for this client
-        for r in self.db.q("SELECT id, cidr FROM ipam_subnets WHERE COALESCE(org_id,0)=?", (org_id,)):
+            data = {"networks": [], "clients": [], "error": "integration API unreadable"}
+
+        def subs():   # the client's subnets as (id, netobj, row)
+            res = []
+            for r in self.db.q("SELECT id, cidr, source, notes FROM ipam_subnets WHERE COALESCE(org_id,0)=?", (org_id,)):
+                try:
+                    res.append((r["id"], ipaddress.ip_network(r["cidr"], strict=False), r))
+                except ValueError:
+                    pass
+            return res
+
+        # 1) real configured networks -> subnets; a real network replaces any UniFi-guessed /24 it now covers
+        for net in data.get("networks") or []:
             try:
-                subs.append((r["id"], ipaddress.ip_network(r["cidr"], strict=False)))
-            except ValueError:
-                pass
-        for mac, d in (devs.items() if isinstance(devs, dict) else []):
-            ip = str(d.get("ip") or "").split("/")[0].strip()
-            if not ip:
+                netobj = ipaddress.ip_network(net["cidr"], strict=False)
+            except (ValueError, KeyError):
                 continue
+            if netobj.version != 4 or self._reserved(netobj):
+                continue
+            name = net.get("name") or net.get("site") or "UniFi"
+            if net.get("vlan"):
+                name = f"{name} (VLAN {net['vlan']})"
+            sid = self._upsert_subnet(org_id, netobj, {"id": None}, None, None, name, now, summary, {})
+            summary["unifi_networks"] = summary.get("unifi_networks", 0) + 1
+            for (oid, ono, orow) in subs():
+                if oid != sid and ono != netobj and ono.subnet_of(netobj) and (orow.get("notes") or "") == self._GUESS:
+                    self.db.run("UPDATE OR IGNORE ipam_addresses SET subnet_id=? WHERE subnet_id=?", (sid, oid))
+                    self.db.run("DELETE FROM ipam_subnets WHERE id=?", (oid,))
+
+        # 2) addresses: real clients first, then the infrastructure devices (name/MAC)
+        ips = {}
+        for c in data.get("clients") or []:
+            ip = str(c.get("ip") or "").split("/")[0].strip()
+            if ip:
+                ips[ip] = {"mac": c.get("mac"), "name": c.get("name")}
+        try:
+            for mac, d in (unifi.known_for_org(org_id) or {}).items():
+                ip = str(d.get("ip") or "").split("/")[0].strip()
+                if ip:
+                    ips[ip] = {"mac": mac, "name": d.get("name") or d.get("model"), "site": d.get("site")}
+        except Exception:
+            pass
+
+        current = subs()
+        for ip, info in ips.items():
             try:
                 addr = ipaddress.ip_address(ip)
             except ValueError:
                 continue
             if addr.version != 4 or not addr.is_private or addr in self.reserved:
                 continue
-            sid = next((s for (s, no) in subs if addr in no), None)
-            if sid is None:   # UniFi-only / unknown subnet: infer a /24 from the device's IP
+            match = None   # most-specific containing subnet
+            for (oid, ono, _r) in current:
+                if addr in ono and (match is None or ono.prefixlen > match[1].prefixlen):
+                    match = (oid, ono)
+            if match is None:
                 netobj = ipaddress.ip_network(f"{ip}/24", strict=False)
-                sid = self._upsert_subnet(org_id, netobj, {"id": None}, None, None, d.get("site") or "UniFi", now, summary, {})
-                subs.append((sid, netobj))
-            row = self.db.one("SELECT id, source FROM ipam_addresses WHERE subnet_id=? AND ip=?", (sid, ip))
-            name = d.get("name") or d.get("model")
-            if not row:
-                self.db.run("INSERT INTO ipam_addresses (subnet_id, ip, ip_sort, status, hostname, mac, source, last_seen, created_at, updated_at) "
-                            "VALUES (?,?,?,?,?,?,'unifi',?,?,?)", (sid, ip, _ipint(ip), "used", name, mac, now, now, now))
-                summary["addresses_added"] += 1
-                summary["unifi"] += 1
-            elif row["source"] != "manual":   # keep a manual record's fields; enrich a discovered/live one with the UniFi name
-                self.db.run("UPDATE ipam_addresses SET status=CASE WHEN status='gateway' THEN 'gateway' ELSE 'used' END, "
-                            "hostname=COALESCE(?, hostname), mac=COALESCE(?, mac), source='unifi', last_seen=?, updated_at=? WHERE id=?",
-                            (name, mac, now, now, row["id"]))
-                summary["addresses_updated"] += 1
-                summary["unifi"] += 1
-            else:
-                self.db.run("UPDATE ipam_addresses SET mac=COALESCE(mac,?), last_seen=? WHERE id=?", (mac, now, row["id"]))
+                sid = self._upsert_subnet(org_id, netobj, {"id": None}, None, None, info.get("site") or "UniFi", now, summary, {})
+                self.db.run("UPDATE ipam_subnets SET notes=? WHERE id=? AND (notes IS NULL OR notes='')", (self._GUESS, sid))
+                current = subs()
+                match = (sid, netobj)
+            self._put_unifi_address(match[0], ip, info.get("name"), info.get("mac"), now, summary)
+
+        if data.get("error"):
+            summary["unifi_error"] = data["error"]
+
+    def _put_unifi_address(self, sid, ip, name, mac, now, summary):
+        row = self.db.one("SELECT id, source FROM ipam_addresses WHERE subnet_id=? AND ip=?", (sid, ip))
+        if not row:
+            self.db.run("INSERT INTO ipam_addresses (subnet_id, ip, ip_sort, status, hostname, mac, source, last_seen, created_at, updated_at) "
+                        "VALUES (?,?,?,?,?,?,'unifi',?,?,?)", (sid, ip, _ipint(ip), "used", name, mac, now, now, now))
+            summary["addresses_added"] += 1
+            summary["unifi"] += 1
+        elif row["source"] != "manual":   # keep a manual record's fields; enrich a discovered/live one with the UniFi name
+            self.db.run("UPDATE ipam_addresses SET status=CASE WHEN status='gateway' THEN 'gateway' ELSE 'used' END, "
+                        "hostname=COALESCE(?, hostname), mac=COALESCE(?, mac), source='unifi', last_seen=?, updated_at=? WHERE id=?",
+                        (name, mac, now, now, row["id"]))
+            summary["addresses_updated"] += 1
+            summary["unifi"] += 1
+        else:
+            self.db.run("UPDATE ipam_addresses SET mac=COALESCE(mac,?), last_seen=? WHERE id=?", (mac, now, row["id"]))

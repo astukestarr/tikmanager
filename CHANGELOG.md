@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.6 - 2026-11-04
+
+- **IPAM: pull the real networks (and clients) from UniFi - every site, not just ones with a gateway.** The UniFi sync
+  now reads each site's **configured networks** from UniFi's Network integration API (the same cloud-connector proxy
+  TikManager already uses - no VPN, works for switch/AP-only sites too), so a subnet comes in with its **real CIDR, VLAN
+  and name** instead of a guessed /24. It also reads each site's **connected clients** and places them as addresses, so
+  the map shows real occupancy. When a real network arrives, any earlier guessed /24 it covers is migrated onto it and
+  removed ("real wins"). If the integration API can't be reached the sync still falls back to device-IP inference and
+  notes it. The subnet field name isn't documented and varies by controller version, so TikManager detects the CIDR
+  defensively (it scans each network object for a private `x.x.x.x/n`).
+
 ## 3.7.0-beta.5 - 2026-11-04
 
 - **IPAM: fix a crash (frozen tab) when opening a 192.168.x / 172.x subnet.** Opening the subnet map computed the
