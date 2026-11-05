@@ -371,12 +371,14 @@ function toast(msg) {
 
 // ---- tabs: VLANs / VRFs / Devices / Locations ---------------------------------------------------------------
 let tab = "subnets";
-let allOrgs = [], vlansCache = [], vrfsCache = [];
+let allOrgs = [], vlansCache = [], vrfsCache = [], typesCache = [], locsCache = [];
 function clientOpts(selId) { return [{ value: "", label: "(none)" }, ...allOrgs.map((o) => ({ value: o.id, label: o.name }))]; }
 async function loadLookups() {
   try { allOrgs = (await api("/api/ipam/orgs")).orgs || []; } catch (e) { allOrgs = tree.clients || []; }
   try { vlansCache = (await api("/api/ipam/vlans")).vlans || []; } catch (e) { vlansCache = []; }
   try { vrfsCache = (await api("/api/ipam/vrfs")).vrfs || []; } catch (e) { vrfsCache = []; }
+  try { typesCache = (await api("/api/ipam/device-types")).types || []; } catch (e) { typesCache = []; }
+  try { locsCache = (await api("/api/ipam/locations")).locations || []; } catch (e) { locsCache = []; }
 }
 function setTab(t) {
   tab = t;
@@ -460,8 +462,75 @@ function vrfDialog(v) {
     await loadLookups(); await showVrfs();
   });
 }
-function showDevices() { $("main").textContent = ""; $("main").appendChild(el("p", "muted pad", "Devices — coming in the next update.")); }
-function showLocations() { $("main").textContent = ""; $("main").appendChild(el("p", "muted pad", "Locations — coming in the next update.")); }
+async function showDevices() {
+  const m = $("main"); m.textContent = "Loading…";
+  let r; try { r = await api("/api/ipam/devices"); } catch (e) { m.textContent = e.message; return; }
+  if (!locsCache.length || !typesCache.length) await loadLookups();
+  m.textContent = ""; m.appendChild(listHead("Devices", "+ Device", "newdevice"));
+  m.appendChild(el("p", "muted small pad", "Infrastructure — routers, switches, access points, gateways and the like. Sync adds managed MikroTiks and UniFi devices automatically; add others by hand."));
+  if (!r.devices.length) { m.appendChild(el("p", "muted pad", "No devices yet — add one, or Sync a client to discover its infrastructure.")); return; }
+  m.appendChild(table(["Device", "Type", "Management IP", "Location", "Client", "Source", ...(readonly ? [] : [""])], r.devices, (d) => {
+    const row = el("tr");
+    row.appendChild(el("td", null, d.name + (d.linked_device ? "" : "")));
+    row.appendChild(el("td", null, d.type || "—"));
+    row.appendChild(el("td", "mono", d.management_ip || ""));
+    row.appendChild(el("td", null, d.location || ""));
+    row.appendChild(el("td", null, d.org || ""));
+    const cs = el("td"); cs.appendChild(el("span", "pill " + (d.source_auto ? "disc" : "man"), d.source_auto ? "discovered" : "manual")); row.appendChild(cs);
+    if (!readonly) {
+      const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editdevice = d.id; last.appendChild(e);
+      const x = el("button", "btn tiny danger", "Delete"); x.dataset.deldevice = d.id; last.appendChild(x); row.appendChild(last);
+    }
+    return row;
+  }));
+}
+function deviceDialog(d) {
+  const box = el("div");
+  box.appendChild(field("Name", inp("f_name", d?.name || "")));
+  const typeOpts = [{ value: "", label: "(none)" }, ...typesCache.map((t) => ({ value: t.id, label: t.name }))];
+  box.appendChild(field("Type", sel("f_type", typeOpts, d?.type_id || "")));
+  box.appendChild(field("Management IP", inp("f_mip", d?.management_ip || "")));
+  const locOpts = [{ value: "", label: "(none)" }, ...locsCache.map((l) => ({ value: l.id, label: l.name }))];
+  box.appendChild(field("Location", sel("f_loc", locOpts, d?.location_id || "")));
+  box.appendChild(field("Client", sel("f_org", clientOpts(), d?.org_id || "")));
+  box.appendChild(field("Description", inp("f_desc", d?.description || "")));
+  box.appendChild(field("Notes", inp("f_notes", d?.notes || "")));
+  openDlg(d?.id ? "Edit device" : "New device", box, async () => {
+    await post("/api/ipam/devices", { id: d?.id, name: $("f_name").value, type_id: $("f_type").value || null, management_ip: $("f_mip").value,
+      location_id: $("f_loc").value || null, org_id: $("f_org").value || null, description: $("f_desc").value, notes: $("f_notes").value });
+    await showDevices();
+  });
+}
+async function showLocations() {
+  const m = $("main"); m.textContent = "Loading…";
+  let r; try { r = await api("/api/ipam/locations"); } catch (e) { m.textContent = e.message; return; }
+  locsCache = r.locations; m.textContent = ""; m.appendChild(listHead("Locations", "+ Location", "newlocation"));
+  m.appendChild(el("p", "muted small pad", "Sites where infrastructure lives. Sync adds a location for each UniFi / UISP site automatically."));
+  if (!r.locations.length) { m.appendChild(el("p", "muted pad", "No locations yet.")); return; }
+  m.appendChild(table(["Location", "Address", "Client", "Devices", ...(readonly ? [] : [""])], r.locations, (l) => {
+    const row = el("tr");
+    row.appendChild(el("td", null, l.name));
+    row.appendChild(el("td", "muted", l.address || ""));
+    row.appendChild(el("td", null, l.org || ""));
+    row.appendChild(el("td", null, String(l.devices)));
+    if (!readonly) {
+      const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editlocation = l.id; last.appendChild(e);
+      const x = el("button", "btn tiny danger", "Delete"); x.dataset.dellocation = l.id; last.appendChild(x); row.appendChild(last);
+    }
+    return row;
+  }));
+}
+function locationDialog(l) {
+  const box = el("div");
+  box.appendChild(field("Name", inp("f_name", l?.name || "")));
+  box.appendChild(field("Address", inp("f_addr", l?.address || "")));
+  box.appendChild(field("Client", sel("f_org", clientOpts(), l?.org_id || "")));
+  box.appendChild(field("Notes", inp("f_notes", l?.notes || "")));
+  openDlg(l?.id ? "Edit location" : "New location", box, async () => {
+    await post("/api/ipam/locations", { id: l?.id, name: $("f_name").value, address: $("f_addr").value, org_id: $("f_org").value || null, notes: $("f_notes").value });
+    await showLocations();
+  });
+}
 
 // ---- load / route -------------------------------------------------------------------------------------------
 async function reload() { tree = await api("/api/ipam/tree"); renderTree(); if (tab !== "subnets") return setTab(tab); if (current?.subnet) await showSubnet(current.subnet); else showSubnets(); }
@@ -508,7 +577,15 @@ async function init() {
     const sub = t.closest("[data-subnet]");
     // read-only client: ignore every write/edit affordance (map cells open the address editor otherwise)
     if (readonly && (t.classList.contains("cell") || ["newvlan", "editvlan", "delvlan", "newvrf", "editvrf", "delvrf",
-      "newsubnet", "editsubnet", "splitsubnet", "newaddr", "syncorg", "delsubnet", "editaddr", "deladdr"].some((k) => t.dataset[k] != null))) return;
+      "newsubnet", "editsubnet", "splitsubnet", "newaddr", "syncorg", "delsubnet", "editaddr", "deladdr",
+      "newdevice", "editdevice", "deldevice", "newlocation", "editlocation", "dellocation"].some((k) => t.dataset[k] != null))) return;
+    // Devices / Locations
+    if (t.dataset.newdevice != null) return deviceDialog(null);
+    if (t.dataset.editdevice != null) { const r = await api("/api/ipam/devices"); return deviceDialog((r.devices || []).find((x) => x.id === +t.dataset.editdevice)); }
+    if (t.dataset.deldevice != null) { if (confirm("Delete this device?")) { await post("/api/ipam/devices/" + t.dataset.deldevice + "/delete"); await showDevices(); } return; }
+    if (t.dataset.newlocation != null) return locationDialog(null);
+    if (t.dataset.editlocation != null) return locationDialog(locsCache.find((x) => x.id === +t.dataset.editlocation));
+    if (t.dataset.dellocation != null) { if (confirm("Delete this location? Devices keep their data but lose the location.")) { await post("/api/ipam/locations/" + t.dataset.dellocation + "/delete"); await loadLookups(); await showLocations(); } return; }
     // VLANs / VRFs
     if (t.dataset.newvlan != null) return vlanDialog(null);
     if (t.dataset.editvlan != null) return vlanDialog(vlansCache.find((v) => v.id === +t.dataset.editvlan));

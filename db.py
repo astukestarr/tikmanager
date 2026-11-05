@@ -374,6 +374,7 @@ CREATE TABLE IF NOT EXISTS ipam_devices (             -- IPAM's own inventory of
   location_id INTEGER REFERENCES ipam_locations(id) ON DELETE SET NULL, org_id INTEGER REFERENCES orgs(id) ON DELETE SET NULL,
   device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,   -- optional link to a managed MikroTik
   management_ip TEXT, description TEXT, notes TEXT, custom TEXT NOT NULL DEFAULT '{}',
+  source_auto INTEGER NOT NULL DEFAULT 0,               -- 1: created by Sync (discovered infrastructure), 0: added by hand
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL
 );
 CREATE TABLE IF NOT EXISTS ipam_addresses (           -- individual host records / the live-usage overlay
@@ -415,6 +416,8 @@ class DB:
                 if col not in cols:
                     c.execute(f"ALTER TABLE orgs ADD COLUMN {col} {ddl}")
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS orgs_cw ON orgs(cw_id)")
+        if "ipam_devices" in tables and "source_auto" not in {r[1] for r in c.execute("PRAGMA table_info(ipam_devices)")}:
+            c.execute("ALTER TABLE ipam_devices ADD COLUMN source_auto INTEGER NOT NULL DEFAULT 0")
         if "users" in tables and "entra_oid" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:
             c.execute("ALTER TABLE users ADD COLUMN entra_oid TEXT")
         if "users" in tables and "prefs" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:

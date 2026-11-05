@@ -16,6 +16,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+try:
+    from devkind import kind as _devkind   # classify a managed MikroTik: router / switch / ap
+except Exception:   # pragma: no cover - devkind is always present in the app
+    def _devkind(model, board, override=None):
+        return "router"
+
 
 class IpamError(ValueError):
     pass
@@ -58,6 +64,20 @@ class Ipam:
             self.reserved = ipaddress.ip_network(getattr(settings, "wg_network", None) or "10.77.0.0/16", strict=False)
         except ValueError:
             self.reserved = ipaddress.ip_network("10.77.0.0/16")
+        self._seed_types()
+
+    _BUILTIN_TYPES = [("Router", "router"), ("Switch", "switch"), ("Access point", "ap"), ("Gateway", "gateway"),
+                      ("Firewall", "firewall"), ("Server", "server"), ("Storage", "storage"), ("UPS", "ups"),
+                      ("Camera", "camera"), ("Printer", "printer"), ("Phone", "phone"), ("Other", "other")]
+
+    def _seed_types(self):
+        """Create the built-in device types once (idempotent)."""
+        try:
+            for name, icon in self._BUILTIN_TYPES:
+                if not self.db.one("SELECT 1 FROM ipam_device_types WHERE name=?", (name,)):
+                    self.db.run("INSERT INTO ipam_device_types (name, icon, builtin) VALUES (?,?,1)", (name, icon))
+        except Exception:
+            pass   # a brand-new database may not have the table yet on the very first boot; next call seeds it
 
     # --- small helpers ------------------------------------------------------------------------------------------
     def _now(self):
@@ -340,6 +360,68 @@ class Ipam:
     def vrf_delete(self, vid):
         self.db.run("DELETE FROM ipam_vrfs WHERE id=?", (int(vid),))
 
+    # --- device types, locations & devices ----------------------------------------------------------------------
+    def device_types(self):
+        return self.db.q("SELECT * FROM ipam_device_types ORDER BY builtin DESC, name")
+
+    def _type_id(self, name):
+        r = self.db.one("SELECT id FROM ipam_device_types WHERE name=?", (name,))
+        return r["id"] if r else None
+
+    def locations(self, org_id=None):
+        where = "WHERE l.org_id=?" if org_id else ""
+        args = (int(org_id),) if org_id else ()
+        return self.db.q(f"SELECT l.*, o.name AS org, (SELECT COUNT(*) FROM ipam_devices d WHERE d.location_id=l.id) AS devices "
+                        f"FROM ipam_locations l LEFT JOIN orgs o ON o.id=l.org_id {where} ORDER BY l.name", args)
+
+    def location_save(self, b, user):
+        name = str(b.get("name") or "").strip()[:120]
+        if not name:
+            raise IpamError("Give the location a name.")
+        org_id = int(b["org_id"]) if b.get("org_id") else None
+        now = self._now()
+        if b.get("id"):
+            self.db.run("UPDATE ipam_locations SET name=?, address=?, org_id=?, notes=?, updated_at=? WHERE id=?",
+                        (name, str(b.get("address") or "")[:300] or None, org_id, str(b.get("notes") or "")[:1000] or None, now, int(b["id"])))
+            return int(b["id"])
+        return self.db.run("INSERT INTO ipam_locations (name, address, org_id, notes, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                           (name, str(b.get("address") or "")[:300] or None, org_id, str(b.get("notes") or "")[:1000] or None, user, now))
+
+    def location_delete(self, lid):
+        self.db.run("DELETE FROM ipam_locations WHERE id=?", (int(lid),))
+
+    def devices_list(self, org_id=None):
+        where = "WHERE d.org_id=?" if org_id else ""
+        args = (int(org_id),) if org_id else ()
+        return self.db.q(f"""SELECT d.*, t.name AS type, t.icon AS type_icon, l.name AS location, o.name AS org,
+            md.name AS linked_device, md.online AS linked_online
+            FROM ipam_devices d LEFT JOIN ipam_device_types t ON t.id=d.type_id
+            LEFT JOIN ipam_locations l ON l.id=d.location_id LEFT JOIN orgs o ON o.id=d.org_id
+            LEFT JOIN devices md ON md.id=d.device_id {where} ORDER BY t.name, d.name""", args)
+
+    def device_save(self, b, user):
+        name = str(b.get("name") or "").strip()[:120]
+        if not name:
+            raise IpamError("Give the device a name.")
+        now = self._now()
+        fields = dict(name=name, type_id=int(b["type_id"]) if b.get("type_id") else None,
+                      location_id=int(b["location_id"]) if b.get("location_id") else None,
+                      org_id=int(b["org_id"]) if b.get("org_id") else None,
+                      management_ip=str(b.get("management_ip") or "")[:64] or None,
+                      description=str(b.get("description") or "")[:300] or None,
+                      notes=str(b.get("notes") or "")[:2000] or None, updated_at=now)
+        if b.get("id"):
+            cols = ", ".join(f"{k}=?" for k in fields)
+            self.db.run(f"UPDATE ipam_devices SET {cols} WHERE id=?", (*fields.values(), int(b["id"])))
+            return int(b["id"])
+        return self.db.run("INSERT INTO ipam_devices (name, type_id, location_id, org_id, management_ip, description, notes, "
+                           "created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                           (name, fields["type_id"], fields["location_id"], fields["org_id"], fields["management_ip"],
+                            fields["description"], fields["notes"], user, now, now))
+
+    def device_delete(self, did):
+        self.db.run("DELETE FROM ipam_devices WHERE id=?", (int(did),))
+
     def _vlan_for(self, org_id, number, name, now):
         """Find or create a VLAN by (number, l2domain='default') for auto-population from discovery. Returns its id."""
         if not number:
@@ -392,6 +474,8 @@ class Ipam:
                 self._sync_addresses(d, topo, sub_by_net, now, summary)
             # 4) overlay the client's UniFi / UISP devices as addresses (and infer a /24 for a client with no MikroTik)
             self._sync_unifi(org_id, now, summary)
+            # 5) auto-populate the infrastructure inventory (managed MikroTiks + UniFi APs/switches/gateways) and locations
+            self._sync_devices(org_id, now, summary)
             return summary
         finally:
             with self.lock:
@@ -517,6 +601,82 @@ class Ipam:
     @staticmethod
     def _src_of(status):
         return {"gateway": "address", "dhcp": "lease", "used": "arp"}.get(status, "arp")
+
+    _KIND_TYPE = {"router": "Router", "switch": "Switch", "ap": "Access point"}
+
+    @staticmethod
+    def _unifi_type(model, is_console):
+        """Best-guess IPAM device type for a UniFi / UISP infrastructure device from its model code."""
+        m = str(model or "").upper()
+        if is_console or any(k in m for k in ("UDM", "UXG", "USG", "UCG", "DREAM", "GATEWAY", "EDGEROUTER", "ER-")):
+            return "Gateway"
+        if any(k in m for k in ("USW", "US-", "US8", "US16", "US24", "US48", "FLEX", "SWITCH", "ES-")):
+            return "Switch"
+        if any(k in m for k in ("UAP", "U6", "U7", "NANOHD", "AC-", "ACCESS", "UALR", "UAX", "AP-", "WAVE")):
+            return "Access point"
+        return "Other"
+
+    def _sync_devices(self, org_id, now, summary):
+        """Auto-populate IPAM's INFRASTRUCTURE inventory from discovery: managed MikroTiks and UniFi / UISP
+        APs/switches/gateways become ipam_devices; UniFi sites become locations. Client workstations are never added.
+        A manual rename is never clobbered (name is set only when a device is first created)."""
+        # locations from the client's UniFi / UISP sites
+        loc_by_site = {}
+        for s in self.db.q("SELECT DISTINCT name FROM net_sites WHERE org_id=? AND name IS NOT NULL AND name!=''", (org_id,)):
+            row = self.db.one("SELECT id FROM ipam_locations WHERE name=? AND COALESCE(org_id,0)=?", (s["name"], org_id))
+            if row:
+                loc_by_site[s["name"]] = row["id"]
+            else:
+                loc_by_site[s["name"]] = self.db.run(
+                    "INSERT INTO ipam_locations (name, org_id, created_by, created_at) VALUES (?,?,?,?)", (s["name"], org_id, "sync", now))
+                summary["locations_added"] = summary.get("locations_added", 0) + 1
+
+        def link_addr(ip, ipam_device_id):
+            if not ip:
+                return
+            self.db.run("UPDATE ipam_addresses SET ipam_device_id=? WHERE ipam_device_id IS NULL AND ip=? AND subnet_id IN "
+                        "(SELECT id FROM ipam_subnets WHERE COALESCE(org_id,0)=?)", (ipam_device_id, ip, org_id))
+
+        # managed MikroTiks -> ipam_devices, linked by device_id and typed by kind
+        for d in self.db.q("SELECT id, name, model, board, kind_override, tunnel_ip, wan_ip FROM devices "
+                           "WHERE org_id=? AND state='adopted'", (org_id,)):
+            mip = (d.get("tunnel_ip") or d.get("wan_ip") or "").split("/")[0] or None
+            tid = self._type_id(self._KIND_TYPE.get(_devkind(d.get("model"), d.get("board"), d.get("kind_override")), "Router"))
+            row = self.db.one("SELECT id FROM ipam_devices WHERE device_id=?", (d["id"],))
+            if row:
+                self.db.run("UPDATE ipam_devices SET type_id=COALESCE(type_id,?), management_ip=COALESCE(management_ip,?), updated_at=? WHERE id=?",
+                            (tid, mip, now, row["id"]))
+                did = row["id"]
+            else:
+                did = self.db.run("INSERT INTO ipam_devices (name, type_id, org_id, device_id, management_ip, source_auto, created_by, created_at, updated_at) "
+                                  "VALUES (?,?,?,?,?,1,?,?,?)", (d["name"], tid, org_id, d["id"], mip, "sync", now, now))
+                summary["devices_added"] = summary.get("devices_added", 0) + 1
+            link_addr(mip, did)
+
+        # UniFi / UISP infrastructure (APs, switches, gateways) -> ipam_devices, matched by (org, management_ip)
+        unifi = getattr(self, "unifi", None)
+        if unifi:
+            try:
+                known = unifi.known_for_org(org_id) or {}
+            except Exception:
+                known = {}
+            for _mac, info in known.items():
+                ip = str(info.get("ip") or "").split("/")[0].strip()
+                if not ip:
+                    continue
+                tid = self._type_id(self._unifi_type(info.get("model"), info.get("console")))
+                lid = loc_by_site.get(info.get("site"))
+                row = self.db.one("SELECT id FROM ipam_devices WHERE device_id IS NULL AND COALESCE(org_id,0)=? AND management_ip=?", (org_id, ip))
+                if row:
+                    self.db.run("UPDATE ipam_devices SET type_id=COALESCE(type_id,?), location_id=COALESCE(location_id,?), updated_at=? WHERE id=?",
+                                (tid, lid, now, row["id"]))
+                    did = row["id"]
+                else:
+                    did = self.db.run("INSERT INTO ipam_devices (name, type_id, location_id, org_id, management_ip, description, source_auto, "
+                                      "created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?,?)",
+                                      (info.get("name") or info.get("model") or "UniFi device", tid, lid, org_id, ip, info.get("model"), "sync", now, now))
+                    summary["devices_added"] = summary.get("devices_added", 0) + 1
+                link_addr(ip, did)
 
     _GUESS = "Inferred from UniFi (no configured network found)"
 

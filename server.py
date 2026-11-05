@@ -889,6 +889,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"vlans": ipam.vlans(org or q.get("org"))})
             if path == "/api/ipam/vrfs":
                 return self.json({"vrfs": ipam.vrfs(org or q.get("org"))})
+            if path == "/api/ipam/device-types":
+                return self.json({"types": ipam.device_types()})
+            if path == "/api/ipam/locations":
+                return self.json({"locations": ipam.locations(org or q.get("org"))})
+            if path == "/api/ipam/devices":
+                return self.json({"devices": ipam.devices_list(org or q.get("org"))})
         except IpamError as e:
             raise HttpError(400, str(e)) from None
         raise HttpError(404, "Not found.")
@@ -925,6 +931,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"id": ipam.vrf_save(b, who)})
             if m := re.fullmatch(r"/api/ipam/vrfs/(\d+)/delete", path):
                 ipam.vrf_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/locations":
+                return self.json({"id": ipam.location_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/locations/(\d+)/delete", path):
+                ipam.location_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/devices":
+                return self.json({"id": ipam.device_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/devices/(\d+)/delete", path):
+                ipam.device_delete(int(m.group(1))); return self.json({"ok": True})
             if path == "/api/ipam/sync":
                 if not b.get("org_id"):
                     raise IpamError("Pick a client to sync.")
