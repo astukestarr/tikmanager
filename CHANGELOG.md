@@ -3,6 +3,27 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.11 - 2026-11-04
+
+- **Updates: survive GitHub's API rate limit.** The update check uses GitHub's API, which allows only 60 requests/hour
+  per IP when unauthenticated - easy to hit during fast beta iteration, giving a "403 rate limit exceeded" on Check for
+  updates. Two fixes: (1) if you set **`TM_UPDATE_TOKEN`** (or `settings.update_token`) to a GitHub token, the updater
+  authenticates and gets 5,000/hour; (2) when the check can't reach GitHub (rate-limited or offline), **Upgrade now**
+  for an explicitly-newer version is still allowed - the upgrade downloads the release archive, which isn't the
+  rate-limited API - instead of being blocked with "check for updates first".
+
+## 3.7.0-beta.10 - 2026-11-04
+
+- **IPAM: resolve the real UniFi console id (fixes the integration-API 403).** A stored UniFi site id is
+  `1:<hostId>:<siteId>`, where the real `/v1/hosts` console id is the `<hostId>` embedded in the middle. The UniFi
+  networks pull now reads `/v1/hosts` and matches each site to the console id it contains, instead of guessing by
+  splitting the string - so the real networks (CIDR + VLAN) come through.
+
+## 3.7.0-beta.9 - 2026-11-04
+
+- **IPAM: a richer UniFi integration-API probe** (`/api/ipam/unifi-probe`) - dumps sample host records and tries the
+  connector proxy per console, to diagnose why a client's real networks don't come in.
+
 ## 3.7.0-beta.8 - 2026-11-04
 
 - **IPAM: fix the UniFi real-networks pull (403 "host not found").** The UniFi console id was taken from the wrong part

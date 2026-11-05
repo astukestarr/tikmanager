@@ -101,8 +101,17 @@ class Updates:
         """One-click upgrade needs the root updater units the Linux installer sets up."""
         return os.name == "posix" and Path("/etc/systemd/system/tikmanager-update.path").exists()
 
+    def _token(self):
+        """A GitHub token raises the API limit from 60/hour (unauthenticated, per IP) to 5,000/hour - useful during fast
+        beta iteration. Set TM_UPDATE_TOKEN (or settings.update_token); a read-only / public-repo token is plenty."""
+        return (getattr(self.s, "update_token", "") or os.environ.get("TM_UPDATE_TOKEN", "") or "").strip()
+
     def _get(self, url):
-        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT})
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT}
+        tok = self._token()
+        if tok:
+            headers["Authorization"] = f"Bearer {tok}"
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.loads(r.read() or b"null")
 
@@ -241,11 +250,18 @@ class Updates:
             raise ValueError("Pick a version like 1.2.3 or 1.2.3-beta.1.")
         if getattr(self.s, "update_check", True):   # a newer version may have come out since the last hourly check
             self.check()
-        if self.latest.get("version") != version and vtuple(self.latest.get("version")) and vtuple(self.latest["version"]) > vtuple(version):
-            raise ValueError(f"A newer version came out since the last check: {self.latest['version']}. The page now offers that one - "
-                             "click Upgrade now again to install it.")
-        if self.latest.get("version") != version or not self.info()["available"]:
-            raise ValueError("That isn't the newest released version - check for updates first.")
+        if self.latest.get("error"):
+            # the check couldn't reach GitHub (rate-limited / offline): trust an explicit, newer-than-installed version
+            # (the upgrade itself downloads the release archive, which isn't the rate-limited API)
+            if not (vtuple(version) and vtuple(version) > vtuple(__version__)):
+                raise ValueError(f"Couldn't check GitHub ({self.latest['error']}), and {version} isn't newer than the "
+                                 f"installed {__version__}.")
+        else:
+            if self.latest.get("version") != version and vtuple(self.latest.get("version")) and vtuple(self.latest["version"]) > vtuple(version):
+                raise ValueError(f"A newer version came out since the last check: {self.latest['version']}. The page now offers that one - "
+                                 "click Upgrade now again to install it.")
+            if self.latest.get("version") != version or not self.info()["available"]:
+                raise ValueError("That isn't the newest released version - check for updates first.")
         if self.status().get("state") in ("requested", "running"):
             raise ValueError("An upgrade is already in progress.")
         tmp = self.request_file.with_suffix(".tmp")
