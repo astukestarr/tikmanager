@@ -95,6 +95,12 @@ class Ipam:
         out = dict(s)
         out["org"] = self._org_name(s.get("org_id"))
         out["reserved"] = self._reserved(net(s["cidr"])) if s.get("cidr") else False
+        if s.get("vlan_id"):
+            v = self.db.one("SELECT number, name FROM ipam_vlans WHERE id=?", (s["vlan_id"],))
+            out["vlan"] = (f"VLAN {v['number']}" + (f" · {v['name']}" if v["name"] else "")) if v else None
+        if s.get("vrf_id"):
+            v = self.db.one("SELECT name FROM ipam_vrfs WHERE id=?", (s["vrf_id"],))
+            out["vrf"] = v["name"] if v else None
         if with_counts:
             usable, by, used = self._counts(s)
             out["usable"] = usable
@@ -104,8 +110,15 @@ class Ipam:
         return out
 
     # --- sections -----------------------------------------------------------------------------------------------
-    def tree(self):
-        """Sections (nested) and, separately, the client pivot - what the left sidebar needs."""
+    def tree(self, org=None):
+        """Sections (nested) and, separately, the client pivot - what the left sidebar needs.
+        A client user (org set) sees only their own organization's subnets - no free-form sections, no other clients."""
+        if org:
+            subs = [self._subnet_public(s) for s in
+                    self.db.q("SELECT * FROM ipam_subnets WHERE org_id=? ORDER BY family, cidr", (int(org),))]
+            clients = self.db.q("SELECT o.id, o.name, COUNT(s.id) AS subnets FROM orgs o "
+                                "JOIN ipam_subnets s ON s.org_id=o.id WHERE o.id=? GROUP BY o.id", (int(org),))
+            return {"sections": [], "subnets": subs, "clients": clients, "scoped": True}
         secs = self.db.q("SELECT * FROM ipam_sections ORDER BY pos, name")
         subs = [self._subnet_public(s) for s in self.db.q("SELECT * FROM ipam_subnets ORDER BY family, cidr")]
         clients = self.db.q("SELECT o.id, o.name, COUNT(s.id) AS subnets FROM orgs o "
@@ -179,6 +192,7 @@ class Ipam:
             if o.version == netobj.version and o != netobj and o.overlaps(netobj) and not (o.subnet_of(netobj) or netobj.subnet_of(o)):
                 raise IpamError(f"{cidr} overlaps {other['cidr']} already recorded for this client.")
         fields = dict(cidr=cidr, family=netobj.version, org_id=org_id, section_id=section_id,
+                      vlan_id=int(b["vlan_id"]) if b.get("vlan_id") else None, vrf_id=int(b["vrf_id"]) if b.get("vrf_id") else None,
                       name=str(b.get("name") or "")[:120], gateway=str(b.get("gateway") or "")[:64] or None,
                       is_pool=1 if b.get("is_pool") else 0, mark_full=1 if b.get("mark_full") else 0,
                       notes=str(b.get("notes") or "")[:2000], updated_at=now)
@@ -186,11 +200,11 @@ class Ipam:
             cols = ", ".join(f"{k}=?" for k in fields)
             self.db.run(f"UPDATE ipam_subnets SET {cols} WHERE id=?", (*fields.values(), int(sid)))
             return int(sid)
-        return self.db.run("INSERT INTO ipam_subnets (cidr, family, org_id, section_id, name, gateway, is_pool, mark_full, "
-                           "notes, source, first_seen, created_by, created_at, updated_at) "
-                           "VALUES (?,?,?,?,?,?,?,?,?,'manual',?,?,?,?)",
-                           (cidr, netobj.version, org_id, section_id, fields["name"], fields["gateway"], fields["is_pool"],
-                            fields["mark_full"], fields["notes"], now, user, now, now))
+        return self.db.run("INSERT INTO ipam_subnets (cidr, family, org_id, section_id, vlan_id, vrf_id, name, gateway, is_pool, "
+                           "mark_full, notes, source, first_seen, created_by, created_at, updated_at) "
+                           "VALUES (?,?,?,?,?,?,?,?,?,?,?,'manual',?,?,?,?)",
+                           (cidr, netobj.version, org_id, section_id, fields["vlan_id"], fields["vrf_id"], fields["name"],
+                            fields["gateway"], fields["is_pool"], fields["mark_full"], fields["notes"], now, user, now, now))
 
     def subnet_delete(self, sid):
         self.db.run("DELETE FROM ipam_subnets WHERE id=?", (int(sid),))
@@ -262,16 +276,81 @@ class Ipam:
         self.db.run("DELETE FROM ipam_addresses WHERE id=?", (int(aid),))
 
     # --- search -------------------------------------------------------------------------------------------------
-    def search(self, q):
+    def search(self, q, org=None):
         q = (q or "").strip()
         if not q:
             return {"subnets": [], "addresses": []}
+        like = f"%{q}%"
+        og = " AND org_id=?" if org else ""
+        oa = (int(org),) if org else ()
         subs = [self._subnet_public(s, with_counts=False) for s in
-                self.db.q("SELECT * FROM ipam_subnets WHERE cidr LIKE ? OR name LIKE ? ORDER BY cidr LIMIT 50", (f"%{q}%", f"%{q}%"))]
+                self.db.q(f"SELECT * FROM ipam_subnets WHERE (cidr LIKE ? OR name LIKE ?){og} ORDER BY cidr LIMIT 50", (like, like, *oa))]
+        og2 = " AND s.org_id=?" if org else ""
         addrs = self.db.q("SELECT a.*, s.cidr AS subnet_cidr FROM ipam_addresses a JOIN ipam_subnets s ON s.id=a.subnet_id "
-                          "WHERE a.ip LIKE ? OR a.hostname LIKE ? OR a.mac LIKE ? OR a.owner LIKE ? ORDER BY a.ip_sort LIMIT 100",
-                          (f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%"))
+                          f"WHERE (a.ip LIKE ? OR a.hostname LIKE ? OR a.mac LIKE ? OR a.owner LIKE ?){og2} ORDER BY a.ip_sort LIMIT 100",
+                          (like, like, like, like, *oa))
         return {"subnets": subs, "addresses": addrs}
+
+    # --- VLANs & VRFs -------------------------------------------------------------------------------------------
+    def vlans(self, org_id=None):
+        where = "WHERE v.org_id=?" if org_id else ""
+        args = (int(org_id),) if org_id else ()
+        return self.db.q(f"SELECT v.*, o.name AS org, (SELECT COUNT(*) FROM ipam_subnets s WHERE s.vlan_id=v.id) AS subnets "
+                        f"FROM ipam_vlans v LEFT JOIN orgs o ON o.id=v.org_id {where} ORDER BY v.l2domain, v.number", args)
+
+    def vlan_save(self, b, user):
+        number = int(b.get("number") or 0)
+        if not (1 <= number <= 4094):
+            raise IpamError("A VLAN number is 1-4094.")
+        l2 = str(b.get("l2domain") or "default").strip()[:60] or "default"
+        org_id = int(b["org_id"]) if b.get("org_id") else None
+        if self.db.one("SELECT id FROM ipam_vlans WHERE number=? AND l2domain=? AND id!=?", (number, l2, int(b.get("id") or 0))):
+            raise IpamError(f"VLAN {number} already exists in L2 domain '{l2}'.")
+        now = self._now()
+        if b.get("id"):
+            self.db.run("UPDATE ipam_vlans SET number=?, name=?, l2domain=?, org_id=?, notes=?, updated_at=? WHERE id=?",
+                        (number, str(b.get("name") or "")[:80], l2, org_id, str(b.get("notes") or "")[:500], now, int(b["id"])))
+            return int(b["id"])
+        return self.db.run("INSERT INTO ipam_vlans (number, name, l2domain, org_id, notes, created_by, created_at) VALUES (?,?,?,?,?,?,?)",
+                           (number, str(b.get("name") or "")[:80], l2, org_id, str(b.get("notes") or "")[:500], user, now))
+
+    def vlan_delete(self, vid):
+        self.db.run("DELETE FROM ipam_vlans WHERE id=?", (int(vid),))
+
+    def vrfs(self, org_id=None):
+        where = "WHERE v.org_id=?" if org_id else ""
+        args = (int(org_id),) if org_id else ()
+        return self.db.q(f"SELECT v.*, o.name AS org, (SELECT COUNT(*) FROM ipam_subnets s WHERE s.vrf_id=v.id) AS subnets "
+                        f"FROM ipam_vrfs v LEFT JOIN orgs o ON o.id=v.org_id {where} ORDER BY v.name", args)
+
+    def vrf_save(self, b, user):
+        name = str(b.get("name") or "").strip()[:80]
+        rd = str(b.get("rd") or "").strip()[:40]
+        if not name or not rd:
+            raise IpamError("A VRF needs a name and a route distinguisher (RD, e.g. 65000:1).")
+        org_id = int(b["org_id"]) if b.get("org_id") else None
+        now = self._now()
+        if b.get("id"):
+            self.db.run("UPDATE ipam_vrfs SET rd=?, name=?, description=?, org_id=?, updated_at=? WHERE id=?",
+                        (rd, name, str(b.get("description") or "")[:300], org_id, now, int(b["id"])))
+            return int(b["id"])
+        return self.db.run("INSERT INTO ipam_vrfs (rd, name, description, org_id, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                           (rd, name, str(b.get("description") or "")[:300], org_id, user, now))
+
+    def vrf_delete(self, vid):
+        self.db.run("DELETE FROM ipam_vrfs WHERE id=?", (int(vid),))
+
+    def _vlan_for(self, org_id, number, name, now):
+        """Find or create a VLAN by (number, l2domain='default') for auto-population from discovery. Returns its id."""
+        if not number:
+            return None
+        row = self.db.one("SELECT id, name FROM ipam_vlans WHERE number=? AND l2domain='default'", (int(number),))
+        if row:
+            if name and not row["name"]:
+                self.db.run("UPDATE ipam_vlans SET name=? WHERE id=?", (str(name)[:80], row["id"]))
+            return row["id"]
+        return self.db.run("INSERT INTO ipam_vlans (number, name, l2domain, org_id, created_by, created_at) VALUES (?,?,?,?,?,?)",
+                           (int(number), str(name or "")[:80], "default", org_id, "sync", now))
 
     # --- live sync from the managed routers ---------------------------------------------------------------------
     def sync(self, org_id, user="sync"):
@@ -364,6 +443,16 @@ class Ipam:
 
     def _sync_addresses(self, d, topo, sub_by_net, now, summary):
         """Overlay live usage (router addresses, DHCP leases, ARP, neighbours) onto the matching subnets' addresses."""
+        # auto-tag the device's discovered subnets with their VLAN. A subnet's stored interface is the VLAN interface's
+        # NAME (e.g. "vlan20-guest"), which matches /interface/vlan's "name" - not its "interface" (the parent bridge).
+        vlan_by_iface = {v.get("name"): v for v in topo.get("vlans") or [] if v.get("name")}
+        if vlan_by_iface:
+            for sub in self.db.q("SELECT id, interface FROM ipam_subnets WHERE device_id=?", (d["id"],)):
+                v = vlan_by_iface.get(sub["interface"])
+                if v and v.get("vlan-id"):
+                    vid = self._vlan_for(d.get("org_id"), v.get("vlan-id"), v.get("name"), now)
+                    if vid:
+                        self.db.run("UPDATE ipam_subnets SET vlan_id=COALESCE(vlan_id, ?) WHERE id=?", (vid, sub["id"]))
         # discover any extra PRIVATE LAN subnets straight off the router's live interface addresses (fallback / additions)
         for a in topo.get("addresses") or []:
             addr = a.get("address") or ""
@@ -467,6 +556,10 @@ class Ipam:
                 name = f"{name} (VLAN {net['vlan']})"
             sid = self._upsert_subnet(org_id, netobj, {"id": None}, None, None, name, now, summary, {})
             summary["unifi_networks"] = summary.get("unifi_networks", 0) + 1
+            if net.get("vlan"):   # auto-populate the VLAN and link the subnet
+                vid = self._vlan_for(org_id, net.get("vlan"), net.get("name"), now)
+                if vid:
+                    self.db.run("UPDATE ipam_subnets SET vlan_id=COALESCE(vlan_id, ?) WHERE id=?", (vid, sid))
             for (oid, ono, orow) in subs():
                 if oid != sid and ono != netobj and ono.subnet_of(netobj) and (orow.get("notes") or "") == self._GUESS:
                     self.db.run("UPDATE OR IGNORE ipam_addresses SET subnet_id=? WHERE subnet_id=?", (sid, oid))

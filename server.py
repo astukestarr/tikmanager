@@ -679,6 +679,16 @@ class Handler(BaseHTTPRequestHandler):
         level = o.get("client_winbox") if o.get("client_winbox") in ("read", "full") else "off"
         return level, bool(o.get("client_vpn"))
 
+    def require_ipam(self):
+        """View access to IPAM: any technician (role-none already refused by require()), or a client user whose
+        organization has IPAM turned on. Writes stay technician-only (ipam_post keeps tech=True, write=True)."""
+        s = self.require()
+        if s["kind"] == "client":
+            o = db.one("SELECT client_ipam FROM orgs WHERE id=?", (s["org_id"],)) if s["org_id"] else None
+            if not (o and o["client_ipam"]):
+                raise HttpError(403, "IPAM isn't turned on for your organization - ask your IT provider.")
+        return s
+
     def require_vpn(self, write=False):
         """Technicians (write needs a non-read-only account), or a client admin whose organization has VPNs turned on."""
         s = self.require()
@@ -846,24 +856,39 @@ class Handler(BaseHTTPRequestHandler):
                 "last_seen": r["last_seen"], "first_seen": r["first_seen"]}
 
     def ipam_get(self, path, q):
-        self.require(tech=True)   # any technician may view IPAM; writes need the 'ipam' permission
+        s = self.require_ipam()   # any technician, or a client user whose org has IPAM turned on; writes need 'ipam'
+        org = s["org_id"] if s["kind"] == "client" else None   # clients see only their own organization
+
+        def owned(sid):   # a client may only open a subnet in their own organization
+            d = ipam.subnet(int(sid))
+            if org is not None and d.get("org_id") != org:
+                raise HttpError(404, "Not found.")
+            return d
         try:
             if path == "/api/ipam/tree":
-                return self.json(ipam.tree())
+                return self.json(ipam.tree(org))
             if path == "/api/ipam/orgs":
-                return self.json({"orgs": ipam.syncable_orgs()})
+                return self.json({"orgs": ipam.syncable_orgs() if org is None else []})
             if path == "/api/ipam/unifi-probe":   # diagnostic: raw UniFi integration API response for a client
+                if org is not None:
+                    raise HttpError(403, "Only technicians can do that.")
                 if not getattr(ipam, "unifi", None):
                     raise HttpError(400, "No UniFi connection configured.")
                 return self.json(ipam.unifi.integration_probe(int(q.get("org") or 0)))
             if path == "/api/ipam/subnets":
-                return self.json({"subnets": ipam.subnets(q.get("org_id"), q.get("section_id"), q.get("q"))})
+                return self.json({"subnets": ipam.subnets(org or q.get("org_id"),
+                                                          None if org is not None else q.get("section_id"), q.get("q"))})
             if m := re.fullmatch(r"/api/ipam/subnets/(\d+)", path):
-                return self.json(ipam.subnet(int(m.group(1))))
+                return self.json(owned(m.group(1)))
             if m := re.fullmatch(r"/api/ipam/subnets/(\d+)/first-free", path):
+                owned(m.group(1))
                 return self.json(ipam.first_free(int(m.group(1))))
             if path == "/api/ipam/search":
-                return self.json(ipam.search(q.get("q")))
+                return self.json(ipam.search(q.get("q"), org))
+            if path == "/api/ipam/vlans":
+                return self.json({"vlans": ipam.vlans(org or q.get("org"))})
+            if path == "/api/ipam/vrfs":
+                return self.json({"vrfs": ipam.vrfs(org or q.get("org"))})
         except IpamError as e:
             raise HttpError(400, str(e)) from None
         raise HttpError(404, "Not found.")
@@ -892,6 +917,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"id": ipam.address_save(b, who)})
             if m := re.fullmatch(r"/api/ipam/addresses/(\d+)/delete", path):
                 ipam.address_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/vlans":
+                return self.json({"id": ipam.vlan_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/vlans/(\d+)/delete", path):
+                ipam.vlan_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/vrfs":
+                return self.json({"id": ipam.vrf_save(b, who)})
+            if m := re.fullmatch(r"/api/ipam/vrfs/(\d+)/delete", path):
+                ipam.vrf_delete(int(m.group(1))); return self.json({"ok": True})
             if path == "/api/ipam/sync":
                 if not b.get("org_id"):
                     raise IpamError("Pick a client to sync.")
@@ -910,7 +943,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/login":
             return self.static("login.html")
         if path == "/ipam":   # the separated IPAM workspace (its own page; ipam.js/ipam.css are auto-served below)
-            self.require(tech=True)
+            self.require_ipam()   # technicians, or a client user whose org has IPAM turned on (read-only)
             return self.static("ipam.html")
         if path.startswith("/api/ipam/"):
             return self.ipam_get(path, q)
@@ -989,13 +1022,15 @@ class Handler(BaseHTTPRequestHandler):
                               "update": updates.info() if self.can(s, "settings") else None,
                               "prefs": user_prefs(s["user_id"]),
                               "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1], "managed_vpn": settings.managed_vpn,
+                              "client_ipam": bool((db.one("SELECT client_ipam FROM orgs WHERE id=?", (s["org_id"],)) or {}).get("client_ipam"))
+                                              if s["kind"] == "client" and s["org_id"] else False,
                               "viewing_as": {"by": s["real_email"]} if s.get("viewing_as") else None,
                               "unifi": (bool(db.one("SELECT 1 FROM net_accounts")) if s["kind"] == "tech"
                                         else bool(db.one("SELECT 1 FROM net_sites WHERE org_id=?", (s["org_id"],))))})
         if path == "/api/orgs":
             s = self.require()
             where, args = self.org_scope(s, column="o.id")
-            return self.json(db.q(f"""SELECT o.id, o.name, o.client_winbox, o.client_vpn, COUNT(d.id) AS devices, SUM(d.online) AS online,
+            return self.json(db.q(f"""SELECT o.id, o.name, o.client_winbox, o.client_vpn, o.client_ipam, COUNT(d.id) AS devices, SUM(d.online) AS online,
                                        SUM(CASE WHEN d.state='adopted' AND d.online=0 THEN 1 ELSE 0 END) AS offline
                                        FROM orgs o LEFT JOIN devices d ON d.org_id = o.id WHERE {where} GROUP BY o.id ORDER BY o.name""", args))
         if path == "/api/devices":
@@ -2054,9 +2089,10 @@ class Handler(BaseHTTPRequestHandler):
             b = self.body()
             wb = b.get("winbox") if b.get("winbox") in ("off", "read", "full") else o["client_winbox"]
             vpn = bool(b["vpn"]) if "vpn" in b else bool(o["client_vpn"])
-            db.run("UPDATE orgs SET client_winbox=?, client_vpn=? WHERE id=?", (wb, int(vpn), o["id"]))
+            ipm = bool(b["ipam"]) if "ipam" in b else bool(o["client_ipam"])
+            db.run("UPDATE orgs SET client_winbox=?, client_vpn=?, client_ipam=? WHERE id=?", (wb, int(vpn), int(ipm), o["id"]))
             db.audit(s["email"], "client admin access changed", o["name"], self.client_ip(), org_id=o["id"],
-                     detail=f"Winbox: {wb}, site-to-site VPNs: {'on' if vpn else 'off'}")
+                     detail=f"Winbox: {wb}, site-to-site VPNs: {'on' if vpn else 'off'}, IPAM: {'on' if ipm else 'off'}")
             if wb == "off":   # turning Winbox off closes this client's open sessions straight away
                 for x in [x for x in winbox.view({"kind": "client", "org_id": o["id"], "email": ""})]:
                     if db.one("SELECT 1 FROM users WHERE email=? AND kind='client'", (x["user"],)):

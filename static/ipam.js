@@ -2,6 +2,7 @@
 // IPAM workspace. CSP forbids inline scripts/handlers, so everything binds via addEventListener + data-* delegation.
 
 let me = null, tree = { sections: [], subnets: [], clients: [] }, current = null; // current = {kind:'all'|'section'|'client', id}
+let readonly = false;   // client users may VIEW their own IPAM but change nothing (writes are technician-only)
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -86,14 +87,17 @@ function showSubnets() {
     : current?.kind === "section" ? (tree.sections.find((s) => s.id === current.id)?.name || "Section") : "All subnets";
   head.appendChild(el("h1", null, title));
   const actions = el("div", "main-head-actions");
-  const addBtn = el("button", "btn primary", "+ Subnet"); addBtn.dataset.newsubnet = "1"; actions.appendChild(addBtn);
-  if (current?.kind === "client") { const sb = el("button", "btn", "Sync this client"); sb.dataset.syncorg = current.id; actions.appendChild(sb); }
+  if (!readonly) {
+    const addBtn = el("button", "btn primary", "+ Subnet"); addBtn.dataset.newsubnet = "1"; actions.appendChild(addBtn);
+    if (current?.kind === "client") { const sb = el("button", "btn", "Sync this client"); sb.dataset.syncorg = current.id; actions.appendChild(sb); }
+  }
   head.appendChild(actions); m.appendChild(head);
 
   const rows = currentSubnets();
   if (!rows.length) { m.appendChild(el("p", "muted pad", "No subnets here yet. Add one, or Sync from routers to discover them.")); return; }
   const tbl = el("table", "ipam-table");
-  const thead = el("tr"); ["Subnet", "Name", "Client", "Router", "Usage", "Source", ""].forEach((h) => thead.appendChild(el("th", null, h)));
+  const cols = ["Subnet", "Name", "Client", "Router", "Usage", "Source"]; if (!readonly) cols.push("");
+  const thead = el("tr"); cols.forEach((h) => thead.appendChild(el("th", null, h)));
   const th = el("thead"); th.appendChild(thead); tbl.appendChild(th);
   const tb = el("tbody");
   rows.forEach((s) => {
@@ -106,7 +110,7 @@ function showSubnets() {
     tr.appendChild(el("td", "muted", s.interface || ""));
     const cu = el("td"); cu.appendChild(usageBar(s)); tr.appendChild(cu);
     const cs = el("td"); cs.appendChild(el("span", "pill " + (s.source === "discovered" ? "disc" : "man"), s.source)); tr.appendChild(cs);
-    const last = el("td"); const del = el("button", "btn tiny danger", "Delete"); del.dataset.delsubnet = s.id; last.appendChild(del); tr.appendChild(last);
+    if (!readonly) { const last = el("td"); const del = el("button", "btn tiny danger", "Delete"); del.dataset.delsubnet = s.id; last.appendChild(del); tr.appendChild(last); }
     tb.appendChild(tr);
   });
   tbl.appendChild(tb); m.appendChild(tbl);
@@ -124,15 +128,19 @@ async function showSubnet(id) {
   head.appendChild(h);
   const acts = el("div", "main-head-actions");
   const back = el("button", "btn", "← Subnets"); back.dataset.back = "1"; acts.appendChild(back);
-  const edit = el("button", "btn", "Edit"); edit.dataset.editsubnet = d.id; acts.appendChild(edit);
-  const split = el("button", "btn", "Split"); split.dataset.splitsubnet = d.id; acts.appendChild(split);
-  const addA = el("button", "btn primary", "+ Address"); addA.dataset.newaddr = d.id; acts.appendChild(addA);
+  if (!readonly) {
+    const edit = el("button", "btn", "Edit"); edit.dataset.editsubnet = d.id; acts.appendChild(edit);
+    const split = el("button", "btn", "Split"); split.dataset.splitsubnet = d.id; acts.appendChild(split);
+    const addA = el("button", "btn primary", "+ Address"); addA.dataset.newaddr = d.id; acts.appendChild(addA);
+  }
   head.appendChild(acts); m.appendChild(head);
 
   const meta = el("div", "meta-row");
   const chip = (k, v) => { const c = el("span", "chip"); c.appendChild(el("b", null, k + " ")); c.appendChild(document.createTextNode(v)); return c; };
   meta.appendChild(chip("Name", d.name || "—"));
   meta.appendChild(chip("Client", d.org || "—"));
+  if (d.vlan) meta.appendChild(chip("VLAN", d.vlan));
+  if (d.vrf) meta.appendChild(chip("VRF", d.vrf));
   meta.appendChild(chip("Gateway", d.gateway || "—"));
   meta.appendChild(chip("Usable", String(d.usable)));
   meta.appendChild(chip("Used", (d.used_total || 0) + " (" + (d.usage || 0) + "%)"));
@@ -145,7 +153,8 @@ async function showSubnet(id) {
   // address table
   if ((d.addresses || []).length) {
     const tbl = el("table", "ipam-table");
-    const tr = el("tr"); ["IP", "Status", "Hostname", "MAC", "Owner", "Source", ""].forEach((x) => tr.appendChild(el("th", null, x)));
+    const acols = ["IP", "Status", "Hostname", "MAC", "Owner", "Source"]; if (!readonly) acols.push("");
+    const tr = el("tr"); acols.forEach((x) => tr.appendChild(el("th", null, x)));
     const th = el("thead"); th.appendChild(tr); tbl.appendChild(th);
     const tb = el("tbody");
     d.addresses.slice().sort((a, b) => (a.ip_sort || 0) - (b.ip_sort || 0)).forEach((a) => {
@@ -156,9 +165,12 @@ async function showSubnet(id) {
       r.appendChild(el("td", "mono muted", a.mac || ""));
       r.appendChild(el("td", null, a.owner || ""));
       r.appendChild(el("td", "muted", a.source));
-      const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editaddr = a.id; e.dataset.subnet = d.id; last.appendChild(e);
-      const del = el("button", "btn tiny danger", "×"); del.dataset.deladdr = a.id; del.dataset.subnet = d.id; last.appendChild(del);
-      r.appendChild(last); tb.appendChild(r);
+      if (!readonly) {
+        const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editaddr = a.id; e.dataset.subnet = d.id; last.appendChild(e);
+        const del = el("button", "btn tiny danger", "×"); del.dataset.deladdr = a.id; del.dataset.subnet = d.id; last.appendChild(del);
+        r.appendChild(last);
+      }
+      tb.appendChild(r);
     });
     tbl.appendChild(tb); m.appendChild(tbl);
   }
@@ -259,11 +271,15 @@ function subnetDialog(s) {
   box.appendChild(field("Client", sel("f_org", clientOpts, s?.org_id || (current?.kind === "client" ? current.id : ""))));
   const secOpts = [{ value: "", label: "(none)" }, ...tree.sections.map((x) => ({ value: x.id, label: x.name }))];
   box.appendChild(field("Section", sel("f_section", secOpts, s?.section_id || (current?.kind === "section" ? current.id : ""))));
+  const vlanOpts = [{ value: "", label: "(none)" }, ...vlansCache.map((v) => ({ value: v.id, label: `VLAN ${v.number}` + (v.name ? ` · ${v.name}` : "") }))];
+  box.appendChild(field("VLAN", sel("f_vlan", vlanOpts, s?.vlan_id || "")));
+  const vrfOpts = [{ value: "", label: "(none)" }, ...vrfsCache.map((v) => ({ value: v.id, label: `${v.name} (${v.rd})` }))];
+  box.appendChild(field("VRF", sel("f_vrf", vrfOpts, s?.vrf_id || "")));
   box.appendChild(field("Gateway", inp("f_gw", s?.gateway || "")));
   box.appendChild(field("Notes", inp("f_notes", s?.notes || "")));
   openDlg(s?.id ? "Edit subnet" : "New subnet", box, async () => {
     await post("/api/ipam/subnets", { id: s?.id, cidr: $("f_cidr").value, name: $("f_name").value, org_id: $("f_org").value || null,
-      section_id: $("f_section").value || null, gateway: $("f_gw").value, notes: $("f_notes").value });
+      section_id: $("f_section").value || null, vlan_id: $("f_vlan").value || null, vrf_id: $("f_vrf").value || null, gateway: $("f_gw").value, notes: $("f_notes").value });
     await reload();
   });
 }
@@ -353,15 +369,115 @@ function toast(msg) {
   t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 4000);
 }
 
+// ---- tabs: VLANs / VRFs / Devices / Locations ---------------------------------------------------------------
+let tab = "subnets";
+let allOrgs = [], vlansCache = [], vrfsCache = [];
+function clientOpts(selId) { return [{ value: "", label: "(none)" }, ...allOrgs.map((o) => ({ value: o.id, label: o.name }))]; }
+async function loadLookups() {
+  try { allOrgs = (await api("/api/ipam/orgs")).orgs || []; } catch (e) { allOrgs = tree.clients || []; }
+  try { vlansCache = (await api("/api/ipam/vlans")).vlans || []; } catch (e) { vlansCache = []; }
+  try { vrfsCache = (await api("/api/ipam/vrfs")).vrfs || []; } catch (e) { vrfsCache = []; }
+}
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === t));
+  $("side").closest(".ipam-body").classList.toggle("no-side", t !== "subnets");
+  if (t === "subnets") { current = { kind: "all" }; renderTree(); showSubnets(); }
+  else if (t === "vlans") showVlans();
+  else if (t === "vrfs") showVrfs();
+  else if (t === "devices") showDevices();
+  else if (t === "locations") showLocations();
+}
+function listHead(title, addLabel, addAttr) {
+  const head = el("div", "main-head"); head.appendChild(el("h1", null, title));
+  const acts = el("div", "main-head-actions");
+  if (!readonly) { const add = el("button", "btn primary", addLabel); add.dataset[addAttr] = "1"; acts.appendChild(add); }
+  head.appendChild(acts); return head;
+}
+function table(cols, rows, rowFn) {
+  const tbl = el("table", "ipam-table"); const tr = el("tr"); cols.forEach((h) => tr.appendChild(el("th", null, h)));
+  const th = el("thead"); th.appendChild(tr); tbl.appendChild(th); const tb = el("tbody");
+  rows.forEach((r) => tb.appendChild(rowFn(r))); tbl.appendChild(tb); return tbl;
+}
+async function showVlans() {
+  const m = $("main"); m.textContent = "Loading…";
+  let r; try { r = await api("/api/ipam/vlans"); } catch (e) { m.textContent = e.message; return; }
+  vlansCache = r.vlans; m.textContent = ""; m.appendChild(listHead("VLANs", "+ VLAN", "newvlan"));
+  if (!r.vlans.length) { m.appendChild(el("p", "muted pad", "No VLANs yet — add one, or they appear as Sync discovers them from routers and UniFi.")); return; }
+  m.appendChild(table(["VLAN", "Name", "L2 domain", "Client", "Subnets", ...(readonly ? [] : [""])], r.vlans, (v) => {
+    const row = el("tr");
+    row.appendChild(el("td", "mono", String(v.number)));
+    row.appendChild(el("td", null, v.name || ""));
+    row.appendChild(el("td", "muted", v.l2domain));
+    row.appendChild(el("td", null, v.org || ""));
+    row.appendChild(el("td", null, String(v.subnets)));
+    if (!readonly) {
+      const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editvlan = v.id; last.appendChild(e);
+      const d = el("button", "btn tiny danger", "Delete"); d.dataset.delvlan = v.id; last.appendChild(d); row.appendChild(last);
+    }
+    return row;
+  }));
+}
+function vlanDialog(v) {
+  const box = el("div");
+  box.appendChild(field("VLAN number", inp("f_num", v?.number || "", "1-4094")));
+  box.appendChild(field("Name", inp("f_name", v?.name || "")));
+  box.appendChild(field("L2 domain", inp("f_l2", v?.l2domain || "default")));
+  box.appendChild(field("Client", sel("f_org", clientOpts(), v?.org_id || "")));
+  box.appendChild(field("Notes", inp("f_notes", v?.notes || "")));
+  openDlg(v?.id ? "Edit VLAN " + v.number : "New VLAN", box, async () => {
+    await post("/api/ipam/vlans", { id: v?.id, number: +$("f_num").value, name: $("f_name").value, l2domain: $("f_l2").value, org_id: $("f_org").value || null, notes: $("f_notes").value });
+    await loadLookups(); await showVlans();
+  });
+}
+async function showVrfs() {
+  const m = $("main"); m.textContent = "Loading…";
+  let r; try { r = await api("/api/ipam/vrfs"); } catch (e) { m.textContent = e.message; return; }
+  vrfsCache = r.vrfs; m.textContent = ""; m.appendChild(listHead("VRFs", "+ VRF", "newvrf"));
+  if (!r.vrfs.length) { m.appendChild(el("p", "muted pad", "No VRFs yet.")); return; }
+  m.appendChild(table(["RD", "Name", "Description", "Client", "Subnets", ...(readonly ? [] : [""])], r.vrfs, (v) => {
+    const row = el("tr");
+    row.appendChild(el("td", "mono", v.rd));
+    row.appendChild(el("td", null, v.name));
+    row.appendChild(el("td", "muted", v.description || ""));
+    row.appendChild(el("td", null, v.org || ""));
+    row.appendChild(el("td", null, String(v.subnets)));
+    if (!readonly) {
+      const last = el("td"); const e = el("button", "btn tiny", "Edit"); e.dataset.editvrf = v.id; last.appendChild(e);
+      const d = el("button", "btn tiny danger", "Delete"); d.dataset.delvrf = v.id; last.appendChild(d); row.appendChild(last);
+    }
+    return row;
+  }));
+}
+function vrfDialog(v) {
+  const box = el("div");
+  box.appendChild(field("Route distinguisher (RD)", inp("f_rd", v?.rd || "", "65000:1")));
+  box.appendChild(field("Name", inp("f_name", v?.name || "")));
+  box.appendChild(field("Description", inp("f_desc", v?.description || "")));
+  box.appendChild(field("Client", sel("f_org", clientOpts(), v?.org_id || "")));
+  openDlg(v?.id ? "Edit VRF" : "New VRF", box, async () => {
+    await post("/api/ipam/vrfs", { id: v?.id, rd: $("f_rd").value, name: $("f_name").value, description: $("f_desc").value, org_id: $("f_org").value || null });
+    await loadLookups(); await showVrfs();
+  });
+}
+function showDevices() { $("main").textContent = ""; $("main").appendChild(el("p", "muted pad", "Devices — coming in the next update.")); }
+function showLocations() { $("main").textContent = ""; $("main").appendChild(el("p", "muted pad", "Locations — coming in the next update.")); }
+
 // ---- load / route -------------------------------------------------------------------------------------------
-async function reload() { tree = await api("/api/ipam/tree"); renderTree(); if (current?.subnet) await showSubnet(current.subnet); else showSubnets(); }
+async function reload() { tree = await api("/api/ipam/tree"); renderTree(); if (tab !== "subnets") return setTab(tab); if (current?.subnet) await showSubnet(current.subnet); else showSubnets(); }
 
 async function init() {
   try { me = await api("/api/me"); } catch (e) { return; }
+  readonly = me.kind !== "tech";   // a client user: read-only
+  if (readonly) { $("newSection").hidden = true; $("syncBtn").hidden = true; }
   if (window.BRAND && window.BRAND.company) document.title = "IPAM · " + window.BRAND.company;
   current = { kind: "all" };
   try { tree = await api("/api/ipam/tree"); } catch (e) { $("main").textContent = e.message; return; }
   renderTree(); showSubnets();
+  loadLookups();
+
+  // tabs
+  $("tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); });
 
   // top bar
   $("newSection").addEventListener("click", () => sectionDialog(null));
@@ -390,6 +506,16 @@ async function init() {
   $("main").addEventListener("click", async (e) => {
     const t = e.target;
     const sub = t.closest("[data-subnet]");
+    // read-only client: ignore every write/edit affordance (map cells open the address editor otherwise)
+    if (readonly && (t.classList.contains("cell") || ["newvlan", "editvlan", "delvlan", "newvrf", "editvrf", "delvrf",
+      "newsubnet", "editsubnet", "splitsubnet", "newaddr", "syncorg", "delsubnet", "editaddr", "deladdr"].some((k) => t.dataset[k] != null))) return;
+    // VLANs / VRFs
+    if (t.dataset.newvlan != null) return vlanDialog(null);
+    if (t.dataset.editvlan != null) return vlanDialog(vlansCache.find((v) => v.id === +t.dataset.editvlan));
+    if (t.dataset.delvlan != null) { if (confirm("Delete this VLAN? Subnets keep their data but lose the VLAN link.")) { await post("/api/ipam/vlans/" + t.dataset.delvlan + "/delete"); await loadLookups(); await showVlans(); } return; }
+    if (t.dataset.newvrf != null) return vrfDialog(null);
+    if (t.dataset.editvrf != null) return vrfDialog(vrfsCache.find((v) => v.id === +t.dataset.editvrf));
+    if (t.dataset.delvrf != null) { if (confirm("Delete this VRF?")) { await post("/api/ipam/vrfs/" + t.dataset.delvrf + "/delete"); await loadLookups(); await showVrfs(); } return; }
     if (t.dataset.back != null) return showSubnets();
     if (t.dataset.newsubnet != null) return subnetDialog(null);
     if (t.dataset.editsubnet != null) return subnetDialog(tree.subnets.find((x) => x.id === +t.dataset.editsubnet));

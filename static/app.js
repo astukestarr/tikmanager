@@ -1475,18 +1475,21 @@ async function clients() {
     ${canWrite() ? `<div class="card"><form id="oForm" class="row"><input id="oName" placeholder="New client name" maxlength="120" required aria-label="Client name">
       <button class="btn primary" type="submit">Add client</button><span class="status" id="oStatus"></span></form></div>` : ""}
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Client</th><th>Routers</th><th>Online</th><th>Offline</th>
-      <th title="What this client's own admins may use (client admin accounts only - viewers never)">Client admins: Winbox</th><th>Client admins: site-to-site VPNs</th></tr></thead><tbody>
+      <th title="What this client's own admins may use (client admin accounts only - viewers never)">Client admins: Winbox</th><th>Client admins: site-to-site VPNs</th>
+      <th title="Lets this client's users view their own IP addresses (read-only)">Client users: IPAM</th></tr></thead><tbody>
       ${orgs.map((o) => `<tr><td>${esc(o.name)}</td><td>${o.devices}</td><td>${o.online || 0}</td><td>${o.offline ? `<span class="status err">${o.offline}</span>` : 0}</td>
         <td>${can("clients") ? `<select data-oacc="${o.id}" data-k="winbox" aria-label="Winbox for ${esc(o.name)}'s admins">${[["off", "Off"], ["read", "Read-only"], ["full", "Full"]].map(([k, l]) =>
           `<option value="${k}" ${o.client_winbox === k ? "selected" : ""}>${l}</option>`).join("")}</select>` : esc({ off: "Off", read: "Read-only", full: "Full" }[o.client_winbox] || "Off")}</td>
-        <td>${can("clients") ? `<label class="small"><input type="checkbox" data-oacc="${o.id}" data-k="vpn" ${o.client_vpn ? "checked" : ""}> Allowed</label>` : o.client_vpn ? "Allowed" : "Off"}</td></tr>`).join("")
-        || `<tr><td colspan="6" class="muted">No clients yet.</td></tr>`}
+        <td>${can("clients") ? `<label class="small"><input type="checkbox" data-oacc="${o.id}" data-k="vpn" ${o.client_vpn ? "checked" : ""}> Allowed</label>` : o.client_vpn ? "Allowed" : "Off"}</td>
+        <td>${can("clients") ? `<label class="small"><input type="checkbox" data-oacc="${o.id}" data-k="ipam" ${o.client_ipam ? "checked" : ""}> Allowed</label>` : o.client_ipam ? "Allowed" : "Off"}</td></tr>`).join("")
+        || `<tr><td colspan="7" class="muted">No clients yet.</td></tr>`}
     </tbody></table></div>
     <p class="small muted">Off by default. Winbox gives the client's admins a Winbox session to their own routers through TikManager (address-locked, 30 minutes,
       a temporary router login - read-only or full, as chosen here). Site-to-site VPNs lets them create and change WireGuard VPNs between their own routers.
+      IPAM lets this client's users open the IPAM workspace to view their own subnets and IP addresses, read-only - they can't change anything or see other clients.
       Every session and change is in the audit log.</p><p class="small status" id="oAccStatus"></p></div>`;
   document.querySelectorAll("[data-oacc]").forEach((el) => el.addEventListener("change", async () => {
-    const body = el.dataset.k === "vpn" ? { vpn: el.checked } : { winbox: el.value };
+    const body = el.dataset.k === "vpn" ? { vpn: el.checked } : el.dataset.k === "ipam" ? { ipam: el.checked } : { winbox: el.value };
     const st = $("oAccStatus");
     try { await post(`/api/orgs/${el.dataset.oacc}/access`, body); st.textContent = "Saved."; st.className = "small status ok"; }
     catch (err) { st.textContent = err.message; st.className = "small status err"; clients(); }
@@ -7124,7 +7127,7 @@ const NAV = [
     { view: "unifi", label: "UniFi / UISP", count: "unifi", who: "unifi" }] },
   { group: "Network", icon: "network", items: [
     { view: "sites", label: "Site map" }, { view: "isps", label: "ISPs" }, { view: "subnets", label: "Subnets" }, { view: "discovered", label: "Discovered", who: "tech" },
-    { link: "/ipam", label: "IPAM", who: "tech" }, { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
+    { link: "/ipam", label: "IPAM", who: "ipam" }, { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
     { view: "health", label: "Router health", who: "tech" }, { view: "checks", label: "Critical checks", who: "tech" },
     { view: "alerts", label: "Alerts", who: "tech", count: "alerts" },
@@ -7139,7 +7142,7 @@ const NAV = [
   { group: "Admin", icon: "admin", items: [{ view: "audit", label: "Audit log", who: "techadmin" }, { view: "admin", label: "Settings", who: "techadmin" }] },
 ];
 const navCounts = {};
-const navOk = (who) => !who || (who === "unifi" ? !!me.unifi : who === "tech" ? isTech() : who === "vpn" ? isTech() || canVpn() : who === "admin" ? isTech() || (me.kind === "client" && me.role === "admin") : adminArea());
+const navOk = (who) => !who || (who === "unifi" ? !!me.unifi : who === "tech" ? isTech() : who === "vpn" ? isTech() || canVpn() : who === "ipam" ? isTech() || (me.kind === "client" && !!me.client_ipam) : who === "admin" ? isTech() || (me.kind === "client" && me.role === "admin") : adminArea());
 const navOpen = () => { try { return new Set(JSON.parse(localStorage.getItem("tmNavOpen") || '["Devices"]')); } catch (e) { return new Set(["Devices"]); } };
 function renderNav() {
   const open = navOpen();
