@@ -311,7 +311,7 @@ function calcDialog() {
 async function syncOrg(orgId, label) {
   toast("Syncing" + (label ? " " + label : "") + "…");
   try { const r = await post("/api/ipam/sync", { org_id: orgId });
-    toast(`Synced ${r.routers} router(s): +${r.subnets_added} subnets, +${r.addresses_added} addresses${r.offline ? ", " + r.offline + " offline" : ""}.`);
+    toast(`Synced ${r.routers} router(s): +${r.subnets_added} subnets, +${r.addresses_added} addresses${r.unifi ? " (" + r.unifi + " from UniFi)" : ""}${r.offline ? ", " + r.offline + " offline" : ""}.`);
     await reload();
   } catch (e) { toast(e.message); }
 }

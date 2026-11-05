@@ -152,6 +152,7 @@ offsite = OffsiteBackup(db, settings, integ)   # backups to your own FTPS / FTP 
 alerts.offsite = offsite
 unifi = Ubnt(db, backups.vault, settings)   # UniFi + UISP connections: sites and devices, each site assigned to a client
 alerts.unifi = unifi
+ipam.unifi = unifi   # IPAM sync also places a client's UniFi / UISP devices by their LAN IP
 winbox = WinboxRelay(db, settings, secev, poller.client, backups)   # Winbox to routers through TikManager (on-demand, address-locked)
 secev.winbox_who = winbox.who   # label router log lines from the relay with the session's technician
 wgport = WgPort(db, settings, poller.client, sysconf)   # moving the WireGuard port without stranding routers

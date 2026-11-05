@@ -276,7 +276,7 @@ class Ipam:
             self.syncing.add(org_id)
         try:
             summary = {"routers": 0, "offline": 0, "subnets_added": 0, "subnets_seen": 0,
-                       "addresses_added": 0, "addresses_updated": 0}
+                       "addresses_added": 0, "addresses_updated": 0, "unifi": 0}
             now = self._now()
             devices = self.db.q("SELECT * FROM devices WHERE org_id=? AND state='adopted'", (org_id,))
             # 1) subnets from each router's cached networks (fast, DB-only) -> per-device {cidr: (id, netobj)}
@@ -305,6 +305,8 @@ class Ipam:
                     continue
                 d, sub_by_net = per_device[did]
                 self._sync_addresses(d, topo, sub_by_net, now, summary)
+            # 4) overlay the client's UniFi / UISP devices as addresses (and infer a /24 for a client with no MikroTik)
+            self._sync_unifi(org_id, now, summary)
             return summary
         finally:
             with self.lock:
@@ -420,3 +422,51 @@ class Ipam:
     @staticmethod
     def _src_of(status):
         return {"gateway": "address", "dhcp": "lease", "used": "arp"}.get(status, "arp")
+
+    def _sync_unifi(self, org_id, now, summary):
+        """Place the client's UniFi / UISP devices (gateway, switches, APs) into IPAM by their LAN IP. UniFi's cloud API
+        gives device IPs but not the configured subnets, so an address lands in the matching subnet when one exists, and
+        otherwise a /24 is inferred (the only way to populate IPAM for a UniFi-only client with no MikroTik)."""
+        unifi = getattr(self, "unifi", None)
+        if not unifi:
+            return
+        try:
+            devs = unifi.known_for_org(org_id) or {}
+        except Exception:
+            return
+        subs = []   # (subnet_id, netobj) for this client
+        for r in self.db.q("SELECT id, cidr FROM ipam_subnets WHERE COALESCE(org_id,0)=?", (org_id,)):
+            try:
+                subs.append((r["id"], ipaddress.ip_network(r["cidr"], strict=False)))
+            except ValueError:
+                pass
+        for mac, d in (devs.items() if isinstance(devs, dict) else []):
+            ip = str(d.get("ip") or "").split("/")[0].strip()
+            if not ip:
+                continue
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if addr.version != 4 or not addr.is_private or addr in self.reserved:
+                continue
+            sid = next((s for (s, no) in subs if addr in no), None)
+            if sid is None:   # UniFi-only / unknown subnet: infer a /24 from the device's IP
+                netobj = ipaddress.ip_network(f"{ip}/24", strict=False)
+                sid = self._upsert_subnet(org_id, netobj, {"id": None}, None, None, d.get("site") or "UniFi", now, summary, {})
+                subs.append((sid, netobj))
+            row = self.db.one("SELECT id, source FROM ipam_addresses WHERE subnet_id=? AND ip=?", (sid, ip))
+            name = d.get("name") or d.get("model")
+            if not row:
+                self.db.run("INSERT INTO ipam_addresses (subnet_id, ip, ip_sort, status, hostname, mac, source, last_seen, created_at, updated_at) "
+                            "VALUES (?,?,?,?,?,?,'unifi',?,?,?)", (sid, ip, _ipint(ip), "used", name, mac, now, now, now))
+                summary["addresses_added"] += 1
+                summary["unifi"] += 1
+            elif row["source"] != "manual":   # keep a manual record's fields; enrich a discovered/live one with the UniFi name
+                self.db.run("UPDATE ipam_addresses SET status=CASE WHEN status='gateway' THEN 'gateway' ELSE 'used' END, "
+                            "hostname=COALESCE(?, hostname), mac=COALESCE(?, mac), source='unifi', last_seen=?, updated_at=? WHERE id=?",
+                            (name, mac, now, now, row["id"]))
+                summary["addresses_updated"] += 1
+                summary["unifi"] += 1
+            else:
+                self.db.run("UPDATE ipam_addresses SET mac=COALESCE(mac,?), last_seen=? WHERE id=?", (mac, now, row["id"]))

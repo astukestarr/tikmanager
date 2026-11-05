@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.4 - 2026-11-04
+
+- **IPAM: Sync also pulls in UniFi / UISP devices.** "Sync from routers" now places a client's UniFi and UISP devices
+  (gateway, switches, APs) into IPAM by their LAN IP - with the device's name and MAC. A device whose IP falls in a
+  subnet discovered from a MikroTik lands there (enriching the map); for a client with **no MikroTik**, the subnet is
+  inferred from the device's IP (a /24), so **UniFi-only clients now get IPAM too** - pairing with the new "No MikroTik
+  attached" UniFi filter. Gateways keep their "gateway" status, and manual records are never overwritten.
+
 ## 3.7.0-beta.3 - 2026-11-04
 
 - **UniFi / UISP: find UniFi routers with no MikroTik.** The Match filter on the UniFi page gains a **"No MikroTik
