@@ -895,6 +895,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"locations": ipam.locations(org or q.get("org"))})
             if path == "/api/ipam/devices":
                 return self.json({"devices": ipam.devices_list(org or q.get("org"))})
+            if path == "/api/ipam/export.csv":
+                kind = "addresses" if q.get("kind") == "addresses" else "subnets"
+                csvtext = ipam.export_csv(kind, org if org is not None else q.get("org"))
+                fname = f"ipam-{kind}-{time.strftime('%Y%m%d')}.csv"
+                return self.send(200, csvtext.encode("utf-8-sig"), "text/csv; charset=utf-8",
+                                 headers=[("Content-Disposition", f'attachment; filename="{fname}"')])
         except IpamError as e:
             raise HttpError(400, str(e)) from None
         raise HttpError(404, "Not found.")
@@ -939,6 +945,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"id": ipam.device_save(b, who)})
             if m := re.fullmatch(r"/api/ipam/devices/(\d+)/delete", path):
                 ipam.device_delete(int(m.group(1))); return self.json({"ok": True})
+            if path == "/api/ipam/import":
+                kind = "addresses" if b.get("kind") == "addresses" else "subnets"
+                return self.json(ipam.import_csv(kind, b.get("csv"), b.get("org_id"), bool(b.get("commit")), who))
             if path == "/api/ipam/sync":
                 if not b.get("org_id"):
                     raise IpamError("Pick a client to sync.")

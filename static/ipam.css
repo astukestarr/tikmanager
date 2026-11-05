@@ -95,7 +95,8 @@ body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex;
 .ipam-dlg form { padding: 18px; }
 .ipam-dlg h2 { margin: 0 0 12px; font-size: 17px; }
 .ipam-dlg .field { display: block; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
-.ipam-dlg .field input, .ipam-dlg .field select { display: block; width: 100%; margin-top: 3px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); box-sizing: border-box; }
+.ipam-dlg .field input, .ipam-dlg .field select, .ipam-dlg .field textarea { display: block; width: 100%; margin-top: 3px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); box-sizing: border-box; font-family: inherit; }
+.ipam-dlg .field textarea { font-family: var(--mono); font-size: 12px; resize: vertical; }
 .ipam-dlg .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .ipam-dlg .btn.danger { margin-right: auto; }
 .calc-out { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 13px; white-space: pre; margin-top: 8px; }

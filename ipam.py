@@ -422,6 +422,123 @@ class Ipam:
     def device_delete(self, did):
         self.db.run("DELETE FROM ipam_devices WHERE id=?", (int(did),))
 
+    # --- CSV import / export (phpIPAM-compatible headers, native fallback; import is ADD-ONLY, never overwrites) ---
+    _ADDR_HEADERS = {"ip address": "ip", "ip": "ip", "address": "ip", "state": "status", "status": "status",
+                     "description": "notes", "note": "notes", "notes": "notes", "hostname": "hostname", "host": "hostname",
+                     "dns": "dns_name", "dns name": "dns_name", "dns_name": "dns_name", "mac": "mac", "mac address": "mac",
+                     "owner": "owner", "ptr": "ptr", "subnet": "subnet", "cidr": "subnet", "network": "subnet"}
+    _SUBNET_HEADERS = {"subnet": "cidr", "cidr": "cidr", "network": "cidr", "mask": "mask", "description": "name",
+                       "name": "name", "gateway": "gateway", "client": "client", "organization": "client",
+                       "note": "notes", "notes": "notes"}
+    _STATE_MAP = {"used": "used", "offline": "offline", "reserved": "reserved", "dhcp": "dhcp", "gateway": "gateway",
+                  "online": "used", "active": "used", "2": "used", "1": "offline", "0": "offline", "": "used"}
+
+    @staticmethod
+    def _rows(text):
+        rows = [r for r in csv.reader(io.StringIO(text or "")) if any((c or "").strip() for c in r)]
+        if not rows:
+            raise IpamError("The file has no rows.")
+        return [h.strip().lower() for h in rows[0]], rows[1:]
+
+    def export_csv(self, kind="subnets", org_id=None):
+        out = io.StringIO()
+        w = csv.writer(out)
+        if kind == "addresses":
+            w.writerow(["IP address", "Subnet", "State", "Hostname", "MAC", "Owner", "DNS name", "PTR", "Source", "Note"])
+            sql = ("SELECT a.ip, a.status, a.hostname, a.mac, a.owner, a.dns_name, a.ptr, a.source, a.notes, s.cidr "
+                   "FROM ipam_addresses a JOIN ipam_subnets s ON s.id=a.subnet_id")
+            sql += (" WHERE COALESCE(s.org_id,0)=?" if org_id else "") + " ORDER BY s.cidr, a.ip_sort"
+            for r in self.db.q(sql, (int(org_id),) if org_id else ()):
+                w.writerow([r["ip"], r["cidr"], r["status"], r["hostname"] or "", r["mac"] or "", r["owner"] or "",
+                            r["dns_name"] or "", r["ptr"] or "", r["source"], r["notes"] or ""])
+        else:
+            w.writerow(["Subnet", "Description", "Client", "Section", "VLAN", "VRF", "Gateway", "Source", "Note"])
+            secname = {s["id"]: s["name"] for s in self.db.q("SELECT id, name FROM ipam_sections")}
+            for s in self.subnets(org_id):
+                w.writerow([s["cidr"], s.get("name") or "", s.get("org") or "", secname.get(s.get("section_id")) or "",
+                            s.get("vlan") or "", s.get("vrf") or "", s.get("gateway") or "", s.get("source"), s.get("notes") or ""])
+        return out.getvalue()
+
+    def import_csv(self, kind, text, org_id=None, commit=False, user="import"):
+        org_id = int(org_id) if org_id else None
+        header, body = self._rows(text)
+        hmap = self._ADDR_HEADERS if kind == "addresses" else self._SUBNET_HEADERS
+        cols = {hmap[h]: i for i, h in enumerate(header) if h in hmap}
+
+        def cell(r, k):
+            i = cols.get(k)
+            return r[i].strip() if (i is not None and i < len(r)) else ""
+        now = self._now()
+        add, skip, errors, seen = [], 0, [], set()
+        if kind == "addresses":
+            if "ip" not in cols:
+                raise IpamError("No IP column found (expected a header like 'IP address').")
+            subs = []
+            for r in self.db.q("SELECT id, cidr FROM ipam_subnets" + (" WHERE COALESCE(org_id,0)=?" if org_id else ""),
+                               (org_id,) if org_id else ()):
+                try:
+                    subs.append((r["id"], ipaddress.ip_network(r["cidr"], strict=False)))
+                except ValueError:
+                    pass
+            for n, r in enumerate(body, 2):
+                raw = cell(r, "ip")
+                if not raw:
+                    continue
+                try:
+                    addr = ipaddress.ip_address(raw.split("/")[0])
+                except ValueError:
+                    errors.append(f"row {n}: '{raw}' isn't a valid IP"); continue
+                match = None
+                for sid, no in subs:
+                    if addr in no and (match is None or no.prefixlen > match[1].prefixlen):
+                        match = (sid, no)
+                if not match:
+                    errors.append(f"row {n}: {raw} is not inside a known subnet"); continue
+                ip = str(addr)
+                if (match[0], ip) in seen or self.db.one("SELECT 1 FROM ipam_addresses WHERE subnet_id=? AND ip=?", (match[0], ip)):
+                    skip += 1; continue
+                seen.add((match[0], ip))
+                add.append(dict(subnet_id=match[0], ip=ip, status=self._STATE_MAP.get(cell(r, "status").lower(), "used"),
+                                hostname=cell(r, "hostname") or None, mac=cell(r, "mac") or None, owner=cell(r, "owner") or None,
+                                dns_name=cell(r, "dns_name") or None, ptr=cell(r, "ptr") or None, notes=cell(r, "notes") or None))
+            if commit:
+                for a in add:
+                    self.db.run("INSERT OR IGNORE INTO ipam_addresses (subnet_id, ip, ip_sort, status, hostname, mac, owner, "
+                                "dns_name, ptr, notes, source, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'manual',?,?,?)",
+                                (a["subnet_id"], a["ip"], _ipint(a["ip"]), a["status"], a["hostname"], a["mac"], a["owner"],
+                                 a["dns_name"], a["ptr"], a["notes"], user, now, now))
+            return {"kind": kind, "to_add": len(add), "skipped_existing": skip, "errors": errors[:50],
+                    "committed": bool(commit), "sample": [a["ip"] for a in add[:12]]}
+        # subnets
+        if "cidr" not in cols:
+            raise IpamError("No subnet column found (expected a header like 'Subnet' or 'CIDR').")
+        by_name = {o["name"].lower(): o["id"] for o in self.db.q("SELECT id, name FROM orgs")}
+        for n, r in enumerate(body, 2):
+            raw, mask = cell(r, "cidr"), cell(r, "mask")
+            if not raw:
+                continue
+            if "/" not in raw and mask:
+                raw = raw + "/" + mask
+            try:
+                no = ipaddress.ip_network(raw, strict=False)
+            except ValueError:
+                errors.append(f"row {n}: '{raw}' isn't a valid subnet"); continue
+            oid = org_id if org_id is not None else (by_name.get(cell(r, "client").lower()) if cell(r, "client") else None)
+            if self._reserved(no):
+                errors.append(f"row {n}: {no} is in the reserved range"); continue
+            if (str(no), oid or 0) in seen or self.db.one("SELECT 1 FROM ipam_subnets WHERE cidr=? AND COALESCE(org_id,0)=?", (str(no), oid or 0)):
+                skip += 1; continue
+            seen.add((str(no), oid or 0))
+            add.append(dict(cidr=str(no), family=no.version, org_id=oid, name=cell(r, "name") or None,
+                            gateway=cell(r, "gateway") or None, notes=cell(r, "notes") or None))
+        if commit:
+            for a in add:
+                self.db.run("INSERT INTO ipam_subnets (cidr, family, org_id, name, gateway, notes, source, first_seen, "
+                            "created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,'manual',?,?,?,?)",
+                            (a["cidr"], a["family"], a["org_id"], a["name"], a["gateway"], a["notes"], now, user, now, now))
+        return {"kind": kind, "to_add": len(add), "skipped_existing": skip, "errors": errors[:50],
+                "committed": bool(commit), "sample": [a["cidr"] for a in add[:12]]}
+
     def _vlan_for(self, org_id, number, name, now):
         """Find or create a VLAN by (number, l2domain='default') for auto-population from discovery. Returns its id."""
         if not number:

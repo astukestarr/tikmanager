@@ -291,10 +291,11 @@ function addrDialog(subnetId, a, ip) {
   box.appendChild(field("MAC", inp("f_mac", a?.mac || "")));
   box.appendChild(field("Owner", inp("f_owner", a?.owner || "")));
   box.appendChild(field("DNS name", inp("f_dns", a?.dns_name || "")));
+  box.appendChild(field("PTR (reverse DNS)", inp("f_ptr", a?.ptr || "")));
   box.appendChild(field("Notes", inp("f_notes", a?.notes || "")));
   openDlg(a?.id ? "Edit " + a.ip : "New address", box, async () => {
     await post("/api/ipam/addresses", { id: a?.id, subnet_id: subnetId, ip: $("f_ip").value, status: $("f_status").value,
-      hostname: $("f_host").value, mac: $("f_mac").value, owner: $("f_owner").value, dns_name: $("f_dns").value, notes: $("f_notes").value });
+      hostname: $("f_host").value, mac: $("f_mac").value, owner: $("f_owner").value, dns_name: $("f_dns").value, ptr: $("f_ptr").value, notes: $("f_notes").value });
     await showSubnet(subnetId);
   });
 }
@@ -323,6 +324,33 @@ function calcDialog() {
   };
   box.querySelector("input").addEventListener("input", run);
   openDlg("Subnet calculator", box, null); run();
+}
+function exportDialog() {
+  const box = el("div");
+  box.appendChild(el("p", "muted", "Download the current view as CSV (headers are phpIPAM-compatible)."));
+  const q = (kind) => "/api/ipam/export.csv?kind=" + kind + (current?.kind === "client" ? "&org=" + current.id : "");
+  const row = el("div", "main-head-actions");
+  const mk = (kind, label) => { const a = el("a", "btn", label); a.href = q(kind); a.setAttribute("download", ""); return a; };
+  row.appendChild(mk("subnets", "Subnets CSV")); row.appendChild(mk("addresses", "Addresses CSV"));
+  box.appendChild(row);
+  openDlg("Export CSV", box, null);
+}
+function importDialog() {
+  const box = el("div");
+  box.appendChild(field("What", sel("f_kind", [{ value: "subnets", label: "Subnets" }, { value: "addresses", label: "IP addresses" }], "subnets")));
+  box.appendChild(field("Client (optional)", sel("f_org", clientOpts(), current?.kind === "client" ? current.id : "")));
+  const fileL = el("label", "field", "CSV file "); const file = el("input"); file.type = "file"; file.accept = ".csv,text/csv"; file.id = "f_file"; fileL.appendChild(file); box.appendChild(fileL);
+  const ta = el("textarea"); ta.id = "f_csv"; ta.rows = 8; ta.placeholder = "…or paste CSV here. Headers like 'Subnet','Description' (subnets) or 'IP address','State','Hostname','MAC' (addresses).";
+  box.appendChild(field("CSV", ta));
+  box.appendChild(el("p", "muted small", "Import only adds new rows — it never changes or removes anything you already have."));
+  const prev = el("button", "btn", "Preview"); prev.type = "button"; prev.dataset.ipampreview = "1"; box.appendChild(prev);
+  const out = el("pre", "calc-out"); out.id = "imp_out"; out.hidden = true; box.appendChild(out);
+  file.addEventListener("change", () => { const f = file.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { ta.value = rd.result; }; rd.readAsText(f); });
+  openDlg("Import from CSV", box, async () => {
+    const r = await post("/api/ipam/import", { kind: $("f_kind").value, org_id: $("f_org").value || null, csv: $("f_csv").value, commit: true });
+    toast(`Imported ${r.to_add} ${r.kind}; skipped ${r.skipped_existing} already present${r.errors.length ? ", " + r.errors.length + " errors" : ""}.`);
+    await loadLookups(); await reload();
+  });
 }
 
 // ---- sync + search ------------------------------------------------------------------------------------------
@@ -538,7 +566,7 @@ async function reload() { tree = await api("/api/ipam/tree"); renderTree(); if (
 async function init() {
   try { me = await api("/api/me"); } catch (e) { return; }
   readonly = me.kind !== "tech";   // a client user: read-only
-  if (readonly) { $("newSection").hidden = true; $("syncBtn").hidden = true; }
+  if (readonly) { $("newSection").hidden = true; $("syncBtn").hidden = true; $("importBtn").hidden = true; }
   if (window.BRAND && window.BRAND.company) document.title = "IPAM · " + window.BRAND.company;
   current = { kind: "all" };
   try { tree = await api("/api/ipam/tree"); } catch (e) { $("main").textContent = e.message; return; }
@@ -552,6 +580,8 @@ async function init() {
   $("newSection").addEventListener("click", () => sectionDialog(null));
   $("syncBtn").addEventListener("click", syncPicker);
   $("calcBtn").addEventListener("click", calcDialog);
+  $("exportBtn").addEventListener("click", exportDialog);
+  $("importBtn").addEventListener("click", importDialog);
   $("search").addEventListener("input", (e) => { clearTimeout(searchTimer); const v = e.target.value; searchTimer = setTimeout(() => doSearch(v), 250); });
 
   // dialog save
@@ -615,7 +645,16 @@ async function init() {
 
   // dialog body delegation (delete buttons inside a form)
   $("dlgBody").addEventListener("click", async (e) => {
-    const ds = e.target.closest("[data-delsection]"); if (ds) { e.preventDefault(); if (confirm("Delete this section? Its subnets stay but lose the folder.")) { await post("/api/ipam/sections/" + ds.dataset.delsection + "/delete"); $("dlg").close(); await reload(); } }
+    const ds = e.target.closest("[data-delsection]"); if (ds) { e.preventDefault(); if (confirm("Delete this section? Its subnets stay but lose the folder.")) { await post("/api/ipam/sections/" + ds.dataset.delsection + "/delete"); $("dlg").close(); await reload(); } return; }
+    const pv = e.target.closest("[data-ipampreview]"); if (pv) {
+      e.preventDefault(); const out = $("imp_out"); out.hidden = false; out.textContent = "Checking…";
+      try {
+        const r = await post("/api/ipam/import", { kind: $("f_kind").value, org_id: $("f_org").value || null, csv: $("f_csv").value, commit: false });
+        out.textContent = `Would add ${r.to_add} ${r.kind}.\nAlready present (skipped): ${r.skipped_existing}.`
+          + (r.sample.length ? `\nFirst: ${r.sample.join(", ")}` : "")
+          + (r.errors.length ? `\n\n${r.errors.length} row(s) with problems:\n- ${r.errors.join("\n- ")}` : "");
+      } catch (err) { out.textContent = err.message; }
+    }
   });
 }
 document.addEventListener("DOMContentLoaded", init);
