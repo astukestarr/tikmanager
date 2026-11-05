@@ -625,40 +625,55 @@ class Ubnt:
         """Diagnostic (tech-only, read-only): for a client's first few UniFi consoles, try the Network integration API via
         the connector and report the raw results/errors, the host record, and a raw network object - so we can see WHY
         integration_data gets a 403 'host not found' and what the subnet field is actually called."""
-        out = {"org_id": org_id, "consoles": []}
+        out = {"org_id": org_id, "hosts_sample": [], "hosts_count": 0, "consoles": []}
         rows = self.db.q("SELECT s.id, s.name, s.internal, s.console, s.account_id FROM net_sites s "
                          "JOIN net_accounts a ON a.id=s.account_id WHERE s.org_id=? AND a.kind='unifi' ORDER BY s.id", (org_id,))
         by = {}
         for r in rows:
             by.setdefault((r["account_id"], (r["id"] or "").rsplit(":", 1)[0]), []).append(r)
-        for (account_id, host), sites in list(by.items())[:3]:
+
+        def hname(h):
+            rs = h.get("reportedState") or {}
+            return rs.get("hostname") or rs.get("name") or h.get("name") or ""
+
+        hosts_cache = {}
+        for (account_id, host), sites in list(by.items())[:4]:
             a = self.db.one("SELECT * FROM net_accounts WHERE id=?", (account_id,))
             if not a:
                 continue
             cl = self.client(a)
-            entry = {"host_id": host, "console": sites[0]["console"], "sites_in_db": len(sites)}
-            try:
-                hosts = cl._all("/v1/hosts")
-                h = next((x for x in hosts if x.get("id") == host), None)
-                entry["host_record"] = {k: (h or {}).get(k) for k in ("id", "type", "ipAddress", "isBlocked")} if h else f"NOT in /v1/hosts ({len(hosts)} hosts visible)"
-            except NetError as e:
-                entry["hosts_error"] = str(e)
-            base = f"/v1/connector/consoles/{urllib.parse.quote(host)}/proxy/network/integration/v1/sites"
-            try:
-                r = cl._call(base, {"limit": "50"}, timeout=25)
-                isites = (r or {}).get("data") or []
-                entry["integration_sites"] = [{"id": s.get("id"), "name": s.get("name"), "internalReference": s.get("internalReference")} for s in isites[:5]]
-                if isites:
-                    sid = urllib.parse.quote(str(isites[0].get("id")))
-                    try:
-                        nr = cl._call(f"{base}/{sid}/networks", {"limit": "50"}, timeout=25)
-                        nets = (nr or {}).get("data") or []
-                        entry["networks_count"] = len(nets)
-                        entry["networks_sample"] = nets[:2]
-                    except NetError as e:
-                        entry["networks_error"] = str(e)
-            except NetError as e:
-                entry["integration_sites_error"] = str(e)
+            if account_id not in hosts_cache:
+                try:
+                    hosts_cache[account_id] = cl._all("/v1/hosts")
+                except NetError:
+                    hosts_cache[account_id] = []
+                for h in hosts_cache[account_id][:3]:   # show the real host id format
+                    out["hosts_sample"].append({"id": h.get("id"), "hardwareId": h.get("hardwareId"), "type": h.get("type"), "name": hname(h)})
+                out["hosts_count"] = len(hosts_cache[account_id])
+            hosts = hosts_cache[account_id]
+            console = (sites[0]["console"] or "").strip().lower()
+            byname = next((h for h in hosts if hname(h).strip().lower() == console), None) \
+                or next((h for h in hosts if console and console in hname(h).strip().lower()), None)
+            entry = {"console": sites[0]["console"], "my_host_id": host,
+                     "my_id_in_hosts": any(h.get("id") == host for h in hosts),
+                     "name_match": {"id": byname.get("id"), "hardwareId": byname.get("hardwareId"), "name": hname(byname)} if byname else "no name match"}
+            # try the connector with my derived id and with the name-matched host id
+            for label, hid in (("mine", host), ("matched", byname.get("id") if byname else None)):
+                if not hid:
+                    continue
+                base = f"/v1/connector/consoles/{urllib.parse.quote(hid)}/proxy/network/integration/v1/sites"
+                try:
+                    isites = (cl._call(base, {"limit": "20"}, timeout=25) or {}).get("data") or []
+                    entry[label + "_sites"] = len(isites)
+                    if isites:
+                        sid = urllib.parse.quote(str(isites[0].get("id")))
+                        try:
+                            nets = (cl._call(f"{base}/{sid}/networks", {"limit": "20"}, timeout=25) or {}).get("data") or []
+                            entry[label + "_networks_sample"] = nets[:2]
+                        except NetError as e:
+                            entry[label + "_networks_error"] = str(e)
+                except NetError as e:
+                    entry[label + "_error"] = str(e)
             out["consoles"].append(entry)
         return out
 
