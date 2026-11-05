@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "3.5.0"    # the release these slides describe (its betas included)
-SINCE = "3.4.0"      # the full release before it
+RELEASE = "3.6.0"    # the release these slides describe (its betas included)
+SINCE = "3.5.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -196,12 +196,19 @@ SLIDES_3_5 = [
              "for a few seconds - and Traffic Watch can now watch a single interface. Both use the router's 'sniff' permission, granted when "
              "the router is adopted (grant it once on routers adopted earlier). The old fetch-based Speed Test is gone; use the Link test."},
 ]
-SLIDES = SLIDES_3_5   # 3.5.0's own slides (3.4.0 was released, so only the new work shows)
+SLIDES_3_6 = [
+    {"id": "api-access", "title": "Outbound API: let other systems pull data", "img": None, "view": "admin", "who": "techadmin",
+     "text": "Admin > API access creates read-only tokens so another system - an RMM, a dashboard, a billing or reporting tool - can "
+             "pull data from TikManager over a small HTTP API (routers, clients, alerts, fleet health). Each key is a bearer token "
+             "with its own scopes, shown once when you create it and revokable any time. It's read-only: nothing in the API can change "
+             "a router or a setting. See the endpoints and examples in the README's \"Outbound API\" section."},
+]
+SLIDES = SLIDES_3_6   # 3.6.0's own slides (3.5.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")

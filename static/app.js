@@ -1548,15 +1548,15 @@ async function users() {
 }
 
 // --- Admin: branding, technicians, system ---------------------------------------------------------------------
-const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["system", "Settings"]];
-const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), system: can("settings") || can("alerts") })[k];
+const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["api", "API access"], ["system", "Settings"]];
+const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), api: can("settings"), system: can("settings") || can("alerts") })[k];
 async function admin(tab) {
   tab = tab && adminTabOk(tab) ? tab : (ADMIN_TABS.find(([k]) => adminTabOk(k)) || ["techs"])[0];
   $("main").innerHTML = `<h1>Admin</h1><div class="tabs" role="tablist">
       ${ADMIN_TABS.filter(([k]) => adminTabOk(k)).map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" class="${k === tab ? "active" : ""}">${l}</button>`).join("")}
     </div><div id="adminBody"></div>`;
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => admin(b.dataset.tab)));
-  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, system: adminSystem };
+  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, api: adminApi, system: adminSystem };
   await (tabs[tab] || adminBranding)();
 }
 
@@ -2320,6 +2320,74 @@ async function lcAdminCard() {
       setTimeout(lcAdminCard, 4000);
     } catch (e) { $("lcStatus").textContent = e.message; $("lcStatus").className = "status err small"; }
   }));
+}
+
+// --- Admin > API access: read-only tokens so other systems can pull TikManager data over /api/v1 --------------------
+async function adminApi() {
+  const d = await api("/api/admin/api-keys");
+  const base = `${d.public_url || location.origin}/api/v1`;
+  const scopeList = Object.entries(d.scopes);
+  $("adminBody").innerHTML = `<div class="card"><div class="row"><h2>API access</h2><span class="spacer"></span><button class="btn primary" type="button" id="akNew">New key</button></div>
+      <p class="muted">Let other systems pull data from TikManager - inventory, status, alerts - over a read-only API. Each key is a
+        bearer token with its own scopes; it's shown once when you create it and can be revoked any time. Nothing here can change a router.</p>
+      <p class="small">Base URL <code class="mono">${esc(base)}</code> · send header <code class="mono">Authorization: Bearer &lt;token&gt;</code> · read-only (GET) · 300 requests/minute per key.</p>
+      <p class="small muted">Endpoints: <code class="mono">/health</code> · <code class="mono">/clients</code> · <code class="mono">/devices</code> · <code class="mono">/devices/{id}</code> · <code class="mono">/alerts</code>. <code class="mono">GET ${esc(base)}</code> lists what a key can call.</p>
+      <span class="status" id="akStatus"></span></div>
+    <div class="card">${d.keys.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Token</th><th>Scopes</th><th>Status</th><th>Last used</th><th>Calls</th><th></th></tr></thead><tbody>
+      ${d.keys.map((k) => `<tr>
+        <td><b>${esc(k.name)}</b></td>
+        <td class="small mono">${esc(k.prefix)}</td>
+        <td class="small">${k.scopes.length === scopeList.length ? "all" : k.scopes.map((x) => esc(x)).join(", ")}</td>
+        <td>${k.enabled ? `<span class="pill up-done">enabled</span>` : `<span class="pill up-run">disabled</span>`}</td>
+        <td class="small">${k.last_used ? ago(k.last_used) : "<span class='muted'>never</span>"}${k.last_ip ? `<div class="small muted mono">${esc(k.last_ip)}</div>` : ""}</td>
+        <td class="small">${k.calls || 0}</td>
+        <td class="nowrap"><button class="btn small" type="button" data-akedit="${k.id}">Edit</button>
+          <button class="btn small" type="button" data-aktog="${k.id}" data-on="${k.enabled ? 1 : 0}">${k.enabled ? "Disable" : "Enable"}</button>
+          <button class="btn small danger" type="button" data-akdel="${k.id}">Revoke</button></td>
+      </tr>`).join("")}</tbody></table></div>` : `<p class="muted">No API keys yet. Create one to let another system pull data.</p>`}</div>`;
+  const msg = (m, ok) => { const e = $("akStatus"); if (e) { e.textContent = m; e.className = `status ${ok ? "ok" : "err"}`; } };
+  $("akNew").addEventListener("click", () => akDialog(null, d.scopes));
+  document.querySelectorAll("[data-akedit]").forEach((b) => b.addEventListener("click", () => akDialog(d.keys.find((k) => k.id === +b.dataset.akedit), d.scopes)));
+  document.querySelectorAll("[data-aktog]").forEach((b) => b.addEventListener("click", async () => {
+    try { await post(`/api/admin/api-keys/${b.dataset.aktog}`, { enabled: b.dataset.on !== "1" }); adminApi(); } catch (e) { msg(e.message); }
+  }));
+  document.querySelectorAll("[data-akdel]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Revoke this API key? Any system using it stops working immediately. This can't be undone.")) return;
+    try { await post(`/api/admin/api-keys/${b.dataset.akdel}/delete`); adminApi(); } catch (e) { msg(e.message); }
+  }));
+}
+function akDialog(k, scopes) {
+  const entries = Object.entries(scopes);
+  const checked = (s) => !k || k.scopes.includes(s);
+  dialog(`<h2>${k ? "Edit API key" : "New API key"}</h2>
+    <label class="field">Name <input id="akName" maxlength="100" value="${esc(k?.name || "")}" placeholder="e.g. Grafana, RMM sync"></label>
+    <h3>Scopes</h3><p class="small muted">What this key may read. Leave all ticked for full read access.</p>
+    <div class="ak-scopes">${entries.map(([id, label]) => `<label class="chk"><input type="checkbox" class="akScope" value="${id}" ${checked(id) ? "checked" : ""}> <b>${esc(id)}</b> — ${esc(label)}</label>`).join("")}</div>
+    <div class="actions"><button class="btn primary" type="button" id="akSave">${k ? "Save" : "Create key"}</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="akDlgStatus"></span></div>`);
+  $("akSave").addEventListener("click", async () => {
+    const name = $("akName").value.trim();
+    const sel = [...document.querySelectorAll(".akScope:checked")].map((x) => x.value);
+    const st = $("akDlgStatus"); st.textContent = "Saving…"; st.className = "status";
+    try {
+      const r = await post(k ? `/api/admin/api-keys/${k.id}` : "/api/admin/api-keys", { name, scopes: sel });
+      $("dlg").close();
+      if (r.token) akShowToken(r.token, r.key.name);
+      admin("api");
+    } catch (e) { st.textContent = e.message; st.className = "status err"; }
+  });
+}
+function akShowToken(token, name) {
+  dialog(`<h2>API key created</h2>
+    <p>Copy this token now — it's shown <b>once</b> and can't be retrieved again. If you lose it, revoke the key and make a new one.</p>
+    <p class="small muted">Key: <b>${esc(name)}</b></p>
+    <div class="row"><input id="akToken" class="mono grow" value="${esc(token)}" readonly spellcheck="false">
+      <button class="btn" type="button" id="akCopy">Copy</button></div>
+    <p class="small muted">Use it as <code class="mono">Authorization: Bearer ${esc(token.slice(0, 11))}…</code></p>
+    <div class="actions"><button class="btn primary" type="button" data-close>Done</button></div>`);
+  $("akCopy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(token); $("akCopy").textContent = "Copied"; }
+    catch { const i = $("akToken"); i.focus(); i.select(); $("akCopy").textContent = "Press Ctrl+C"; }
+  });
 }
 
 async function adminSystem() {

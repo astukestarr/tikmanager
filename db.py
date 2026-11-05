@@ -322,6 +322,14 @@ CREATE TABLE IF NOT EXISTS net_devices (
   is_console INTEGER NOT NULL DEFAULT 0, startup_time TEXT, offline_since REAL, updated_at REAL
 );
 CREATE INDEX IF NOT EXISTS net_devices_site ON net_devices(site_key);
+CREATE TABLE IF NOT EXISTS api_keys (                 -- outbound read API tokens (apikeys.py): other systems pull data
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL,   -- prefix = the token's first chars, shown so a key is recognisable
+  token_hash TEXT NOT NULL UNIQUE,                    -- SHA-256 of the token; the token itself is shown once, never stored
+  scopes TEXT NOT NULL DEFAULT '[]',                  -- JSON list from apikeys.SCOPES; what this key may read
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT, created_at REAL NOT NULL, last_used REAL, last_ip TEXT, calls INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS api_keys_hash ON api_keys(token_hash);
 """
 
 

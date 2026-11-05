@@ -72,6 +72,7 @@ import whatsnew
 from f2b import F2b
 from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
+from apikeys import ApiKeys, SCOPES as API_SCOPES
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
                       check_totp, cookie, derive, hash_password, new_totp_secret, password_problem, read_cookie, token,
                       token_hash, totp_uri)
@@ -169,6 +170,8 @@ checks = Checks(db, poller.client)   # critical checks: addresses a client's rou
 alerts.checks = checks
 isps = ISPs(db, settings, geo, wg, lambda: integ.config("cloudflare").get("token", ""))   # which ISP each router's links use; outages
 alerts.isps = isps   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
+apikeys = ApiKeys(db)                  # Admin > API access: tokens that let other systems pull data over /api/v1
+api_limit = RateLimiter(300, 60)       # per key: 300 requests a minute
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
 geo_lock = threading.Lock()
@@ -749,7 +752,99 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self.json({"error": "Something went wrong on the server."}, 500)
 
+    def do_OPTIONS(self):
+        """CORS preflight for the outbound read API (browser clients). Everything else doesn't need it."""
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/api/v1" or path.startswith("/api/v1/"):
+            return self.send(204, b"", "text/plain", headers=[("Access-Control-Allow-Origin", "*"),
+                             ("Access-Control-Allow-Methods", "GET, OPTIONS"), ("Access-Control-Allow-Headers", "Authorization"),
+                             ("Access-Control-Max-Age", "86400")])
+        return self.send(404, b"", "text/plain")
+
+    CORS = (("Access-Control-Allow-Origin", "*"),)
+
+    def route_api_v1(self, path, q):
+        """The outbound, read-only API (apikeys.py). Bearer-token auth, per-key rate limit, scoped to what the key allows.
+        Every endpoint here is a GET and returns a generic shape - it never exposes TikManager-internal columns wholesale."""
+        key = apikeys.verify(self.headers.get("Authorization"), self.client_ip())
+        if not key:
+            raise HttpError(401, "Missing or invalid API token. Send header 'Authorization: Bearer <token>'.")
+        if not api_limit.allow(f"k{key['id']}"):
+            raise HttpError(429, "Rate limit exceeded (300 requests per minute).")
+        scopes = json.loads(key["scopes"] or "[]")
+
+        def need(scope):
+            if scope not in scopes:
+                raise HttpError(403, f"This API key doesn't have the '{scope}' scope.")
+
+        if path in ("/api/v1", "/api/v1/"):   # discovery: what this key can call
+            return self.json({"service": "TikManager", "version": __version__, "key": key["name"], "scopes": scopes,
+                              "endpoints": ["/api/v1/health", "/api/v1/clients", "/api/v1/devices",
+                                            "/api/v1/devices/{id}", "/api/v1/alerts"]}, headers=self.CORS)
+        if path == "/api/v1/health":
+            need("health")
+            row = db.one("""SELECT COUNT(*) AS routers, COALESCE(SUM(online),0) AS online,
+                            COALESCE(SUM(CASE WHEN online=0 THEN 1 ELSE 0 END),0) AS offline FROM devices WHERE state='adopted'""")
+            alerts_open = db.one("SELECT COUNT(*) AS n FROM alerts WHERE resolved_at IS NULL")["n"]
+            clients = db.one("SELECT COUNT(*) AS n FROM orgs WHERE active=1")["n"]
+            return self.json({"routers": row["routers"], "online": row["online"], "offline": row["offline"],
+                              "alerts_open": alerts_open, "clients": clients, "at": time.time()}, headers=self.CORS)
+        if path == "/api/v1/clients":
+            need("clients")
+            rows = db.q("""SELECT o.id, o.name, COUNT(d.id) AS routers, COALESCE(SUM(d.online),0) AS online
+                           FROM orgs o LEFT JOIN devices d ON d.org_id=o.id AND d.state='adopted'
+                           WHERE o.active=1 GROUP BY o.id, o.name ORDER BY o.name""")
+            return self.json({"clients": [{"id": r["id"], "name": r["name"], "routers": r["routers"],
+                              "online": r["online"]} for r in rows]}, headers=self.CORS)
+        if path == "/api/v1/devices":
+            need("devices")
+            where, args = "d.state='adopted'", []
+            if q.get("client") and str(q["client"]).isdigit():
+                where += " AND d.org_id=?"; args.append(int(q["client"]))
+            if q.get("online") in ("true", "false"):
+                where += " AND d.online=?"; args.append(1 if q["online"] == "true" else 0)
+            limit = max(1, min(1000, int(q["limit"]) if str(q.get("limit") or "").isdigit() else 500))
+            offset = max(0, int(q["offset"]) if str(q.get("offset") or "").isdigit() else 0)
+            total = db.one(f"SELECT COUNT(*) AS n FROM devices d WHERE {where}", args)["n"]
+            rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.online, d.last_seen, d.first_seen,
+                            d.model, d.board, d.serial, d.version, d.uptime, d.cpu, d.mem_used, d.mem_total,
+                            d.public_ip, d.tunnel_ip, d.kind_override
+                            FROM devices d LEFT JOIN orgs o ON o.id=d.org_id WHERE {where}
+                            ORDER BY o.name, d.name LIMIT ? OFFSET ?""", (*args, limit, offset))
+            return self.json({"total": total, "count": len(rows), "limit": limit, "offset": offset,
+                              "devices": [self._api_device(r) for r in rows]}, headers=self.CORS)
+        if m := re.fullmatch(r"/api/v1/devices/(\d+)", path):
+            need("devices")
+            r = db.one("""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.online, d.last_seen, d.first_seen,
+                          d.model, d.board, d.serial, d.version, d.uptime, d.cpu, d.mem_used, d.mem_total,
+                          d.public_ip, d.tunnel_ip, d.kind_override
+                          FROM devices d LEFT JOIN orgs o ON o.id=d.org_id WHERE d.id=? AND d.state='adopted'""", (int(m.group(1)),))
+            if not r:
+                raise HttpError(404, "No such router.")
+            return self.json(self._api_device(r), headers=self.CORS)
+        if path == "/api/v1/alerts":
+            need("alerts")
+            rows = db.q("""SELECT a.id, a.kind, a.title, a.detail, a.opened_at, a.device_id, a.org_id,
+                           d.name AS device, o.name AS org FROM alerts a LEFT JOIN devices d ON d.id=a.device_id
+                           LEFT JOIN orgs o ON o.id=a.org_id WHERE a.resolved_at IS NULL ORDER BY a.opened_at DESC LIMIT 500""")
+            return self.json({"alerts": [{"id": a["id"], "kind": a["kind"], "title": a["title"], "detail": a["detail"],
+                              "opened_at": a["opened_at"], "device": a["device"], "device_id": a["device_id"],
+                              "client": a["org"], "client_id": a["org_id"]} for a in rows]}, headers=self.CORS)
+        raise HttpError(404, "No such API endpoint. See GET /api/v1 for the list.")
+
+    @staticmethod
+    def _api_device(r):
+        return {"id": r["id"], "name": r["name"], "client": r["org"], "client_id": r["org_id"], "site": r["site"] or None,
+                "model": r["model"], "kind": device_kind(r.get("model"), r.get("board"), r.get("kind_override")),
+                "serial": r["serial"] or None, "online": bool(r["online"]),
+                "ros_version": (r["version"] or "").split(" ")[0] or None, "uptime": r["uptime"],
+                "cpu_percent": r["cpu"], "mem_used": r["mem_used"], "mem_total": r["mem_total"],
+                "wan_ip": r["public_ip"] or None, "tunnel_ip": r["tunnel_ip"] or None,
+                "last_seen": r["last_seen"], "first_seen": r["first_seen"]}
+
     def route_get(self, path, q):
+        if path == "/api/v1" or path.startswith("/api/v1/"):
+            return self.route_api_v1(path, q)
         if path in ("/", "/index.html"):
             if not self.session():
                 return self.redirect("/login")
@@ -811,6 +906,9 @@ class Handler(BaseHTTPRequestHandler):
             from alerts import KINDS as ALERT_KINDS
             return self.json({"hooks": alerts.webhooks.public(), "formats": WEBHOOK_FORMATS, "placeholders": WEBHOOK_PLACEHOLDERS,
                               "kinds": {k: v[0] for k, v in ALERT_KINDS.items()}})
+        if path == "/api/admin/api-keys":   # outbound read API tokens (administrators)
+            self.require(tech=True, admin=True)
+            return self.json({"keys": apikeys.list(), "scopes": API_SCOPES, "public_url": settings.public_url})
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)
             return self.json({**updates.info(), "observatory": observatory.info(), "reachability": reach.info()})
@@ -3249,6 +3347,25 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, str(e)) from None
             db.audit(s["email"], "webhook saved", h["name"], self.client_ip(), detail=h["format"])
             return self.json({"ok": True, "id": h["id"]})
+        if path == "/api/admin/api-keys":   # create an outbound read API token (administrators); the token is shown once
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            row, token = apikeys.create(b.get("name"), b.get("scopes"), s["email"])
+            db.audit(s["email"], "API key created", row["name"], self.client_ip(), detail=",".join(row["scopes"]))
+            return self.json({"ok": True, "key": row, "token": token})   # token: shown once, never retrievable again
+        if m := re.fullmatch(r"/api/admin/api-keys/(\d+)", path):   # rename / change scopes / enable-disable
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            row = apikeys.update(int(m.group(1)), name=b.get("name"), scopes=b.get("scopes"), enabled=b.get("enabled"))
+            if not row:
+                raise HttpError(404, "No such API key.")
+            db.audit(s["email"], "API key changed", row["name"], self.client_ip())
+            return self.json({"ok": True, "key": row})
+        if m := re.fullmatch(r"/api/admin/api-keys/(\d+)/delete", path):   # revoke a token for good
+            s = self.require(tech=True, admin=True)
+            apikeys.delete(int(m.group(1)))
+            db.audit(s["email"], "API key revoked", m.group(1), self.client_ip())
+            return self.json({"ok": True})
         if path == "/api/isps/detect":   # look up every router's ISP now (and Cloudflare Radar)
             self.require(tech=True, perm="devices")
             threading.Thread(target=lambda: (isps.detect(), isps.refresh_radar(force=True)), daemon=True, name="isp-detect").start()

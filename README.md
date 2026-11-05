@@ -835,6 +835,37 @@ IT Glue.
 Router thumbnails are matched by model against mikrotik.com's product catalog (refreshed weekly), downloaded once into
 `/var/lib/tikmanager/thumbs/` and served by TikManager itself. Discontinued models are found through mikrotik.com's sitemap; CHR shows a generic icon.
 
+## Outbound API (let other systems pull data)
+
+**Admin > API access** creates read-only tokens so another system - an RMM, a dashboard, a billing or reporting tool - can
+pull data from TikManager over a small HTTP API. It is **read-only**: every endpoint is a `GET`, and nothing in the API can
+change a router, a ticket or a setting.
+
+- **Authentication:** a bearer token. Send `Authorization: Bearer <token>` on every request. A token is shown **once** when
+  you create it (TikManager stores only its SHA-256 hash); if you lose it, revoke the key and make a new one.
+- **Scopes:** each key is limited to the areas it was granted - `devices`, `clients`, `alerts`, `health`. Calling an endpoint
+  outside the key's scopes returns `403`.
+- **Rate limit:** 300 requests per minute per key (`429` over that).
+- **Base URL:** `https://<your TikManager>/api/v1`.
+
+| Endpoint | Scope | Returns |
+|---|---|---|
+| `GET /api/v1` | any | What this key can call (service, version, scopes, endpoints) |
+| `GET /api/v1/health` | health | Fleet counts: routers, online, offline, open alerts, clients |
+| `GET /api/v1/clients` | clients | Each client (organisation) with its router and online counts |
+| `GET /api/v1/devices` | devices | Routers (id, name, client, model, serial, online, RouterOS version, uptime, CPU/memory, WAN/tunnel IP, first/last seen). Filters: `?client=<id>`, `?online=true|false`; paging: `?limit=` (max 1000), `?offset=` |
+| `GET /api/v1/devices/{id}` | devices | One router, same fields |
+| `GET /api/v1/alerts` | alerts | Open alerts (kind, title, detail, device, client, opened time) |
+
+Example:
+
+```
+curl -H "Authorization: Bearer tk_xxxxxxxx" https://tik.example.com/api/v1/devices?online=false
+```
+
+CORS is open (`Access-Control-Allow-Origin: *`) so a browser-based dashboard can call it directly with its token. Keys are
+managed only by administrators, and every create / change / revoke is in the audit log.
+
 ## Admin
 
 Admin (administrators only):

@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.6.0-beta.1 - 2026-11-04
+
+**Outbound API: let other systems pull data from TikManager.** A new **Admin > API access** page creates read-only bearer
+tokens so an RMM, dashboard, or billing/reporting tool can pull inventory, status, clients, alerts and fleet health over a
+small HTTP API at `/api/v1`. Each key is scoped (`devices` / `clients` / `alerts` / `health`), shown once on creation
+(only its SHA-256 hash is stored), rate-limited (300 req/min), and revokable. It is strictly **read-only** - every endpoint
+is a GET and nothing in the API can change a router, ticket or setting. CORS is open so browser dashboards can call it with
+a token. Endpoints and examples are in the README's "Outbound API" section. (New module `apikeys.py`, `api_keys` table.)
+
 ## 3.5.1 - 2026-11-04
 
 **ConnectWise billing: the "All clients" view loads fast.** Reconciling every linked client used to run one client's
