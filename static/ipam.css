@@ -20,8 +20,10 @@ body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex;
 .ipam-tabs .tab { border: none; background: none; color: var(--muted); padding: 10px 14px; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; }
 .ipam-tabs .tab:hover { color: var(--text); }
 .ipam-tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-.ipam-body { display: flex; flex: 1; min-height: 0; }
+.ipam-body { display: flex; flex: 1; min-height: 0; position: relative; }
 .ipam-body.no-side .ipam-side { display: none; }
+.ipam-sidetoggle { display: none; font-size: 20px; }   /* mobile only: opens the sections/clients drawer */
+.side-backdrop { display: none; }
 .ipam-side { width: 260px; flex: none; border-right: 1px solid var(--border); background: var(--panel); overflow-y: auto; }
 .side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel); }
 .tree { padding: 6px 0; }
@@ -107,6 +109,26 @@ body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex;
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 @media (max-width: 720px) {
-  .ipam-side { position: absolute; z-index: 10; height: calc(100% - 46px); box-shadow: var(--shadow); }
-  .ipam-search { max-width: none; }
+  /* top bar wraps; search drops to its own full-width row */
+  .ipam-top { flex-wrap: wrap; row-gap: 8px; }
+  .ipam-search { order: 3; flex-basis: 100%; max-width: none; }
+  .ipam-top-actions { margin-left: auto; flex-wrap: wrap; }
+  body.tab-subnets .ipam-sidetoggle { display: inline-grid; place-items: center; }
+
+  /* tab strip scrolls sideways instead of overflowing */
+  .ipam-tabs { overflow-x: auto; scrollbar-width: none; }
+  .ipam-tabs::-webkit-scrollbar { display: none; }
+  .ipam-tabs .tab { flex: none; white-space: nowrap; }
+
+  .ipam-main { padding: 14px; }
+  /* wide tables scroll horizontally in place instead of being clipped off-screen */
+  .ipam-table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+
+  /* sections & clients become a slide-in drawer with a tap-to-close backdrop */
+  .ipam-side { position: absolute; top: 0; left: 0; z-index: 20; width: 280px; max-width: 85vw; height: 100%;
+    transform: translateX(-102%); transition: transform .18s; box-shadow: var(--shadow); }
+  .ipam-body.side-open .ipam-side { transform: none; }
+  .side-backdrop { position: absolute; inset: 0; z-index: 15; background: rgba(10, 16, 28, .4); }
+  .ipam-body.side-open .side-backdrop { display: block; }
 }
+@media (max-width: 720px) and (prefers-reduced-motion: reduce) { .ipam-side { transition: none; } }

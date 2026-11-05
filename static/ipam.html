@@ -12,9 +12,10 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/ipam.css">
 </head>
-<body class="ipam">
+<body class="ipam tab-subnets">
   <header class="ipam-top">
     <a class="ipam-home" href="/" title="Back to TikManager">&larr;</a>
+    <button class="ipam-home ipam-sidetoggle" id="sideToggle" type="button" title="Sections &amp; clients" aria-label="Sections and clients">&#9776;</button>
     <img class="brand-logo brand-wordmark ipam-word" src="/wordmark.svg" alt="TikManager">
     <span class="ipam-title">IPAM</span>
     <div class="ipam-search"><input id="search" type="search" placeholder="Search IP, subnet, host, MAC…" autocomplete="off"></div>
@@ -43,6 +44,7 @@
     <main class="ipam-main" id="main">
       <p class="muted pad">Loading…</p>
     </main>
+    <div class="side-backdrop" id="sideBackdrop"></div>
   </div>
 
   <dialog id="dlg" class="ipam-dlg">

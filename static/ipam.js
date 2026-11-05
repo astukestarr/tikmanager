@@ -411,7 +411,10 @@ async function loadLookups() {
 function setTab(t) {
   tab = t;
   document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === t));
-  $("side").closest(".ipam-body").classList.toggle("no-side", t !== "subnets");
+  document.body.classList.toggle("tab-subnets", t === "subnets");   // mobile: only the subnets tab has a tree drawer
+  const body = $("side").closest(".ipam-body");
+  body.classList.toggle("no-side", t !== "subnets");
+  body.classList.remove("side-open");   // close the mobile drawer on any tab switch
   if (t === "subnets") { current = { kind: "all" }; renderTree(); showSubnets(); }
   else if (t === "vlans") showVlans();
   else if (t === "vrfs") showVrfs();
@@ -576,6 +579,11 @@ async function init() {
   // tabs
   $("tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); });
 
+  // mobile sections/clients drawer
+  const ipamBody = document.querySelector(".ipam-body");
+  $("sideToggle").addEventListener("click", () => ipamBody.classList.toggle("side-open"));
+  $("sideBackdrop").addEventListener("click", () => ipamBody.classList.remove("side-open"));
+
   // top bar
   $("newSection").addEventListener("click", () => sectionDialog(null));
   $("syncBtn").addEventListener("click", syncPicker);
@@ -598,6 +606,7 @@ async function init() {
     const es = e.target.closest("[data-editsection]"); if (es) { e.stopPropagation(); const s = tree.sections.find((x) => x.id === +es.dataset.editsection); return sectionDialog(s); }
     const item = e.target.closest(".tree-item"); if (!item) return;
     current = item.dataset.kind === "all" ? { kind: "all" } : { kind: item.dataset.kind, id: +item.dataset.id };
+    e.currentTarget.closest(".ipam-body").classList.remove("side-open");   // mobile: close the drawer after picking
     renderTree(); showSubnets();
   });
 

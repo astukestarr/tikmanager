@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.13 - 2026-11-05
+
+Mobile polish for the IPAM workspace. On a phone the sections & clients list is now a slide-in drawer (a ☰ button in
+the header opens it; tap the dimmed area or pick an entry to close it) instead of a fixed column that crowded the page,
+the tab strip scrolls sideways when the tabs don't fit, and wide subnet/device tables scroll within the page instead of
+being clipped off the right edge. No change on desktop. (The rest of TikManager was already laid out for narrow screens
+- this release brings IPAM, the newest workspace, up to the same standard.)
+
 ## 3.7.0-beta.12 - 2026-11-04
 
 The IPAM workspace fills out: VLANs, VRFs, Devices, Locations, DNS/PTR, CSV import/export, and read access for
