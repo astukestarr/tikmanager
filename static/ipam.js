@@ -548,6 +548,21 @@ function heroTile(value, label, sub, tone, gotab) {
   t.appendChild(el("div", "hero-n", value)); t.appendChild(el("div", "hero-label", label));
   if (sub != null) t.appendChild(el("div", "hero-sub", sub)); return t;
 }
+function trendChart(points) {
+  const W = 600, H = 130, pad = 8;
+  const svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, class: "trend", preserveAspectRatio: "none" });
+  const n = points.length, maxV = Math.max(10, ...points.map((p) => p.usage));   // floor at 10% so a low-usage line isn't a spike
+  const X = (i) => pad + (n <= 1 ? (W - 2 * pad) / 2 : i * (W - 2 * pad) / (n - 1));
+  const Y = (v) => H - pad - (v / maxV) * (H - 2 * pad);
+  for (let g = 1; g <= 3; g++) { const gy = (H - 2 * pad) * g / 4 + pad; svg.appendChild(svgEl("line", { x1: pad, y1: gy, x2: W - pad, y2: gy, class: "trend-grid" })); }
+  let line = ""; points.forEach((p, i) => { line += (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(p.usage).toFixed(1) + " "; });
+  if (n >= 2) {
+    svg.appendChild(svgEl("path", { d: "M" + X(0).toFixed(1) + " " + (H - pad) + " " + line.replace(/^M/, "L") + "L" + X(n - 1).toFixed(1) + " " + (H - pad) + " Z", class: "trend-area" }));
+    svg.appendChild(svgEl("path", { d: line.trim(), class: "trend-line" }));
+  }
+  points.forEach((p, i) => { if (n <= 14 || i === n - 1) svg.appendChild(svgEl("circle", { cx: X(i).toFixed(1), cy: Y(p.usage).toFixed(1), r: i === n - 1 ? 4 : 2.5, class: "trend-dot" })); });
+  return svg;
+}
 function utilTone(p) { return p >= 90 ? "hot" : p >= 75 ? "warm" : ""; }
 function fmtAgo(ts) {
   if (!ts) return "—";
@@ -591,6 +606,22 @@ async function showDashboard() {
   capStats.appendChild(chip("Addressable", cap.usable, ""));
   capBody.appendChild(capStats);
   grid.appendChild(dashCard("IP capacity", capBody));
+
+  // ---- Utilization trend (daily snapshots) ----
+  const tr = r.trend || [];
+  const trBody = el("div", "trend-wrap");
+  if (tr.length >= 2) {
+    const first = tr[0], last = tr[tr.length - 1], delta = last.usage - first.usage;
+    const cap2 = el("div", "trend-cap");
+    cap2.appendChild(el("span", "trend-now", last.usage + "%"));
+    const dChip = el("span", "trend-delta " + (delta > 0 ? "up" : delta < 0 ? "down" : ""), (delta > 0 ? "▲ +" : delta < 0 ? "▼ " : "±") + delta + "% over " + tr.length + " days");
+    cap2.appendChild(dChip); trBody.appendChild(cap2);
+    trBody.appendChild(trendChart(tr));
+    const ax = el("div", "trend-axis"); ax.appendChild(el("span", "muted small", (first.day || "").slice(5))); ax.appendChild(el("span", "muted small", (last.day || "").slice(5))); trBody.appendChild(ax);
+  } else {
+    trBody.appendChild(el("p", "muted small", "Collecting history — the utilization trend records one point per day. Check back tomorrow to see the line build."));
+  }
+  grid.appendChild(dashCard("Utilization trend", trBody, true));
 
   // ---- Subnet health ----
   const h = r.health, htot = Object.values(h).reduce((a, b) => a + b, 0);

@@ -211,6 +211,19 @@ body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex;
 .util-cell{min-width:120px}
 .right{text-align:right} .nowrap{white-space:nowrap}
 
+/* utilization trend (SVG area chart) */
+.trend-wrap{display:flex;flex-direction:column;gap:6px}
+.trend{width:100%;height:130px;display:block}
+.trend-grid{stroke:var(--border);stroke-width:1;stroke-dasharray:3 4}
+.trend-area{fill:var(--accent);opacity:.14}
+.trend-line{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.trend-dot{fill:var(--accent)}
+.trend-cap{display:flex;align-items:baseline;gap:10px}
+.trend-now{font-family:var(--mono);font-size:24px;font-weight:700}
+.trend-delta{font-size:12px;color:var(--muted)}
+.trend-delta.up{color:var(--warn)} .trend-delta.down{color:var(--good)}
+.trend-axis{display:flex;justify-content:space-between}
+
 /* Rack elevation (one row per U; a device cell spans its height via rowspan) */
 .rack-wrap { max-width: 440px; margin: 6px 0 18px; }
 .rack { width: 100%; border-collapse: collapse; table-layout: fixed; border: 3px solid color-mix(in srgb, var(--text) 55%, var(--panel)); border-radius: 8px; overflow: hidden; background: var(--bg); }

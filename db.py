@@ -398,6 +398,11 @@ CREATE TABLE IF NOT EXISTS ipam_addresses (           -- individual host records
 CREATE INDEX IF NOT EXISTS ipam_addresses_subnet ON ipam_addresses(subnet_id, ip_sort);
 CREATE INDEX IF NOT EXISTS ipam_addresses_device ON ipam_addresses(device_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ipam_addresses_uq ON ipam_addresses(subnet_id, ip);
+CREATE TABLE IF NOT EXISTS ipam_stats_daily (          -- one utilization snapshot per day (org_id 0 = whole estate)
+  day TEXT NOT NULL, org_id INTEGER NOT NULL DEFAULT 0, used INTEGER NOT NULL DEFAULT 0,
+  usable INTEGER NOT NULL DEFAULT 0, subnets INTEGER NOT NULL DEFAULT 0, addresses INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, org_id)
+);
 """
 
 

@@ -287,14 +287,24 @@ class Ipam:
 
         capacity = {"used": total_used, "usable": total_usable, "free": max(0, total_usable - total_used),
                     "usage": round(100 * total_used / total_usable) if total_usable else 0, "v6_subnets": v6}
+        # passive daily utilization snapshot (idempotent per day+scope; org_id 0 = the whole estate) -> the trend chart
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        try:
+            self.db.run("INSERT OR REPLACE INTO ipam_stats_daily (day, org_id, used, usable, subnets, addresses) "
+                        "VALUES (?,?,?,?,?,?)", (today, oid or 0, total_used, total_usable, counts["subnets"], counts["addresses"]))
+        except Exception:
+            pass   # a dashboard read must never fail because the snapshot write did
+        trend = [{"day": t["day"], "used": t["used"], "usage": round(100 * t["used"] / t["usable"]) if t["usable"] else 0}
+                 for t in self.db.q("SELECT day, used, usable FROM ipam_stats_daily WHERE org_id=? ORDER BY day DESC LIMIT 30",
+                                    (oid or 0,))][::-1]
         alerts = {"over_threshold": over_threshold[:8], "over_threshold_n": len(over_threshold),
                   "full": full_n, "offline": offline_n, "stale": stale_n}
         change = {"new_subnets": new_subnets, "new_addresses": new_addr}
         return {"counts": counts, "capacity": capacity, "health": bands, "status_mix": status_mix,
                 "source_mix": {"subnets": srcmix, "addresses": addr_src}, "clients": clients[:12], "client_total": len(clients),
                 "devices_by_type": dev_types, "prefix_sizes": sorted(({"pfx": k, "n": v} for k, v in prefix.items()), key=lambda x: x["pfx"]),
-                "alerts": alerts, "change": change, "utilization": util[:8], "recent": recent, "offline": offline,
-                "scoped": bool(oid)}
+                "alerts": alerts, "change": change, "trend": trend, "utilization": util[:8], "recent": recent,
+                "offline": offline, "scoped": bool(oid)}
 
     def section_save(self, b, user):
         name = str(b.get("name") or "").strip()[:80]

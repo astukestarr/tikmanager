@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.24 - 2026-11-05
+
+Added a **utilization trend** to the IPAM Dashboard: a 30-day area chart of overall IP utilization, with the change
+over the period. The dashboard quietly records one snapshot per day (per estate and per client), so the line builds
+itself over time - a fresh install shows "collecting history" until it has a few days. New table `ipam_stats_daily`
+(created automatically; nothing to migrate).
+
 ## 3.7.0-beta.23 - 2026-11-05
 
 A completely rebuilt **IPAM Dashboard** - an operations overview for running many clients' networks at a glance:
