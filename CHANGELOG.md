@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.0-beta.3 - 2026-11-06
+
+- **IPAM: DHCP pool utilisation.** A subnet can be nearly empty while its **DHCP pool** is full - that's when a client
+  "can't get one device to connect". IPAM now shows, separately from overall subnet usage, how full each DHCP pool is:
+  a **DHCP pool X / Y · Z%** bar on the subnet detail and a compact bar in the subnet list, turning amber then red as it
+  fills (with a "near full" / "FULL" note). Capacity follows the MikroTik **next-pool chain**, so an overflow pool is
+  counted even when nothing else references it, and it only ever counts pools a **DHCP server actually uses** - so
+  orphan pools in `/ip/pool` are ignored. "Used" is bound dynamic leases plus in-pool static reservations.
+
 ## 4.1.0-beta.2 - 2026-11-06
 
 - **Manual: a much deeper Administration chapter.** The brief "Admin settings" page is now a full **Administration**

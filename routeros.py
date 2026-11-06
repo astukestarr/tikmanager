@@ -807,6 +807,9 @@ class RouterOS:
             "arp": pick(self.optional(lambda: self.get("/ip/arp"), []), ("address", "mac-address", "interface", "complete", "dynamic", "status")),
             "hosts": pick(self.optional(lambda: self.get("/interface/bridge/host"), []), ("mac-address", "on-interface", "bridge", "interface", "local", "vid")),
             "leases": self.dhcp_leases(),
+            # DHCP pools (with their next-pool chain) and servers, so IPAM can show how full each DHCP pool is
+            "pools": pick(self.optional(lambda: self.get("/ip/pool"), []), ("name", "ranges", "next-pool")),
+            "dhcp_servers": pick(self.optional(lambda: self.get("/ip/dhcp-server"), []), ("name", "interface", "address-pool", "disabled")),
             "addresses": pick(self.optional(lambda: self.get("/ip/address"), []), ("address", "network", "interface", "disabled", "comment")),
             "interfaces": pick(self.optional(lambda: self.get("/interface"), []), ("name", "type", "comment", "running", "disabled")),
             "vlans": pick(self.optional(lambda: self.get("/interface/vlan"), []), ("name", "vlan-id", "interface")),
@@ -2384,7 +2387,17 @@ class SimRouter:
         if self.id % 2:
             routes.append({"dst-address": f"172.16.{self.id}.0/24", "gateway": "10.250.0.1", "active": "true", "static": "true",
                            "comment": "Branch office over site-to-site VPN"})
+        # simulated DHCP: a server using pool-lan; some routers chain a next-pool (overflow); plus an orphan pool no
+        # server uses (to show it's ignored). Pool starts at .30 where the leases above live, so usage is realistic.
+        chained = self.id % 4 == 0
+        psize = 12 + (self.id * 3) % 18   # 12..29 addresses -> some routers run their pool near full
+        pools = [{"name": "pool-lan", "ranges": f"{lan}.30-{lan}.{30 + psize - 1}", "next-pool": "pool-overflow" if chained else "none"},
+                 {"name": "pool-orphan", "ranges": "10.99.0.10-10.99.0.250", "next-pool": "none"}]
+        if chained:
+            pools.insert(1, {"name": "pool-overflow", "ranges": f"{lan}.{30 + psize}-{lan}.254", "next-pool": "none"})
+        dhcp_servers = [{"name": "dhcp-lan", "interface": "bridge", "address-pool": "pool-lan", "disabled": "false"}]
         return {"routes": routes, "neighbors": neighbors, "arp": arp, "hosts": hosts, "leases": leases,
+                "pools": pools, "dhcp_servers": dhcp_servers,
                 "addresses": [{"address": n["address"], "network": n["network"].split("/")[0], "interface": n["interface"]} for n in nets],
                 "interfaces": [{"name": "ether1", "type": "ether", "comment": "WAN"}, {"name": "bridge", "type": "bridge", "comment": "LAN"},
                                {"name": "vlan20-guest", "type": "vlan"}, {"name": "vlan30-voip", "type": "vlan"}],

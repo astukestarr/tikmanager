@@ -149,6 +149,8 @@ class Ipam:
             out["counts"] = by
             out["used_total"] = used
             out["usage"] = round(100 * used / usable) if usable else 0
+        if s.get("dhcp_size"):   # how full the DHCP pool is (separate from overall subnet usage)
+            out["dhcp_usage"] = round(100 * (s.get("dhcp_used") or 0) / s["dhcp_size"])
         return out
 
     # --- sections -----------------------------------------------------------------------------------------------
@@ -847,6 +849,7 @@ class Ipam:
                     continue
                 d, sub_by_net = per_device[did]
                 self._sync_addresses(d, topo, sub_by_net, now, summary)
+                self._sync_dhcp(d, topo, sub_by_net, now)
             # 4) overlay the client's UniFi / UISP devices as addresses (and infer a /24 for a client with no MikroTik)
             self._sync_unifi(org_id, now, summary)
             # 5) auto-populate the infrastructure inventory (managed MikroTiks + UniFi APs/switches/gateways) and locations
@@ -1021,6 +1024,81 @@ class Ipam:
     @staticmethod
     def _src_of(status):
         return {"gateway": "address", "dhcp": "lease", "used": "arp"}.get(status, "arp")
+
+    # --- DHCP pool utilisation: how full each DHCP pool is (not the whole subnet) --------------------------------
+    @staticmethod
+    def _parse_ranges(s):
+        """A MikroTik pool 'ranges' string -> [(start_int, end_int)]. Handles 'a-b', single IPs and comma/semicolon lists."""
+        out = []
+        for part in str(s or "").replace(";", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            a, _, b = part.partition("-")
+            b = b or a
+            try:
+                lo, hi = int(ipaddress.ip_address(a.strip())), int(ipaddress.ip_address(b.strip()))
+            except ValueError:
+                continue
+            if lo <= hi:
+                out.append((lo, hi))
+        return out
+
+    def _dhcp_pool_stats(self, topo):
+        """Per enabled DHCP server: the effective pool capacity and how many addresses are in use. The capacity follows
+        the pool's next-pool chain (so overflow pools count) and only ever starts from a pool a DHCP server actually uses,
+        so orphan pools in /ip/pool are ignored. 'Used' is bound dynamic leases plus in-pool static reservations."""
+        pools = {p.get("name"): p for p in topo.get("pools") or [] if p.get("name")}
+
+        def chain(name, seen):
+            if not name or name in seen or name not in pools:
+                return [], []
+            seen.add(name)
+            p = pools[name]
+            rngs, names = self._parse_ranges(p.get("ranges")), [name]
+            nxt = (p.get("next-pool") or "").strip()
+            if nxt and nxt.lower() not in ("none", "static-only", ""):
+                r2, n2 = chain(nxt, seen)
+                rngs += r2
+                names += n2
+            return rngs, names
+        used_ips = set()
+        for l in topo.get("leases") or []:
+            if l.get("disabled"):
+                continue
+            if str(l.get("status") or "").lower() == "bound" or not l.get("dynamic"):   # active lease or a static reservation
+                try:
+                    used_ips.add(int(ipaddress.ip_address((l.get("address") or "").split("/")[0])))
+                except ValueError:
+                    pass
+        out = {}
+        for srv in topo.get("dhcp_servers") or []:
+            if str(srv.get("disabled")).lower() == "true":
+                continue
+            ranges, names = chain((srv.get("address-pool") or "").strip(), set())
+            if not ranges:
+                continue
+            size = sum(hi - lo + 1 for lo, hi in ranges)
+            used = sum(1 for x in used_ips if any(lo <= x <= hi for lo, hi in ranges))
+            out[srv.get("name") or ""] = {"ranges": ranges, "size": size, "used": min(used, size), "pools": names}
+        return out
+
+    def _sync_dhcp(self, d, topo, sub_by_net, now):
+        """Store each of this router's subnets' DHCP pool capacity / usage (cleared first, so a removed server/pool clears)."""
+        self.db.run("UPDATE ipam_subnets SET dhcp_size=NULL, dhcp_used=NULL, dhcp_pools=NULL WHERE device_id=?", (d["id"],))
+        per_subnet = {}   # subnet_id -> {size, used, pools}  (a subnet may host more than one DHCP server)
+        for srv in self._dhcp_pool_stats(topo).values():
+            first = srv["ranges"][0][0]
+            match = next(((sid, no) for (sid, no) in sub_by_net.values() if ipaddress.ip_address(first) in no), None)
+            if not match:
+                continue
+            agg = per_subnet.setdefault(match[0], {"size": 0, "used": 0, "pools": []})
+            agg["size"] += srv["size"]
+            agg["used"] += srv["used"]
+            agg["pools"] += srv["pools"]
+        for sid, agg in per_subnet.items():
+            self.db.run("UPDATE ipam_subnets SET dhcp_size=?, dhcp_used=?, dhcp_pools=?, updated_at=? WHERE id=?",
+                        (agg["size"], agg["used"], ",".join(dict.fromkeys(agg["pools"])), now, sid))
 
     # --- ingest from a network collector (collectors.py: an on-site agent scans the LAN and reports) --------------
     def ingest(self, org_id, payload, user="collector"):

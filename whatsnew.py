@@ -260,6 +260,11 @@ SLIDES_4_1 = [
              "TikManager page by page and ships with the app. The Knowledge Base is your team's own how-to articles - a "
              "client quirk, a workaround, a step list - that administrators add, categorise, pin and edit right in the app, "
              "no code needed. Both have a live search."},
+    {"id": "dhcp-pools", "title": "IPAM: see how full each DHCP pool is", "img": None, "view": None, "who": "tech",
+     "text": "A subnet can be nearly empty while its DHCP pool is full - that's when a client can't get a device online. "
+             "IPAM now shows each DHCP pool's utilisation separately: a DHCP pool X / Y bar on the subnet, amber then red "
+             "as it fills. Capacity follows the MikroTik next-pool chain (overflow pools count) and ignores orphan pools "
+             "nothing uses."},
 ]
 SLIDES = SLIDES_4_1   # 4.1's own slides (4.0.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}

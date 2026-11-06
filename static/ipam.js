@@ -103,6 +103,24 @@ function usageBar(s) {
   const lbl = el("span", "usebar-txt", (s.usage || 0) + "%"); wrap.appendChild(lbl);
   return wrap;
 }
+// A subnet's DHCP pool fill (how full the pool is - separate from overall subnet usage). null when there's no pool.
+function dhcpPoolBar(s, compact) {
+  if (!s.dhcp_size) return null;
+  const pct = s.dhcp_usage || 0;
+  const bar = el("span", "usebar"); bar.style.width = compact ? "90px" : "260px"; bar.style.maxWidth = compact ? "" : "40vw";
+  const fill = el("span", "usebar-fill"); fill.style.width = Math.min(100, pct) + "%";
+  if (pct >= 90) fill.classList.add("hot"); else if (pct >= 70) fill.classList.add("warm");
+  bar.appendChild(fill);
+  bar.appendChild(el("span", "usebar-txt", pct + "%"));
+  if (s.dhcp_pools) bar.title = `DHCP pool chain: ${s.dhcp_pools}`;
+  if (compact) return bar;
+  const row = el("div"); row.style.cssText = "display:flex;align-items:center;gap:10px;margin:4px 0 12px";
+  const lbl = el("span"); lbl.style.cssText = "font-size:13px;white-space:nowrap";
+  lbl.appendChild(el("b", null, "DHCP pool "));
+  lbl.appendChild(document.createTextNode(`${s.dhcp_used} / ${s.dhcp_size}` + (pct >= 100 ? " · FULL" : pct >= 90 ? " · near full" : "")));
+  row.appendChild(lbl); row.appendChild(bar);
+  return row;
+}
 function showSubnets() {
   const m = $("main"); m.textContent = "";
   const head = el("div", "main-head");
@@ -131,7 +149,10 @@ function showSubnets() {
     tr.appendChild(el("td", null, s.name || ""));
     tr.appendChild(el("td", null, s.org || ""));
     tr.appendChild(el("td", "muted", s.interface || ""));
-    const cu = el("td"); cu.appendChild(usageBar(s)); tr.appendChild(cu);
+    const cu = el("td"); cu.appendChild(usageBar(s));
+    const pb = dhcpPoolBar(s, true);
+    if (pb) { const dr = el("div"); dr.style.cssText = "display:flex;align-items:center;gap:4px;margin-top:3px"; const t = el("span", "muted"); t.style.fontSize = "10px"; t.textContent = "DHCP"; dr.appendChild(t); dr.appendChild(pb); cu.appendChild(dr); }
+    tr.appendChild(cu);
     const cs = el("td"); cs.appendChild(el("span", "pill " + (s.source === "discovered" ? "disc" : "man"), s.source)); tr.appendChild(cs);
     if (!readonly) { const last = el("td"); const del = el("button", "btn tiny danger", "Delete"); del.dataset.delsubnet = s.id; last.appendChild(del); tr.appendChild(last); }
     tb.appendChild(tr);
@@ -169,6 +190,7 @@ async function showSubnet(id) {
   meta.appendChild(chip("Used", (d.used_total || 0) + " (" + (d.usage || 0) + "%)"));
   meta.appendChild(chip("Source", d.source));
   m.appendChild(meta);
+  const dhcpRow = dhcpPoolBar(d, false); if (dhcpRow) m.appendChild(dhcpRow);
 
   const byIp = {}; (d.addresses || []).forEach((a) => (byIp[a.ip] = a));
   m.appendChild(renderMap(d, byIp));

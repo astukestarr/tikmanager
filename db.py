@@ -372,6 +372,7 @@ CREATE TABLE IF NOT EXISTS ipam_subnets (            -- the core CIDR records (n
   interface TEXT, name TEXT, gateway TEXT, is_pool INTEGER NOT NULL DEFAULT 0,
   source TEXT NOT NULL DEFAULT 'manual',               -- 'manual' | 'discovered'
   mark_full INTEGER NOT NULL DEFAULT 0, threshold INTEGER, locked INTEGER NOT NULL DEFAULT 0,
+  dhcp_size INTEGER, dhcp_used INTEGER, dhcp_pools TEXT,   -- DHCP pool capacity / in-use (MikroTik pool chain, or UniFi range)
   notes TEXT, custom TEXT NOT NULL DEFAULT '{}', first_seen REAL, last_seen REAL,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL
 );
@@ -447,6 +448,11 @@ class DB:
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS orgs_cw ON orgs(cw_id)")
         if "ipam_devices" in tables and "source_auto" not in {r[1] for r in c.execute("PRAGMA table_info(ipam_devices)")}:
             c.execute("ALTER TABLE ipam_devices ADD COLUMN source_auto INTEGER NOT NULL DEFAULT 0")
+        if "ipam_subnets" in tables:
+            scols = {r[1] for r in c.execute("PRAGMA table_info(ipam_subnets)")}
+            for col, ddl in (("dhcp_size", "INTEGER"), ("dhcp_used", "INTEGER"), ("dhcp_pools", "TEXT")):
+                if col not in scols:
+                    c.execute(f"ALTER TABLE ipam_subnets ADD COLUMN {col} {ddl}")
         if "ipam_devices" in tables:
             idcols = {r[1] for r in c.execute("PRAGMA table_info(ipam_devices)")}
             for col, ddl in (("rack_id", "INTEGER"), ("rack_u", "INTEGER"), ("rack_height", "INTEGER NOT NULL DEFAULT 1")):
