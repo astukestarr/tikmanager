@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.0-beta.4 - 2026-11-06
+
+- **DHCP pool utilisation: UniFi networks + a dashboard alert.** UniFi networks now get the same DHCP pool bar as
+  MikroTik (from the network's DHCP start/stop range; usage = connected clients/devices in that range). And the IPAM
+  **Dashboard** now flags **DHCP pools at 85%+** - an alert tile and a "DHCP pools filling up" list (with each pool's
+  fill bar, clickable to the subnet) - and counts them in the **Attention** total, so you spot a pool about to run out
+  of addresses before a client calls.
+
 ## 4.1.0-beta.3 - 2026-11-06
 
 - **IPAM: DHCP pool utilisation.** A subnet can be nearly empty while its **DHCP pool** is full - that's when a client

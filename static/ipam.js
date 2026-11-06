@@ -653,7 +653,7 @@ async function showDashboard() {
 
   // ---- Hero KPI row ----
   const hero = el("div", "ipam-hero");
-  const alertN = al.over_threshold_n + al.full + al.offline + al.stale;
+  const alertN = al.over_threshold_n + al.full + al.offline + al.stale + (al.dhcp_pools_n || 0);
   if (!r.scoped) hero.appendChild(heroTile(fmtNum(c.clients), "Clients", fmtNum(c.sections) + " sections", "", "subnets"));
   hero.appendChild(heroTile(fmtNum(c.subnets), "Subnets", fmtNum(cap.v6_subnets) + " IPv6", "", "subnets"));
   hero.appendChild(heroTile(cap.usage + "%", "IP utilization", fmtBig(cap.used) + " of " + fmtBig(cap.usable), cap.usage >= 85 ? "hot" : cap.usage >= 70 ? "warm" : "ok"));
@@ -724,9 +724,22 @@ async function showDashboard() {
   const aTile = (n, lab, cls) => { const d = el("div", "alert-tile " + (n ? cls : "ok")); d.appendChild(el("div", "alert-n", fmtNum(n))); d.appendChild(el("div", "alert-l", lab)); return d; };
   aRow.appendChild(aTile(al.over_threshold_n, "Over threshold", "warn"));
   aRow.appendChild(aTile(al.full, "Full", "hot"));
+  if ((al.dhcp_pools_n || 0) || al.dhcp_full) aRow.appendChild(aTile(al.dhcp_pools_n || 0, "DHCP pools ≥85%", "hot"));
   aRow.appendChild(aTile(al.offline, "Offline hosts", "warn"));
   aRow.appendChild(aTile(al.stale, "Stale subnets", "warn"));
   aBody.appendChild(aRow);
+  // DHCP pools filling up (separate from subnet usage) - which pool to expand before clients can't get an address
+  if ((al.dhcp_pools || []).length) {
+    const sh = el("div"); sh.style.cssText = "font-weight:600;font-size:13px;margin:12px 0 4px"; sh.textContent = "DHCP pools filling up"; aBody.appendChild(sh);
+    const dt = el("table", "ipam-table dash-table"); const dtb = el("tbody");
+    al.dhcp_pools.forEach((s) => {
+      const row = el("tr");
+      const c0 = el("td"); c0.appendChild(cidrLink(s.id, s.cidr)); if (!r.scoped && s.org) c0.appendChild(el("span", "muted small", " " + s.org)); row.appendChild(c0);
+      const bc = el("td", "nowrap"); const bar = el("div", "dash-bar mini"); const f = el("div", "dash-bar-fill " + utilTone(s.usage)); f.style.width = Math.min(100, s.usage) + "%"; bar.appendChild(f); bc.appendChild(bar); row.appendChild(bc);
+      row.appendChild(el("td", "mono small right", `${s.used}/${s.size} · ${s.usage}%`)); dtb.appendChild(row);
+    });
+    dt.appendChild(dtb); aBody.appendChild(dt);
+  }
   if (al.over_threshold.length) {
     const t = el("table", "ipam-table dash-table"); const tb = el("tbody");
     al.over_threshold.forEach((s) => {

@@ -2390,7 +2390,7 @@ class SimRouter:
         # simulated DHCP: a server using pool-lan; some routers chain a next-pool (overflow); plus an orphan pool no
         # server uses (to show it's ignored). Pool starts at .30 where the leases above live, so usage is realistic.
         chained = self.id % 4 == 0
-        psize = 12 + (self.id * 3) % 18   # 12..29 addresses -> some routers run their pool near full
+        psize = 10 + (self.id * 3) % 10   # 10..19 addresses -> some routers run their pool near full / full
         pools = [{"name": "pool-lan", "ranges": f"{lan}.30-{lan}.{30 + psize - 1}", "next-pool": "pool-overflow" if chained else "none"},
                  {"name": "pool-orphan", "ranges": "10.99.0.10-10.99.0.250", "next-pool": "none"}]
         if chained:

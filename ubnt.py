@@ -574,6 +574,29 @@ class Ubnt:
                         pass
         return None
 
+    @staticmethod
+    def _dhcp_range(n):
+        """Best-effort DHCP pool start/stop from a UniFi network object (field names vary by controller / API version).
+        Returns (start, stop) IPv4 strings, or (None, None) when DHCP is off or no range is exposed."""
+        if not isinstance(n, dict):
+            return None, None
+        d = n.get("dhcpSettings") or n.get("dhcp") or {}
+        if not isinstance(d, dict):
+            d = {}
+        def pick(*keys):
+            for k in keys:
+                for src in (d, n):
+                    v = src.get(k)
+                    if isinstance(v, str) and re.match(r"^\d{1,3}(\.\d{1,3}){3}$", v.strip()):
+                        return v.strip()
+            return None
+        start = pick("dhcpRangeStart", "rangeStart", "start", "dhcpd_start", "dhcp_start", "startAddress")
+        stop = pick("dhcpRangeStop", "rangeStop", "stop", "dhcpd_stop", "dhcp_stop", "stopAddress", "endAddress")
+        mode = str(d.get("mode") or n.get("dhcpMode") or n.get("dhcpdMode") or "").lower()
+        if start and stop and mode not in ("none", "disabled", "relay"):
+            return start, stop
+        return None, None
+
     def integration_data(self, org_id):
         """Configured networks and connected clients for a client's UniFi sites, from the Network integration API (via the
         cloud connector - the same proxy used for device-to-site mapping). Works for ANY site, gateway or not. Returns
@@ -640,8 +663,9 @@ class Ubnt:
                     for n in nets:
                         cidr = self._first_cidr(n)
                         if cidr:
+                            ds, dp = self._dhcp_range(n)
                             out["networks"].append({"site": match["name"], "name": n.get("name") or "",
-                                                    "vlan": n.get("vlanId") or n.get("vlan"), "cidr": cidr})
+                                                    "vlan": n.get("vlanId") or n.get("vlan"), "cidr": cidr, "dhcp_start": ds, "dhcp_stop": dp})
                     try:
                         clients = (cl._call(f"{base}/{sid}/clients", {"limit": "500"}, timeout=25) or {}).get("data") or []
                     except NetError as e:

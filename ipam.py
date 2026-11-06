@@ -220,13 +220,13 @@ class Ipam:
         # ---- single pass over every subnet (with its used count) drives capacity, health, per-client, sizes, alerts
         main = self.db.q(
             "SELECT s.id, s.cidr, s.name, s.org_id, s.source, s.threshold, s.mark_full, s.family, s.first_seen, "
-            "COALESCE(s.last_seen, s.first_seen, s.created_at) AS seen, "
+            "s.dhcp_size, s.dhcp_used, s.dhcp_pools, COALESCE(s.last_seen, s.first_seen, s.created_at) AS seen, "
             "(SELECT COUNT(*) FROM ipam_addresses a WHERE a.subnet_id=s.id) AS used "
             "FROM ipam_subnets s" + (" WHERE s.org_id=?" if oid else ""), sa)
         total_used = total_usable = v6 = new_subnets = full_n = 0
         bands = {"free": 0, "low": 0, "moderate": 0, "high": 0, "critical": 0, "full": 0}
         per_client, prefix, srcmix = {}, {}, {"discovered": 0, "manual": 0}
-        util, over_threshold = [], []
+        util, over_threshold, dhcp_pools = [], [], []
         for r in main:
             srcmix[r["source"]] = srcmix.get(r["source"], 0) + 1
             if r["first_seen"] and r["first_seen"] >= week_ago:
@@ -263,6 +263,11 @@ class Ipam:
             util.append(row)
             if not full and pct >= thr:
                 over_threshold.append({**row, "threshold": thr})
+            if r["dhcp_size"]:   # a DHCP pool filling up - tracked separately from overall subnet usage
+                du, dpct = r["dhcp_used"] or 0, min(100, round(100 * (r["dhcp_used"] or 0) / r["dhcp_size"]))
+                if dpct >= 85:
+                    dhcp_pools.append({"id": r["id"], "cidr": r["cidr"], "name": r["name"], "org": org_names.get(r["org_id"]),
+                                       "used": du, "size": r["dhcp_size"], "usage": dpct, "pools": r["dhcp_pools"]})
             pc = per_client.setdefault(r["org_id"], {"org_id": r["org_id"], "name": org_names.get(r["org_id"]) or "Unassigned",
                                                      "subnets": 0, "used": 0, "usable": 0, "devices": 0})
             pc["subnets"] += 1; pc["used"] += used; pc["usable"] += usable
@@ -321,8 +326,11 @@ class Ipam:
         trend = [{"day": t["day"], "used": t["used"], "usage": round(100 * t["used"] / t["usable"]) if t["usable"] else 0}
                  for t in self.db.q("SELECT day, used, usable FROM ipam_stats_daily WHERE org_id=? ORDER BY day DESC LIMIT 30",
                                     (oid or 0,))][::-1]
+        dhcp_pools.sort(key=lambda x: x["usage"], reverse=True)
         alerts = {"over_threshold": over_threshold[:8], "over_threshold_n": len(over_threshold),
-                  "full": full_n, "offline": offline_n, "stale": stale_n}
+                  "full": full_n, "offline": offline_n, "stale": stale_n,
+                  "dhcp_pools": dhcp_pools[:8], "dhcp_pools_n": len(dhcp_pools),
+                  "dhcp_full": sum(1 for p in dhcp_pools if p["usage"] >= 100)}
         change = {"new_subnets": new_subnets, "new_addresses": new_addr}
         return {"counts": counts, "capacity": capacity, "health": bands, "status_mix": status_mix,
                 "source_mix": {"subnets": srcmix, "addresses": addr_src}, "clients": clients[:12], "client_total": len(clients),
@@ -1329,6 +1337,7 @@ class Ipam:
             return res
 
         # 1) real configured networks -> subnets; a real network replaces any UniFi-guessed /24 it now covers
+        unifi_pools = []   # (subnet_id, start_int, stop_int) for networks whose DHCP range we know
         for net in data.get("networks") or []:
             try:
                 netobj = ipaddress.ip_network(net["cidr"], strict=False)
@@ -1341,6 +1350,14 @@ class Ipam:
                 name = f"{name} (VLAN {net['vlan']})"
             sid = self._upsert_subnet(org_id, netobj, {"id": None}, None, None, name, now, summary, {})
             summary["unifi_networks"] = summary.get("unifi_networks", 0) + 1
+            ds, dp = net.get("dhcp_start"), net.get("dhcp_stop")   # the UniFi DHCP pool range, if the API gave one
+            if ds and dp:
+                try:
+                    unifi_pools.append((sid, int(ipaddress.ip_address(ds)), int(ipaddress.ip_address(dp))))
+                except ValueError:
+                    pass
+            else:   # DHCP off / not exposed - clear any stale UniFi pool figure (never touch a MikroTik pool)
+                self.db.run("UPDATE ipam_subnets SET dhcp_size=NULL, dhcp_used=NULL, dhcp_pools=NULL WHERE id=? AND dhcp_pools='UniFi DHCP'", (sid,))
             if net.get("vlan"):   # auto-populate the VLAN and link the subnet
                 vid = self._vlan_for(org_id, net.get("vlan"), net.get("name"), now)
                 if vid:
@@ -1363,6 +1380,22 @@ class Ipam:
                     ips[ip] = {"mac": mac, "name": d.get("name") or d.get("model"), "site": d.get("site")}
         except Exception:
             pass
+
+        # UniFi DHCP pool utilisation: how many of the DHCP range's addresses are taken by connected clients/devices
+        if unifi_pools:
+            ip_ints = set()
+            for ip in ips:
+                try:
+                    ip_ints.add(int(ipaddress.ip_address(ip)))
+                except ValueError:
+                    pass
+            for sid, lo, hi in unifi_pools:
+                if lo > hi:
+                    lo, hi = hi, lo
+                size = hi - lo + 1
+                used = sum(1 for x in ip_ints if lo <= x <= hi)
+                self.db.run("UPDATE ipam_subnets SET dhcp_size=?, dhcp_used=?, dhcp_pools='UniFi DHCP', updated_at=? WHERE id=?",
+                            (size, min(used, size), now, sid))
 
         current = subs()
         for ip, info in ips.items():
