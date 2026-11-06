@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.29 - 2026-11-05
+
+**Collectors can now scan over SNMP (v2c) - device names, VLANs and ARP tables.** Turn it on per collector
+(Admin > Collectors > Edit) and give it one or more read-only community strings. The agent then queries each SNMP-capable
+device it finds and reports: the device's name and model (typed into IPAM - switch / router / firewall / AP), its **VLANs**
+(so you get VLANs off any SNMP switch, not just MikroTik), and its ARP table (more IP-to-MAC coverage). Community strings
+are sent only to the agent over HTTPS and never shown back on the admin page. SNMP is built into the agent with no extra
+dependencies. Device and VLAN records never overwrite your manual names.
+
 ## 3.7.0-beta.28 - 2026-11-05
 
 **Network collectors (Admin > Collectors) - see clients that have no MikroTik or UniFi.** A lightweight PowerShell

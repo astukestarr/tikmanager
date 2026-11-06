@@ -245,7 +245,11 @@ SLIDES_3_7 = [
     {"id": "collectors", "title": "Network collectors for unmanaged clients", "img": None, "view": "admin", "who": "tech",
      "text": "Install a lightweight agent on a Windows box at a client with no MikroTik or UniFi - push it from your RMM or "
              "paste a one-line command. It scans the LAN (ping, ARP, reverse-DNS) and reports live hosts into IPAM under that "
-             "client. Create one per client on Admin > Collectors. SNMP device + VLAN discovery is next."},
+             "client. Create one per client on Admin > Collectors."},
+    {"id": "collectors-snmp", "title": "Collectors: SNMP device & VLAN discovery", "img": None, "view": "admin", "who": "tech",
+     "text": "Turn on SNMP (v2c) for a collector and give it a read-only community string. It then reads device names and "
+             "models (typed as switch / router / firewall / AP), VLANs off any SNMP switch, and ARP tables - all folded into "
+             "IPAM. Community strings are sent only to the agent, never shown on the admin page."},
 ]
 SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}

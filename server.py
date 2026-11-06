@@ -3602,7 +3602,8 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require(tech=True, admin=True)
             b = self.body()
             row = collectors.update(int(m.group(1)), name=b.get("name"), enabled=b.get("enabled"),
-                                    ranges=b.get("ranges"), interval_min=b.get("interval_min"))
+                                    ranges=b.get("ranges"), interval_min=b.get("interval_min"),
+                                    snmp_enabled=b.get("snmp_enabled"), communities=b.get("communities"))
             if not row:
                 raise HttpError(404, "No such collector.")
             db.audit(s["email"], "collector changed", row["name"], self.client_ip())

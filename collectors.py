@@ -44,8 +44,10 @@ class Collectors:
             cfg = json.loads(r.get("config") or "{}")
         except (ValueError, TypeError):
             cfg = {}
+        snmp = cfg.get("snmp") or {}
         return {"id": r["id"], "org_id": r.get("org_id"), "org": r.get("org"), "name": r["name"], "prefix": r["prefix"],
                 "enabled": bool(r["enabled"]), "ranges": cfg.get("ranges") or [], "interval_min": cfg.get("interval_min") or DEFAULT_INTERVAL_MIN,
+                "snmp_enabled": bool(snmp.get("enabled")), "snmp_communities": len(snmp.get("communities") or []),   # count only - never the strings
                 "agent_version": r.get("agent_version"), "last_seen": r.get("last_seen"), "last_ip": r.get("last_ip"),
                 "created_by": r.get("created_by"), "created_at": r.get("created_at")}
 
@@ -60,12 +62,12 @@ class Collectors:
         name = (name or "").strip()[:100] or "Collector"
         token = "tkc_" + secrets.token_urlsafe(30)   # ~40 url-safe chars of entropy
         h, prefix = _hash(token), token[:12] + "…"
-        cfg = json.dumps({"ranges": [], "interval_min": DEFAULT_INTERVAL_MIN})
+        cfg = json.dumps({"ranges": [], "interval_min": DEFAULT_INTERVAL_MIN, "snmp": {"enabled": False, "communities": []}})
         cid = self.db.run("""INSERT INTO collectors (org_id, name, prefix, token_hash, config, enabled, created_by, created_at)
                              VALUES (?,?,?,?,?,1,?,?)""", (int(org_id), name, prefix, h, cfg, user, time.time()))
         return self.get(cid), token
 
-    def update(self, cid, name=None, enabled=None, ranges=None, interval_min=None):
+    def update(self, cid, name=None, enabled=None, ranges=None, interval_min=None, snmp_enabled=None, communities=None):
         row = self.db.one("SELECT * FROM collectors WHERE id=?", (int(cid),))
         if not row:
             return None
@@ -82,6 +84,13 @@ class Collectors:
                 cfg["interval_min"] = max(5, min(1440, int(interval_min)))
             except (ValueError, TypeError):
                 pass
+        if snmp_enabled is not None or communities is not None:
+            snmp = cfg.get("snmp") or {}
+            if snmp_enabled is not None:
+                snmp["enabled"] = bool(snmp_enabled)
+            if communities is not None:
+                snmp["communities"] = [str(x).strip() for x in communities if str(x).strip()][:10]
+            cfg["snmp"] = snmp
         self.db.run("UPDATE collectors SET name=?, enabled=?, config=? WHERE id=?", (name, en, json.dumps(cfg), int(cid)))
         return self.get(cid)
 
@@ -105,9 +114,12 @@ class Collectors:
         return row
 
     def config_for(self, row):
-        """What the agent pulls: the scan ranges (empty = sweep the box's own subnets) and the interval."""
+        """What the agent pulls (over HTTPS, bearer-authed): scan ranges, interval, and SNMP settings incl. the
+        community strings (sent only to the agent, never shown on the admin page)."""
         try:
             cfg = json.loads(row["config"] or "{}")
         except (ValueError, TypeError):
             cfg = {}
-        return {"ranges": cfg.get("ranges") or [], "interval_min": cfg.get("interval_min") or DEFAULT_INTERVAL_MIN}
+        snmp = cfg.get("snmp") or {}
+        return {"ranges": cfg.get("ranges") or [], "interval_min": cfg.get("interval_min") or DEFAULT_INTERVAL_MIN,
+                "snmp": {"enabled": bool(snmp.get("enabled")), "communities": snmp.get("communities") or []}}

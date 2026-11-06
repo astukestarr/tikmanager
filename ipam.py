@@ -1077,7 +1077,54 @@ class Ipam:
                 summary["addresses_updated"] += 1
             else:   # manual / router / unifi own this row - never touch its fields; only fill a blank mac + note presence
                 self.db.run("UPDATE ipam_addresses SET mac=COALESCE(mac,?), last_seen=? WHERE id=?", (mac, now, row["id"]))
+
+        # VLANs the agent read over SNMP (dot1q) - fold into the VLAN inventory (never clobbers a name already set)
+        for v in payload.get("vlans") or []:
+            try:
+                num = int(v.get("number"))
+            except (TypeError, ValueError):
+                continue
+            if num > 1:
+                self._vlan_for(org_id, num, (v.get("name") or "").strip() or None, now)
+                summary["vlans"] = summary.get("vlans", 0) + 1
+        # SNMP-identified devices -> IPAM's infrastructure inventory (never clobbers a manual rename)
+        for dv in payload.get("devices") or []:
+            self._ingest_device(org_id, dv, now, summary)
         return summary
+
+    def _ingest_device(self, org_id, dv, now, summary):
+        """Upsert an SNMP-discovered endpoint into ipam_devices, matched by (org, management_ip). source_auto=1."""
+        ip = (dv.get("ip") or "").split("/")[0].strip()
+        if not ip:
+            return
+        name = (dv.get("name") or "").strip() or ip
+        descr = (dv.get("descr") or "").strip() or None
+        tid = self._type_id(self._snmp_type(descr, dv.get("type")))
+        row = self.db.one("SELECT id FROM ipam_devices WHERE COALESCE(org_id,0)=? AND management_ip=?", (org_id or 0, ip))
+        if row:
+            self.db.run("UPDATE ipam_devices SET type_id=COALESCE(type_id,?), description=COALESCE(description,?), updated_at=? WHERE id=?",
+                        (tid, descr, now, row["id"]))
+            did = row["id"]
+        else:
+            did = self.db.run("INSERT INTO ipam_devices (name, type_id, org_id, management_ip, description, source_auto, created_by, created_at, updated_at) "
+                              "VALUES (?,?,?,?,?,1,'collector',?,?)", (name, tid, org_id, ip, descr, now, now))
+            summary["devices_added"] = summary.get("devices_added", 0) + 1
+        self.db.run("UPDATE ipam_addresses SET ipam_device_id=? WHERE ipam_device_id IS NULL AND ip=? AND subnet_id IN "
+                    "(SELECT id FROM ipam_subnets WHERE COALESCE(org_id,0)=?)", (did, ip, org_id or 0))
+
+    @staticmethod
+    def _snmp_type(descr, hint=None):
+        """Best-guess IPAM device type from an SNMP sysDescr / hint. Returns a seeded ipam_device_types name."""
+        t = " " + (str(hint or "") + " " + str(descr or "")).lower() + " "
+        if any(w in t for w in ("firewall", "fortigate", "fortios", "palo alto", "sonicwall", "pfsense")):
+            return "Firewall"
+        if "access point" in t or " ap " in t or "wireless" in t or "wi-fi" in t or "aironet" in t:
+            return "Access point"
+        if "switch" in t or "catalyst" in t or "procurve" in t or "aruba" in t:
+            return "Switch"
+        if any(w in t for w in ("router", "gateway", "mikrotik", "routeros", "edgerouter")):
+            return "Router"
+        return "Server"   # a sane default for anything else that answers SNMP
 
     def _ingest_subnet(self, org_id, netobj, now, summary, out):
         """Create or refresh one collector-reported subnet (no managed device behind it). Records it in `out`."""
