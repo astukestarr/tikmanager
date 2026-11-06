@@ -241,7 +241,7 @@ SLIDES_3_7 = [
     {"id": "ipam-sync-all", "title": "IPAM: sync every client at once", "img": None, "view": None, "who": "tech",
      "text": "IPAM's \"Sync from routers\" now has an All clients option that discovers your whole estate in one go, in the "
              "background with a progress count. VLAN discovery is more complete too - every VLAN a router reports now shows "
-             "on the VLANs tab."},
+             "on the VLANs tab, including layer-2 VLANs defined purely by bridge VLAN filtering (no IP of their own)."},
 ]
 SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}

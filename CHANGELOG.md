@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.27 - 2026-11-05
+
+**IPAM now discovers layer-2 VLANs too.** A sync reads each router/switch's bridge VLAN table
+(`/interface/bridge/vlan`), so VLANs defined purely by bridge VLAN filtering - access/trunk VLANs with no L3
+VLAN interface and no IP of their own - now appear on the VLANs tab alongside the routed ones. VLAN-id lists
+and small ranges ("30,40" / "100-104") are expanded; the default VLAN 1 and absurd trunk ranges are skipped;
+a VLAN already found as an `/interface/vlan` keeps its interface name. Re-sync a client (or All clients) to pick
+them up.
+
 ## 3.7.0-beta.26 - 2026-11-05
 
 IPAM fixes and a bulk sync:

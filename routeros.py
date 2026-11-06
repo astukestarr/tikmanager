@@ -810,6 +810,9 @@ class RouterOS:
             "addresses": pick(self.optional(lambda: self.get("/ip/address"), []), ("address", "network", "interface", "disabled", "comment")),
             "interfaces": pick(self.optional(lambda: self.get("/interface"), []), ("name", "type", "comment", "running", "disabled")),
             "vlans": pick(self.optional(lambda: self.get("/interface/vlan"), []), ("name", "vlan-id", "interface")),
+            # L2 VLANs defined via bridge VLAN filtering (no L3 vlan interface) - vlan-ids can be a list/range "30,40"
+            "bridge_vlans": pick(self.optional(lambda: self.get("/interface/bridge/vlan"), []),
+                                 ("bridge", "vlan-ids", "tagged", "untagged", "comment", "dynamic")),
         }
 
     def gps(self):
@@ -2385,7 +2388,11 @@ class SimRouter:
                 "addresses": [{"address": n["address"], "network": n["network"].split("/")[0], "interface": n["interface"]} for n in nets],
                 "interfaces": [{"name": "ether1", "type": "ether", "comment": "WAN"}, {"name": "bridge", "type": "bridge", "comment": "LAN"},
                                {"name": "vlan20-guest", "type": "vlan"}, {"name": "vlan30-voip", "type": "vlan"}],
-                "vlans": [{"name": "vlan20-guest", "vlan-id": "20", "interface": "bridge"}, {"name": "vlan30-voip", "vlan-id": "30", "interface": "bridge"}]}
+                "vlans": [{"name": "vlan20-guest", "vlan-id": "20", "interface": "bridge"}, {"name": "vlan30-voip", "vlan-id": "30", "interface": "bridge"}],
+                # L2-only VLANs (bridge VLAN filtering, no L3 vlan interface): 50/60/70 have no /interface/vlan entry
+                "bridge_vlans": [{"bridge": "bridge", "vlan-ids": "20", "comment": "Guest", "tagged": "bridge,ether2"},
+                                 {"bridge": "bridge", "vlan-ids": "50", "comment": "Cameras", "tagged": "ether2"},
+                                 {"bridge": "bridge", "vlan-ids": "60,70", "comment": "IoT", "tagged": "ether3"}]}
 
     def gps(self):
         return None

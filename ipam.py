@@ -42,6 +42,27 @@ def _ip(s):
         raise IpamError(f"{s!r} isn't a valid IP address.") from None
 
 
+def _expand_vlan_ids(spec):
+    """RouterOS bridge 'vlan-ids' -> a list of ints. Accepts "30", "30,40", "100-104" (ranges capped to stay sane)."""
+    out = []
+    for tok in str(spec or "").replace(" ", "").split(","):
+        if not tok:
+            continue
+        if "-" in tok:
+            try:
+                lo, hi = (int(x) for x in tok.split("-", 1))
+            except ValueError:
+                continue
+            if 0 < lo <= hi and hi - lo <= 256:   # ignore absurd ranges (a trunk "2-4094") - those aren't an inventory
+                out.extend(range(lo, hi + 1))
+        else:
+            try:
+                out.append(int(tok))
+            except ValueError:
+                pass
+    return out
+
+
 def _ipint(ip):
     """Integer form of an IPv4 address for ordered range queries; None for IPv6 (stored as TEXT order)."""
     try:
@@ -916,6 +937,13 @@ class Ipam:
         for v in topo.get("vlans") or []:
             if v.get("vlan-id"):
                 self._vlan_for(d.get("org_id"), v.get("vlan-id"), v.get("name"), now)
+        # L2 VLANs defined only via bridge VLAN filtering (no L3 vlan interface). vlan-ids can be a list/range "30,40,100-104".
+        for bv in topo.get("bridge_vlans") or []:
+            if str(bv.get("dynamic")).lower() == "true":
+                continue   # dynamic entries mirror learned tags, not configured VLANs
+            for vid in _expand_vlan_ids(bv.get("vlan-ids")):
+                if vid > 1:   # skip the default VLAN 1
+                    self._vlan_for(d.get("org_id"), vid, bv.get("comment"), now)
         if vlan_by_iface:
             for sub in self.db.q("SELECT id, interface FROM ipam_subnets WHERE device_id=?", (d["id"],)):
                 v = vlan_by_iface.get(sub["interface"])
