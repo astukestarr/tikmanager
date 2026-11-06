@@ -60,6 +60,7 @@ class Ipam:
         self.db, self.client_for, self.settings = db, client_for, settings
         self.syncing = set()
         self.lock = threading.Lock()
+        self.sync_all_state = {"running": False, "total": 0, "done": 0, "summary": {}, "at": 0}
         try:
             self.reserved = ipaddress.ip_network(getattr(settings, "wg_network", None) or "10.77.0.0/16", strict=False)
         except ValueError:
@@ -828,6 +829,39 @@ class Ipam:
             with self.lock:
                 self.syncing.discard(org_id)
 
+    def sync_all(self, user="sync"):
+        """Sync every client with routers, one after another, in the background (the estate can be many routers).
+        Returns immediately; poll sync_status() for progress."""
+        orgs = [o["id"] for o in self.syncable_orgs()]
+        if not orgs:
+            raise IpamError("No clients with routers to sync.")
+        with self.lock:
+            if self.sync_all_state.get("running"):
+                raise IpamError("A full sync is already running.")
+            self.sync_all_state = {"running": True, "total": len(orgs), "done": 0,
+                                   "summary": {"clients": 0, "routers": 0, "subnets_added": 0, "addresses_added": 0, "unifi": 0},
+                                   "at": self._now()}
+
+        def run():
+            agg = self.sync_all_state["summary"]
+            for oid in orgs:
+                try:
+                    r = self.sync(oid, user)
+                    agg["clients"] += 1
+                    for k in ("routers", "subnets_added", "addresses_added", "unifi"):
+                        agg[k] = agg.get(k, 0) + (r.get(k) or 0)
+                except Exception:
+                    pass   # one client's routers failing never stops the rest
+                self.sync_all_state["done"] += 1
+            self.sync_all_state["running"] = False
+            self.sync_all_state["at"] = self._now()
+        threading.Thread(target=run, daemon=True).start()
+        return {"started": True, "clients": len(orgs)}
+
+    def sync_status(self):
+        st = self.sync_all_state
+        return {"running": bool(st.get("running")), "total": st.get("total", 0), "done": st.get("done", 0), "summary": st.get("summary", {})}
+
     def _upsert_subnet(self, org_id, netobj, d, iface, gw, name, now, summary, out):
         """Create or refresh one discovered subnet; record it in `out` ({cidr: (id, netobj)}). Returns the subnet id."""
         cidr = str(netobj)
@@ -877,6 +911,11 @@ class Ipam:
         # auto-tag the device's discovered subnets with their VLAN. A subnet's stored interface is the VLAN interface's
         # NAME (e.g. "vlan20-guest"), which matches /interface/vlan's "name" - not its "interface" (the parent bridge).
         vlan_by_iface = {v.get("name"): v for v in topo.get("vlans") or [] if v.get("name")}
+        # Capture EVERY VLAN the router reports (/interface/vlan) as its own inventory entry, even one with no
+        # discovered subnet yet - so the VLANs tab mirrors the routers, not just VLANs whose subnet interface matched.
+        for v in topo.get("vlans") or []:
+            if v.get("vlan-id"):
+                self._vlan_for(d.get("org_id"), v.get("vlan-id"), v.get("name"), now)
         if vlan_by_iface:
             for sub in self.db.q("SELECT id, interface FROM ipam_subnets WHERE device_id=?", (d["id"],)):
                 v = vlan_by_iface.get(sub["interface"])

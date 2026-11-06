@@ -372,16 +372,28 @@ async function syncOrg(orgId, label) {
     await reload();
   } catch (e) { toast(e.message); }
 }
+async function syncAll() {
+  let r; try { r = await post("/api/ipam/sync", { org_id: "all" }); } catch (e) { return toast(e.message); }
+  toast(`Syncing all ${r.clients} client${r.clients === 1 ? "" : "s"} in the background…`, 60000);
+  const poll = async () => {
+    let st; try { st = await api("/api/ipam/sync-status"); } catch (e) { return; }
+    if (st.running) { toast(`Syncing clients… ${st.done}/${st.total}`, 60000); return setTimeout(poll, 3000); }
+    const s = st.summary || {};
+    toast(`Synced ${s.clients != null ? s.clients : st.done} clients: +${s.subnets_added || 0} subnets, +${s.addresses_added || 0} addresses across ${s.routers || 0} routers.`, 9000);
+    await reload();
+  };
+  setTimeout(poll, 3000);
+}
 async function syncPicker() {
   const box = el("div");
-  box.appendChild(el("p", "muted", "Pick a client to discover its subnets and live IP usage from its routers."));
+  box.appendChild(el("p", "muted", "Pick a client to discover its subnets and live IP usage from its routers - or sync every client at once."));
   let orgs = [];
   try { orgs = (await api("/api/ipam/orgs")).orgs || []; } catch (e) { /* fall back to clients already in IPAM */ }
   if (!orgs.length) orgs = tree.clients.map((c) => ({ id: c.id, name: c.name, routers: "" }));
-  const opts = orgs.length ? orgs.map((o) => ({ value: o.id, label: o.name + (o.routers ? ` (${o.routers} router${o.routers === 1 ? "" : "s"})` : o.unifi_sites ? " (UniFi)" : "") }))
-    : [{ value: "", label: "(no clients with routers)" }];
+  const opts = [{ value: "all", label: "All clients (every router)" }].concat(
+    orgs.map((o) => ({ value: o.id, label: o.name + (o.routers ? ` (${o.routers} router${o.routers === 1 ? "" : "s"})` : o.unifi_sites ? " (UniFi)" : "") })));
   box.appendChild(field("Client", sel("f_org", opts)));
-  openDlg("Sync from routers", box, async () => { const id = $("f_org").value; if (id) await syncOrg(+id); });
+  openDlg("Sync from routers", box, async () => { const id = $("f_org").value; if (id === "all") await syncAll(); else if (id) await syncOrg(+id); });
 }
 let searchTimer = null;
 async function doSearch(q) {

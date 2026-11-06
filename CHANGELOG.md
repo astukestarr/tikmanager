@@ -3,6 +3,17 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.26 - 2026-11-05
+
+IPAM fixes and a bulk sync:
+
+- **VLANs now capture the full inventory.** A sync records every VLAN a router reports (`/interface/vlan`), not just
+  the ones whose subnet interface happened to match a VLAN name - so VLANs like a PhoneVLAN that didn't line up with a
+  discovered subnet now appear on the VLANs tab.
+- **Sync all clients at once.** "Sync from routers" has an **All clients (every router)** option that discovers the
+  whole estate in one go. It runs in the background (the estate can be many routers) with a live "x of y clients"
+  progress toast, then refreshes when it's done.
+
 ## 3.7.0-beta.25 - 2026-11-05
 
 A global **Customer** selector in the top bar: pick one customer and the whole app follows it - every page, list and

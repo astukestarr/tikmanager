@@ -883,6 +883,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(ipam.dashboard(org))
             if path == "/api/ipam/tree":
                 return self.json(ipam.tree(org))
+            if path == "/api/ipam/sync-status":   # progress of a "sync all clients" run
+                return self.json(ipam.sync_status())
             if path == "/api/ipam/orgs":
                 return self.json({"orgs": ipam.syncable_orgs() if s["kind"] != "client" else []})
             if path == "/api/ipam/unifi-probe":   # diagnostic: raw UniFi integration API response for a client
@@ -979,6 +981,8 @@ class Handler(BaseHTTPRequestHandler):
                 kind = "addresses" if b.get("kind") == "addresses" else "subnets"
                 return self.json(ipam.import_csv(kind, b.get("csv"), b.get("org_id"), bool(b.get("commit")), who))
             if path == "/api/ipam/sync":
+                if str(b.get("org_id")) == "all":        # sync every client's routers (runs in the background)
+                    return self.json(ipam.sync_all(who))
                 if not b.get("org_id"):
                     raise IpamError("Pick a client to sync.")
                 return self.json(ipam.sync(int(b["org_id"]), who))

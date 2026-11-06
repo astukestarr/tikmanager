@@ -238,6 +238,10 @@ SLIDES_3_7 = [
      "text": "A new Customer pulldown at the top of every page. Pick a customer and the entire app follows - every page, "
              "list and menu count shows only their data - then set it back to All customers when you're done. It remembers "
              "your choice and carries into the IPAM workspace too."},
+    {"id": "ipam-sync-all", "title": "IPAM: sync every client at once", "img": None, "view": None, "who": "tech",
+     "text": "IPAM's \"Sync from routers\" now has an All clients option that discovers your whole estate in one go, in the "
+             "background with a progress count. VLAN discovery is more complete too - every VLAN a router reports now shows "
+             "on the VLANs tab."},
 ]
 SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
