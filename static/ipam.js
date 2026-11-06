@@ -766,7 +766,7 @@ async function showDashboard() {
       const c0 = el("td"); c0.appendChild(cidrLink(s.id, s.cidr)); row.appendChild(c0);
       row.appendChild(el("td", "small", s.name || "—"));
       if (!r.scoped) row.appendChild(el("td", "small", s.org || "—"));
-      const src = el("td"); src.appendChild(el("span", "pill " + (s.source === "discovered" ? "disc" : "man"), s.source === "discovered" ? "discovered" : "manual")); row.appendChild(src);
+      const src = el("td"); src.appendChild(el("span", "pill " + (s.source === "manual" ? "man" : "disc"), s.source || "manual")); row.appendChild(src);
       row.appendChild(el("td", "muted small", fmtAgo(s.seen))); tb.appendChild(row);
     });
     t.appendChild(tb); recentBody.appendChild(t);

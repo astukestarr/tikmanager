@@ -1560,15 +1560,15 @@ async function users() {
 }
 
 // --- Admin: branding, technicians, system ---------------------------------------------------------------------
-const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["api", "API access"], ["system", "Settings"]];
-const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), api: can("settings"), system: can("settings") || can("alerts") })[k];
+const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["api", "API access"], ["collectors", "Collectors"], ["system", "Settings"]];
+const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), api: can("settings"), collectors: can("settings"), system: can("settings") || can("alerts") })[k];
 async function admin(tab) {
   tab = tab && adminTabOk(tab) ? tab : (ADMIN_TABS.find(([k]) => adminTabOk(k)) || ["techs"])[0];
   $("main").innerHTML = `<h1>Admin</h1><div class="tabs" role="tablist">
       ${ADMIN_TABS.filter(([k]) => adminTabOk(k)).map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" class="${k === tab ? "active" : ""}">${l}</button>`).join("")}
     </div><div id="adminBody"></div>`;
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => admin(b.dataset.tab)));
-  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, api: adminApi, system: adminSystem };
+  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, api: adminApi, collectors: adminCollectors, system: adminSystem };
   await (tabs[tab] || adminBranding)();
 }
 
@@ -2440,6 +2440,77 @@ function akShowToken(token, name) {
   $("akCopy").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(token); $("akCopy").textContent = "Copied"; }
     catch { const i = $("akToken"); i.focus(); i.select(); $("akCopy").textContent = "Press Ctrl+C"; }
+  });
+}
+
+// --- Admin > Collectors: on-site agents that scan a client's LAN (no MikroTik/UniFi needed) and report to IPAM --------
+async function adminCollectors() {
+  const d = await api("/api/admin/collectors");
+  const seen = (c) => c.last_seen ? ago(c.last_seen) : "<span class='muted'>never</span>";
+  $("adminBody").innerHTML = `<div class="card"><div class="row"><h2>Collectors</h2><span class="spacer"></span><button class="btn primary" type="button" id="colNew" ${d.orgs.length ? "" : "disabled"}>New collector</button></div>
+      <p class="muted">A lightweight agent you install on a Windows box at a client site. It scans the local network (ping, ARP, reverse-DNS) and
+        reports back into IPAM - so you can see clients that have no managed MikroTik or UniFi. Each collector is tied to one client by its key.</p>
+      <p class="small">Push the install command from your RMM (Syncro, NinjaOne…) or run it by hand on the box. The key is shown <b>once</b>; everything the agent finds lands under its client.</p>
+      ${d.orgs.length ? "" : `<p class="small err">Add a client first - collectors are created per client.</p>`}
+      <span class="status" id="colStatus"></span></div>
+    <div class="card">${d.collectors.length ? `<div class="table-wrap"><table><thead><tr><th>Client</th><th>Name</th><th>Key</th><th>Status</th><th>Last report</th><th>Agent</th><th></th></tr></thead><tbody>
+      ${d.collectors.map((c) => `<tr>
+        <td><b>${esc(c.org || "—")}</b></td>
+        <td>${esc(c.name)}</td>
+        <td class="small mono">${esc(c.prefix)}</td>
+        <td>${c.enabled ? `<span class="pill up-done">enabled</span>` : `<span class="pill up-run">disabled</span>`}</td>
+        <td class="small">${seen(c)}${c.last_ip ? `<div class="small muted mono">${esc(c.last_ip)}</div>` : ""}</td>
+        <td class="small">${c.agent_version ? esc(c.agent_version) : "<span class='muted'>—</span>"}</td>
+        <td class="nowrap"><button class="btn small" type="button" data-coledit="${c.id}">Edit</button>
+          <button class="btn small" type="button" data-coltog="${c.id}" data-on="${c.enabled ? 1 : 0}">${c.enabled ? "Disable" : "Enable"}</button>
+          <button class="btn small danger" type="button" data-coldel="${c.id}">Remove</button></td>
+      </tr>`).join("")}</tbody></table></div>` : `<p class="muted">No collectors yet.${d.orgs.length ? " Create one for a client to scan its network." : ""}</p>`}</div>`;
+  const msg = (m, ok) => { const e = $("colStatus"); if (e) { e.textContent = m; e.className = `status ${ok ? "ok" : "err"}`; } };
+  $("colNew")?.addEventListener("click", () => colDialog(null, d.orgs));
+  document.querySelectorAll("[data-coledit]").forEach((b) => b.addEventListener("click", () => colDialog(d.collectors.find((c) => c.id === +b.dataset.coledit), d.orgs)));
+  document.querySelectorAll("[data-coltog]").forEach((b) => b.addEventListener("click", async () => {
+    try { await post(`/api/admin/collectors/${b.dataset.coltog}`, { enabled: b.dataset.on !== "1" }); adminCollectors(); } catch (e) { msg(e.message); }
+  }));
+  document.querySelectorAll("[data-coldel]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Remove this collector? Its agent stops reporting (uninstall the scheduled task on the box separately). This can't be undone.")) return;
+    try { await post(`/api/admin/collectors/${b.dataset.coldel}/delete`); adminCollectors(); } catch (e) { msg(e.message); }
+  }));
+}
+function colDialog(c, orgs) {
+  dialog(`<h2>${c ? "Edit collector" : "New collector"}</h2>
+    ${c ? `<p class="small muted">Client: <b>${esc(c.org || "—")}</b></p>` : `<label class="field">Client <select id="colOrg">${orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select></label>`}
+    <label class="field">Name <input id="colName" maxlength="100" value="${esc(c?.name || "")}" placeholder="e.g. Main office box"></label>
+    <label class="field">Scan every (minutes) <input id="colInt" type="number" min="5" max="1440" value="${c?.interval_min || 30}"></label>
+    <label class="field">Scan ranges <span class="small muted">optional - one CIDR per line; leave blank to sweep the box's own subnets</span>
+      <textarea id="colRanges" rows="3" class="mono" placeholder="192.168.10.0/24&#10;10.20.0.0/23">${esc((c?.ranges || []).join("\n"))}</textarea></label>
+    <div class="actions"><button class="btn primary" type="button" id="colSave">${c ? "Save" : "Create collector"}</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="colDlgStatus"></span></div>`);
+  $("colSave").addEventListener("click", async () => {
+    const name = $("colName").value.trim();
+    const ranges = $("colRanges").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    const interval_min = +$("colInt").value || 30;
+    const st = $("colDlgStatus"); st.textContent = "Saving…"; st.className = "status";
+    try {
+      const body = c ? { name, ranges, interval_min } : { org_id: +$("colOrg").value, name };
+      const r = await post(c ? `/api/admin/collectors/${c.id}` : "/api/admin/collectors", body);
+      if (!c && r.collector) await post(`/api/admin/collectors/${r.collector.id}`, { ranges, interval_min });
+      $("dlg").close();
+      if (r.install) colShowInstall(r.install, r.token, r.collector);
+      admin("collectors");
+    } catch (e) { st.textContent = e.message; st.className = "status err"; }
+  });
+}
+function colShowInstall(install, token, c) {
+  dialog(`<h2>Collector created</h2>
+    <p>Run this on a Windows box at <b>${esc(c?.org || "the client")}</b> (push it from your RMM, or paste into an elevated PowerShell). The key is shown <b>once</b>.</p>
+    <label class="field small muted">Install command (PowerShell / RMM)
+      <textarea id="colCmd" rows="4" class="mono" readonly spellcheck="false">${esc(install)}</textarea></label>
+    <div class="row"><button class="btn" type="button" id="colCopy">Copy command</button>
+      <span class="small muted">Key: <code class="mono">${esc((token || "").slice(0, 12))}…</code></span></div>
+    <p class="small muted">It installs a scheduled task "TikManager Collector" that scans and reports on your interval. Re-running it is safe (idempotent).</p>
+    <div class="actions"><button class="btn primary" type="button" data-close>Done</button></div>`);
+  $("colCopy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(install); $("colCopy").textContent = "Copied"; }
+    catch { const i = $("colCmd"); i.focus(); i.select(); $("colCopy").textContent = "Press Ctrl+C"; }
   });
 }
 

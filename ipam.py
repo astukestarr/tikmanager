@@ -1016,6 +1016,86 @@ class Ipam:
     def _src_of(status):
         return {"gateway": "address", "dhcp": "lease", "used": "arp"}.get(status, "arp")
 
+    # --- ingest from a network collector (collectors.py: an on-site agent scans the LAN and reports) --------------
+    def ingest(self, org_id, payload, user="collector"):
+        """Fold a collector's sweep (subnets + live hosts) into IPAM under its client. Mirrors the router-sync
+        reconciliation: match subnets by (org,cidr) and addresses by (subnet,ip); NEVER clobber a manual record, and
+        rank collector data BELOW router/UniFi-derived rows (only update rows we own, else just enrich mac/hostname)."""
+        org_id = int(org_id)
+        now = self._now()
+        summary = {"subnets_added": 0, "subnets_seen": 0, "addresses_added": 0, "addresses_updated": 0, "hosts": 0}
+        out = {}   # cidr -> (sid, netobj)
+        hosts = payload.get("hosts") or []
+
+        nets = []
+        for c in payload.get("subnets") or []:
+            try:
+                n = ipaddress.ip_network(str(c).strip(), strict=False)
+            except ValueError:
+                continue
+            if n.version == 4 and not self._reserved(n):
+                nets.append(n)
+        # infer a /24 for any reported host not inside a reported subnet, so its address still has a home
+        for h in hosts:
+            ip = (h.get("ip") or "").split("/")[0].split("%")[0]
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if addr.version != 4 or addr in self.reserved or any(addr in n for n in nets):
+                continue
+            guess = ipaddress.ip_network(f"{ip}/24", strict=False)
+            if not self._reserved(guess) and guess not in nets:
+                nets.append(guess)
+        for n in nets:
+            self._ingest_subnet(org_id, n, now, summary, out)
+
+        for h in hosts:
+            ip = (h.get("ip") or "").split("/")[0].split("%")[0]
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if addr.version != 4 or addr in self.reserved:
+                continue
+            match = next(((sid, no) for (sid, no) in out.values() if addr in no), None)
+            if not match:
+                continue
+            sid = match[0]
+            mac = (h.get("mac") or "").strip() or None
+            host = (h.get("hostname") or "").strip() or None
+            summary["hosts"] += 1
+            row = self.db.one("SELECT * FROM ipam_addresses WHERE subnet_id=? AND ip=?", (sid, ip))
+            if not row:
+                self.db.run("INSERT INTO ipam_addresses (subnet_id, ip, ip_sort, status, hostname, mac, source, last_seen, created_at, updated_at) "
+                            "VALUES (?,?,?,?,?,?,'collector',?,?,?)", (sid, ip, _ipint(ip), "used", host, mac, now, now, now))
+                summary["addresses_added"] += 1
+            elif row["source"] in ("collector", None, ""):   # a row we own: refresh it (keep a gateway/dhcp status if set)
+                self.db.run("UPDATE ipam_addresses SET status=CASE WHEN status IN ('gateway','dhcp') THEN status ELSE 'used' END, "
+                            "mac=COALESCE(?, mac), hostname=COALESCE(?, hostname), source='collector', last_seen=?, updated_at=? WHERE id=?",
+                            (mac, host, now, now, row["id"]))
+                summary["addresses_updated"] += 1
+            else:   # manual / router / unifi own this row - never touch its fields; only fill a blank mac + note presence
+                self.db.run("UPDATE ipam_addresses SET mac=COALESCE(mac,?), last_seen=? WHERE id=?", (mac, now, row["id"]))
+        return summary
+
+    def _ingest_subnet(self, org_id, netobj, now, summary, out):
+        """Create or refresh one collector-reported subnet (no managed device behind it). Records it in `out`."""
+        cidr = str(netobj)
+        if cidr in out:
+            return out[cidr][0]
+        row = self.db.one("SELECT * FROM ipam_subnets WHERE cidr=? AND COALESCE(org_id,0)=?", (cidr, org_id or 0))
+        if not row:
+            sid = self.db.run("INSERT INTO ipam_subnets (cidr, family, org_id, name, source, first_seen, last_seen, created_at, updated_at) "
+                              "VALUES (?,?,?,?,'collector',?,?,?,?)", (cidr, 4, org_id, "", now, now, now, now))
+            summary["subnets_added"] += 1
+        else:
+            sid = row["id"]
+            summary["subnets_seen"] += 1
+            self.db.run("UPDATE ipam_subnets SET last_seen=?, updated_at=? WHERE id=?", (now, now, sid))
+        out[cidr] = (sid, netobj)
+        return sid
+
     _KIND_TYPE = {"router": "Router", "switch": "Switch", "ap": "Access point"}
 
     @staticmethod

@@ -331,6 +331,17 @@ CREATE TABLE IF NOT EXISTS api_keys (                 -- outbound read API token
   created_by TEXT, created_at REAL NOT NULL, last_used REAL, last_ip TEXT, calls INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS api_keys_hash ON api_keys(token_hash);
+CREATE TABLE IF NOT EXISTS collectors (               -- Auvik-style network collectors (collectors.py): a per-client agent
+  id INTEGER PRIMARY KEY,                             --   installed on a box at the site, scans the LAN and reports to IPAM
+  org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,   -- the client this collector reports for (key is org-bound)
+  name TEXT NOT NULL, prefix TEXT NOT NULL,           -- prefix = the enroll token's first chars, shown so it's recognisable
+  token_hash TEXT NOT NULL UNIQUE,                    -- SHA-256 of the enroll token (tkc_…); the token is shown once, never stored
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}',                  -- JSON the agent pulls: {ranges:[cidr…], interval_min, (v2) snmp:{…}}
+  agent_version TEXT, last_seen REAL, last_ip TEXT,
+  created_by TEXT, created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS collectors_hash ON collectors(token_hash);
 -- IPAM (IP Address Management): a separated workspace at /ipam. Subnets/addresses are discovered live from the
 -- managed routers and overlaid on manual records. A subnet can belong to a client (org_id) and/or a free-form section.
 CREATE TABLE IF NOT EXISTS ipam_sections (            -- free-form folders for shared / infrastructure space (nested)

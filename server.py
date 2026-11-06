@@ -74,6 +74,7 @@ from f2b import F2b
 from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
 from apikeys import ApiKeys, SCOPES as API_SCOPES
+from collectors import Collectors
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
                       check_totp, cookie, derive, hash_password, new_totp_secret, password_problem, read_cookie, token,
                       token_hash, totp_uri)
@@ -174,6 +175,7 @@ alerts.checks = checks
 isps = ISPs(db, settings, geo, wg, lambda: integ.config("cloudflare").get("token", ""))   # which ISP each router's links use; outages
 alerts.isps = isps   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 apikeys = ApiKeys(db)                  # Admin > API access: tokens that let other systems pull data over /api/v1
+collectors = Collectors(db)            # Admin > Collectors: on-site agents that scan a client's LAN and report to IPAM
 api_limit = RateLimiter(300, 60)       # per key: 300 requests a minute
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
@@ -858,6 +860,33 @@ class Handler(BaseHTTPRequestHandler):
                               "client": a["org"], "client_id": a["org_id"]} for a in rows]}, headers=self.CORS)
         raise HttpError(404, "No such API endpoint. See GET /api/v1 for the list.")
 
+    def route_collector(self, method, path, q):
+        """The collector agent API (collectors.py). Bearer token = a per-client enroll token; everything reported lands
+        under that client. GET the scan config, POST a sweep -> IPAM. Never trusts an org id from the body."""
+        row = collectors.verify(self.headers.get("Authorization"), self.client_ip(), self.headers.get("X-Agent-Version"))
+        if not row:
+            raise HttpError(401, "Missing or invalid collector token. Send header 'Authorization: Bearer <token>'.")
+        if not api_limit.allow(f"c{row['id']}"):
+            raise HttpError(429, "Rate limit exceeded (300 requests per minute).")
+        if method == "GET" and path == "/api/collector/config":
+            return self.json({"collector": row["name"], **collectors.config_for(row)})
+        if method == "POST" and path == "/api/collector/report":
+            try:
+                summary = ipam.ingest(row["org_id"], self.body())
+            except IpamError as e:
+                raise HttpError(400, str(e)) from None
+            return self.json({"ok": True, **summary})
+        raise HttpError(404, "No such collector endpoint.")
+
+    def _serve_collector_script(self, path):
+        """Serve the PowerShell agent / installer (generic - the key is passed as a param, never baked into the file)."""
+        fn = "install-collector.ps1" if path.endswith("install.ps1") else "agent.ps1"
+        try:
+            data = (ROOT / "agent" / fn).read_bytes()
+        except OSError:
+            raise HttpError(404, "Not found.")
+        return self.send(200, data, "text/plain; charset=utf-8", headers=[("Cache-Control", "no-store")])
+
     @staticmethod
     def _api_device(r):
         return {"id": r["id"], "name": r["name"], "client": r["org"], "client_id": r["org_id"], "site": r["site"] or None,
@@ -993,6 +1022,10 @@ class Handler(BaseHTTPRequestHandler):
     def route_get(self, path, q):
         if path == "/api/v1" or path.startswith("/api/v1/"):
             return self.route_api_v1(path, q)
+        if path.startswith("/api/collector/"):
+            return self.route_collector("GET", path, q)
+        if path in ("/collector/install.ps1", "/collector/agent.ps1"):
+            return self._serve_collector_script(path)
         if path in ("/", "/index.html"):
             if not self.session():
                 return self.redirect("/login")
@@ -1062,6 +1095,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/api-keys":   # outbound read API tokens (administrators)
             self.require(tech=True, admin=True)
             return self.json({"keys": apikeys.list(), "scopes": API_SCOPES, "public_url": settings.public_url})
+        if path == "/api/admin/collectors":   # on-site network collectors, one per client (administrators)
+            self.require(tech=True, admin=True)
+            orgs = db.q("SELECT id, name FROM orgs WHERE active=1 ORDER BY name")
+            return self.json({"collectors": collectors.list(), "orgs": orgs, "public_url": settings.public_url})
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)
             return self.json({**updates.info(), "observatory": observatory.info(), "reachability": reach.info()})
@@ -2088,6 +2125,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def route_post(self, path, q):
         # unauthenticated endpoints (each has its own protection)
+        if path.startswith("/api/collector/"):   # collector agents: bearer token, not a session (see route_collector)
+            return self.route_collector("POST", path, q)
         if path == "/api/login":
             return self.login_password()
         if path == "/api/login/mfa":
@@ -3546,6 +3585,32 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require(tech=True, admin=True)
             apikeys.delete(int(m.group(1)))
             db.audit(s["email"], "API key revoked", m.group(1), self.client_ip())
+            return self.json({"ok": True})
+        if path == "/api/admin/collectors":   # create a collector for a client; the enroll token + install command are shown once
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            try:
+                row, token = collectors.create(b.get("org_id"), b.get("name"), s["email"])
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "collector created", f"{row['org']} / {row['name']}", self.client_ip())
+            url = settings.public_url.rstrip("/")
+            install = (f"powershell -ExecutionPolicy Bypass -Command \"& ([scriptblock]::Create("
+                       f"(irm '{url}/collector/install.ps1'))) -Server '{url}' -Key '{token}'\"")
+            return self.json({"ok": True, "collector": row, "token": token, "install": install})   # token: shown once
+        if m := re.fullmatch(r"/api/admin/collectors/(\d+)", path):   # rename / enable-disable / scan ranges / interval
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            row = collectors.update(int(m.group(1)), name=b.get("name"), enabled=b.get("enabled"),
+                                    ranges=b.get("ranges"), interval_min=b.get("interval_min"))
+            if not row:
+                raise HttpError(404, "No such collector.")
+            db.audit(s["email"], "collector changed", row["name"], self.client_ip())
+            return self.json({"ok": True, "collector": row})
+        if m := re.fullmatch(r"/api/admin/collectors/(\d+)/delete", path):   # revoke a collector for good
+            s = self.require(tech=True, admin=True)
+            collectors.delete(int(m.group(1)))
+            db.audit(s["email"], "collector deleted", m.group(1), self.client_ip())
             return self.json({"ok": True})
         if path == "/api/isps/detect":   # look up every router's ISP now (and Cloudflare Radar)
             self.require(tech=True, perm="devices")

@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.28 - 2026-11-05
+
+**Network collectors (Admin > Collectors) - see clients that have no MikroTik or UniFi.** A lightweight PowerShell
+agent you install on a Windows box at a client site (push it from your RMM, or run the one-line command by hand). It
+scans the local network - ping, ARP and reverse-DNS - and reports back into IPAM, so unmanaged client networks show up
+with their live hosts. Each collector is created per client (Admin > Collectors): you get a one-time enroll key and a
+ready install command; the key ties everything the agent finds to that client. Reported hosts/subnets land in IPAM with
+a **collector** source badge and never overwrite your manual edits or richer router/UniFi data. This is v1 (discovery
+sweep only); SNMP device + VLAN discovery is coming next.
+
 ## 3.7.0-beta.27 - 2026-11-05
 
 **IPAM now discovers layer-2 VLANs too.** A sync reads each router/switch's bridge VLAN table
