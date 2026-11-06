@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.30 - 2026-11-05
+
+Collectors: **SNMP can be turned on when you create a collector**, not only afterwards - the New collector dialog now has
+the SNMP toggle and community-string field, so a box is configured for device + VLAN discovery from its very first run.
+(Config changes - ranges, SNMP, communities - are still picked up automatically on the next sweep; no reinstall.)
+
 ## 3.7.0-beta.29 - 2026-11-05
 
 **Collectors can now scan over SNMP (v2c) - device names, VLANs and ARP tables.** Turn it on per collector

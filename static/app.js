@@ -2483,24 +2483,26 @@ function colDialog(c, orgs) {
     <label class="field">Scan every (minutes) <input id="colInt" type="number" min="5" max="1440" value="${c?.interval_min || 30}"></label>
     <label class="field">Scan ranges <span class="small muted">optional - one CIDR per line; leave blank to sweep the box's own subnets</span>
       <textarea id="colRanges" rows="3" class="mono" placeholder="192.168.10.0/24&#10;10.20.0.0/23">${esc((c?.ranges || []).join("\n"))}</textarea></label>
-    ${c ? `<label class="chk"><input type="checkbox" id="colSnmp" ${c.snmp_enabled ? "checked" : ""}> Scan devices over SNMP (v2c) — pulls device names, VLANs and ARP tables</label>
-    <label class="field">SNMP community strings <span class="small muted">one per line${c.snmp_communities ? ` · ${c.snmp_communities} set — leave blank to keep` : ""}; tried read-only, in order (e.g. public)</span>
-      <textarea id="colComm" rows="2" class="mono" placeholder="public"></textarea></label>` : `<p class="small muted">Save, then edit the collector to turn on SNMP (device + VLAN discovery) and set community strings.</p>`}
+    <label class="chk"><input type="checkbox" id="colSnmp" ${c?.snmp_enabled ? "checked" : ""}> Scan devices over SNMP (v2c) — pulls device names, VLANs and ARP tables</label>
+    <label class="field">SNMP community strings <span class="small muted">one per line${c?.snmp_communities ? ` · ${c.snmp_communities} set — leave blank to keep` : ""}; tried read-only, in order (e.g. public)</span>
+      <textarea id="colComm" rows="2" class="mono" placeholder="public"></textarea></label>
     <div class="actions"><button class="btn primary" type="button" id="colSave">${c ? "Save" : "Create collector"}</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="colDlgStatus"></span></div>`);
   $("colSave").addEventListener("click", async () => {
     const name = $("colName").value.trim();
     const ranges = $("colRanges").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
     const interval_min = +$("colInt").value || 30;
     const st = $("colDlgStatus"); st.textContent = "Saving…"; st.className = "status";
+    const snmp_enabled = $("colSnmp").checked;
+    const comm = $("colComm").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
     try {
       let body;
       if (c) {
-        body = { name, ranges, interval_min, snmp_enabled: $("colSnmp").checked };
-        const comm = $("colComm").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+        body = { name, ranges, interval_min, snmp_enabled };
         if (comm.length) body.communities = comm;   // blank = keep the existing ones
       } else { body = { org_id: +$("colOrg").value, name }; }
       const r = await post(c ? `/api/admin/collectors/${c.id}` : "/api/admin/collectors", body);
-      if (!c && r.collector) await post(`/api/admin/collectors/${r.collector.id}`, { ranges, interval_min });
+      // a brand-new collector: apply its ranges/interval/SNMP in the same go, so it's configured from the first run
+      if (!c && r.collector) await post(`/api/admin/collectors/${r.collector.id}`, { ranges, interval_min, snmp_enabled, communities: comm });
       $("dlg").close();
       if (r.install) colShowInstall(r.install, r.token, r.collector);
       admin("collectors");
