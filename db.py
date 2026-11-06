@@ -268,6 +268,11 @@ CREATE TABLE IF NOT EXISTS message_acks (           -- who acknowledged which me
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   acked_at REAL NOT NULL, PRIMARY KEY (user_id, message_id)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS kb_articles (            -- Knowledge Base (kb.py): how-to articles technicians write, shown in the Help Center
+  id INTEGER PRIMARY KEY, ts REAL NOT NULL, updated_at REAL,
+  title TEXT NOT NULL, category TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+  pinned INTEGER NOT NULL DEFAULT 0, created_by TEXT
+);
 CREATE TABLE IF NOT EXISTS flows (                  -- Flows pilot (flows.py): conversations summed per 10 minutes, kept 7 days
   device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, ts INTEGER NOT NULL,
   local TEXT NOT NULL, remote TEXT NOT NULL, port INTEGER NOT NULL, proto INTEGER NOT NULL, dir TEXT NOT NULL,

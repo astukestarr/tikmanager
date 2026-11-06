@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.0-beta.1 - 2026-11-06
+
+- **Help Center** - a new **Manual** and **Knowledge Base**, reached from a **?** menu in the top bar (and at the top of
+  IPAM). The Manual walks through TikManager page by page and ships with the app. The Knowledge Base is your team's own
+  growing set of how-to articles - a client quirk, a workaround, a step list the Manual doesn't cover - that
+  administrators add, categorise, pin and edit right in the app (no code, no redeploy). Both have a live search; the
+  Manual has a contents sidebar. Everything signed-in users read; administrators write.
+
 ## 4.0.0 - 2026-11-05
 
 A major release. TikManager grew from a MikroTik controller into a **network management platform** for MSPs - with

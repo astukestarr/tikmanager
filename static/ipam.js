@@ -24,6 +24,22 @@ async function api(path, opts = {}) {
 }
 const post = (path, data = {}) => api(path, { method: "POST", body: JSON.stringify(data) });
 
+// Help menu (the "?" icon): a small dropdown to the Help Center's Manual and Knowledge Base
+const HELP_ITEMS = [
+  { href: "/help#manual", ic: "📘", main: "Manual", sub: "How TikManager works, page by page" },
+  { href: "/help#kb", ic: "💡", main: "Knowledge Base", sub: "How-to articles your team writes" },
+];
+function setupHelpMenu() {
+  const btn = $("helpBtn"), pop = $("helpPop");
+  if (!btn || !pop) return;
+  pop.innerHTML = HELP_ITEMS.map((i) => `<a class="help-item" role="menuitem" href="${i.href}"><span class="hi-ic" aria-hidden="true">${i.ic}</span>
+    <span class="hi-main"><span>${i.main}</span><span class="hi-sub">${i.sub}</span></span></a>`).join("");
+  btn.addEventListener("click", (e) => { e.stopPropagation(); const open = pop.classList.toggle("hidden"); btn.setAttribute("aria-expanded", open ? "false" : "true"); });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".help-wrap")) closeHelp(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeHelp(); });
+}
+function closeHelp() { $("helpPop")?.classList.add("hidden"); $("helpBtn")?.setAttribute("aria-expanded", "false"); }
+
 // ---- data model helpers -------------------------------------------------------------------------------------
 function ipToInt(ip) { return ip.split(".").reduce((a, o) => (a << 8 >>> 0) + (+o), 0) >>> 0; }
 function intToIp(n) { return [24, 16, 8, 0].map((s) => (n >>> s) & 255).join("."); }
@@ -1124,6 +1140,7 @@ async function init() {
   $("calcBtn").addEventListener("click", calcDialog);
   $("exportBtn").addEventListener("click", exportDialog);
   $("importBtn").addEventListener("click", importDialog);
+  setupHelpMenu();
   $("search").addEventListener("input", (e) => { clearTimeout(searchTimer); const v = e.target.value; searchTimer = setTimeout(() => doSearch(v), 250); });
 
   // dialog save

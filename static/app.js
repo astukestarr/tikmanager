@@ -5464,6 +5464,24 @@ async function bellPop() {
 }
 function closeBell() { $("bellPop")?.classList.add("hidden"); $("bellBtn")?.setAttribute("aria-expanded", "false"); }
 
+// --- Help menu (the "?" icon): a small dropdown to the Help Center's Manual and Knowledge Base -----------------
+const HELP_ITEMS = [
+  { href: "/help#manual", ic: "📘", main: "Manual", sub: "How TikManager works, page by page" },
+  { href: "/help#kb", ic: "💡", main: "Knowledge Base", sub: "How-to articles your team writes" },
+];
+function setupHelpMenu() {
+  const btn = $("helpBtn"), pop = $("helpPop");
+  if (!btn || !pop) return;
+  pop.innerHTML = HELP_ITEMS.map((i) => `<a class="help-item" role="menuitem" href="${i.href}"><span class="hi-ic" aria-hidden="true">${i.ic}</span>
+    <span class="hi-main"><span>${i.main}</span><span class="hi-sub">${i.sub}</span></span></a>`).join("");
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = pop.classList.toggle("hidden");
+    btn.setAttribute("aria-expanded", open ? "false" : "true");
+  });
+}
+function closeHelp() { $("helpPop")?.classList.add("hidden"); $("helpBtn")?.setAttribute("aria-expanded", "false"); }
+
 async function messagesPage() {
   const x = await api(`/api/messages${msgView.all ? "?all=1" : ""}`);
   setBell(x.unread);
@@ -7524,8 +7542,9 @@ async function init() {
   refreshBell();
   setInterval(refreshBell, 120000);
   $("bellBtn").addEventListener("click", (e) => { e.stopPropagation(); bellPop(); });
-  document.addEventListener("click", (e) => { if (!e.target.closest(".bell-wrap")) closeBell(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeBell(); });
+  setupHelpMenu();
+  document.addEventListener("click", (e) => { if (!e.target.closest(".bell-wrap")) closeBell(); if (!e.target.closest(".help-wrap")) closeHelp(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeBell(); closeHelp(); } });
   whatsNew(false);
   $("logout").addEventListener("click", async () => {
     const r = await post("/api/logout");

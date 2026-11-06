@@ -856,6 +856,16 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .bell-item:hover, .bell-item:focus-visible { background: var(--accent-soft); }
 .bell-t { font-weight: 600; font-size: 13px; }
 .bell-foot { margin-top: 8px; text-align: right; }
+/* Help menu (the "?" icon in the top bar, and at the top of IPAM): Manual + Knowledge Base */
+.help-wrap { position: relative; display: inline-flex; }
+.help-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; min-width: 200px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+.help-item { all: unset; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer;
+  color: var(--text); font-size: 14px; }
+.help-item:hover, .help-item:focus-visible { background: var(--accent-soft); }
+.help-item .hi-ic { width: 18px; text-align: center; }
+.help-item .hi-sub { display: block; font-size: 12px; color: var(--muted); }
+.help-item .hi-main { display: flex; flex-direction: column; gap: 1px; }
 .msg-bar { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .msg-list { display: flex; flex-direction: column; }
 .msg { border-top: 1px solid var(--border); } .msg:first-child { border-top: 0; }

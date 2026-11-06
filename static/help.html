@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Help · TikManager</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#13233a">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/help.css">
+</head>
+<body class="help">
+  <header class="help-top">
+    <a class="help-home" href="/" title="Back to TikManager">&larr;</a>
+    <button class="help-home help-sidetoggle" id="sideToggle" type="button" title="Contents" aria-label="Contents">&#9776;</button>
+    <img class="brand-logo brand-wordmark help-word" src="/wordmark.svg" alt="TikManager">
+    <span class="help-pagetitle">Help Center</span>
+    <div class="help-search"><input id="search" type="search" placeholder="Search the manual &amp; knowledge base…" autocomplete="off"></div>
+  </header>
+  <nav class="help-tabs" id="tabs">
+    <button class="tab active" data-tab="manual" type="button">Manual</button>
+    <button class="tab" data-tab="kb" type="button">Knowledge Base</button>
+  </nav>
+  <div class="help-body">
+    <aside class="help-side" id="side"><div id="toc" class="toc"></div></aside>
+    <main class="help-main" id="main"><p class="muted pad">Loading…</p></main>
+    <div class="side-backdrop" id="sideBackdrop"></div>
+  </div>
+
+  <dialog id="dlg" class="help-dlg">
+    <form method="dialog" id="dlgForm">
+      <h2 id="dlgTitle">Article</h2>
+      <div id="dlgBody"></div>
+      <p class="status hidden" id="dlgMsg"></p>
+      <div class="actions">
+        <button class="btn" value="cancel" type="submit">Cancel</button>
+        <button class="btn primary" id="dlgSave" value="save" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/brand.js"></script>
+  <script src="/help.js"></script>
+</body>
+</html>

@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "4.0.0"    # the release these slides describe (the 3.7 beta cycle shipped as 4.0)
-SINCE = "3.6.0"      # the full release before it
+RELEASE = "4.1.0"    # the release these slides describe
+SINCE = "4.0.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -254,12 +254,19 @@ SLIDES_3_7 = [
              "models (typed as switch / router / firewall / AP), VLANs off any SNMP switch, and ARP tables - all folded into "
              "IPAM. Community strings are sent only to the agent, never shown on the admin page."},
 ]
-SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
+SLIDES_4_1 = [
+    {"id": "help-center", "title": "A Help Center: Manual & Knowledge Base", "img": None, "view": None, "who": "all",
+     "text": "A new ? menu in the top bar (and at the top of IPAM) opens the Help Center. The Manual walks through "
+             "TikManager page by page and ships with the app. The Knowledge Base is your team's own how-to articles - a "
+             "client quirk, a workaround, a step list - that administrators add, categorise, pin and edit right in the app, "
+             "no code needed. Both have a live search."},
+]
+SLIDES = SLIDES_4_1   # 4.1's own slides (4.0.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"4.0.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"4.1.0": {"since": "4.0.0", "slides": SLIDES_4_1}, "4.0.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")

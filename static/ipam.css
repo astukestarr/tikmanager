@@ -14,7 +14,9 @@ body.ipam { margin: 0; background: var(--bg); color: var(--text); display: flex;
 .ipam-search { flex: 1; max-width: 460px; }
 .ipam-search input { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid transparent; background: rgba(255,255,255,.12); color: #fff; }
 .ipam-search input::placeholder { color: var(--nav-muted); }
-.ipam-top-actions { display: flex; gap: 8px; margin-left: auto; }
+.ipam-top-actions { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+.ipam-top .help-btn { color: var(--nav-text); }
+.ipam-top .help-btn:hover, .ipam-top .help-btn:focus-visible { background: rgba(255,255,255,.1); color: #fff; }
 
 .ipam-tabs { display: flex; gap: 2px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--border); flex: none; }
 .ipam-tabs .tab { border: none; background: none; color: var(--muted); padding: 10px 14px; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; }

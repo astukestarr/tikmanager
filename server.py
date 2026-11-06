@@ -75,6 +75,7 @@ from remoteaccess import RemoteAccess, RaError
 from tasks import PLACEHOLDERS, Tasks, next_run
 from apikeys import ApiKeys, SCOPES as API_SCOPES
 from collectors import Collectors
+from kb import Kb
 from security import (MAX_FAILS, LOCK_SECONDS, SESSION_COOKIE, SESSION_SECONDS, RateLimiter, Sessions, check_password,
                       check_totp, cookie, derive, hash_password, new_totp_secret, password_problem, read_cookie, token,
                       token_hash, totp_uri)
@@ -176,6 +177,7 @@ isps = ISPs(db, settings, geo, wg, lambda: integ.config("cloudflare").get("token
 alerts.isps = isps   # technician roles and their permissions (Admin > Technicians > Roles)   # the bell: release notes and notices, acknowledged per person   # Flows pilot: Traffic Flow (IPFIX) over the tunnel
 apikeys = ApiKeys(db)                  # Admin > API access: tokens that let other systems pull data over /api/v1
 collectors = Collectors(db)            # Admin > Collectors: on-site agents that scan a client's LAN and report to IPAM
+kb = Kb(db)                            # Help Center > Knowledge Base: how-to articles technicians write
 api_limit = RateLimiter(300, 60)       # per key: 300 requests a minute
 login_limit = RateLimiter(10, 300)     # per IP
 topo_cache: dict = {}                  # device id -> (read at, raw tables) for the network map (60 s)
@@ -1035,6 +1037,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/ipam":   # the separated IPAM workspace (its own page; ipam.js/ipam.css are auto-served below)
             self.require_ipam()   # technicians, or a client user whose org has IPAM turned on (read-only)
             return self.static("ipam.html")
+        if path == "/help":   # the Help Center: the Manual (static/help.js) and the Knowledge Base (kb.py); help.js/help.css auto-served below
+            if not self.session():
+                return self.redirect("/login")
+            return self.static("help.html")
         if path.startswith("/api/ipam/"):
             return self.ipam_get(path, q)
         if re.fullmatch(r"/invite/[A-Za-z0-9_-]{20,80}", path):
@@ -1099,6 +1105,9 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, admin=True)
             orgs = db.q("SELECT id, name FROM orgs WHERE active=1 ORDER BY name")
             return self.json({"collectors": collectors.list(), "orgs": orgs, "public_url": settings.public_url})
+        if path == "/api/kb":   # Knowledge Base articles (anyone signed in reads; administrators write)
+            s = self.require()
+            return self.json({"articles": kb.list(), "can_edit": self.can(s, "settings")})   # same gate as the write routes (admin=True -> 'settings')
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)
             return self.json({**updates.info(), "observatory": observatory.info(), "reachability": reach.info()})
@@ -3612,6 +3621,31 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require(tech=True, admin=True)
             collectors.delete(int(m.group(1)))
             db.audit(s["email"], "collector deleted", m.group(1), self.client_ip())
+            return self.json({"ok": True})
+        if path == "/api/kb":   # add a Knowledge Base article (administrators)
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            try:
+                row = kb.create(b.get("title"), b.get("category"), b.get("body"), s["email"], b.get("pinned"))
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "kb article added", row["title"], self.client_ip())
+            return self.json({"ok": True, "article": row})
+        if m := re.fullmatch(r"/api/kb/(\d+)", path):   # edit an article (administrators)
+            s = self.require(tech=True, admin=True)
+            b = self.body()
+            try:
+                row = kb.update(int(m.group(1)), title=b.get("title"), category=b.get("category"), body=b.get("body"), pinned=b.get("pinned"))
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            if not row:
+                raise HttpError(404, "No such article.")
+            db.audit(s["email"], "kb article changed", row["title"], self.client_ip())
+            return self.json({"ok": True, "article": row})
+        if m := re.fullmatch(r"/api/kb/(\d+)/delete", path):   # delete an article (administrators)
+            s = self.require(tech=True, admin=True)
+            kb.delete(int(m.group(1)))
+            db.audit(s["email"], "kb article deleted", m.group(1), self.client_ip())
             return self.json({"ok": True})
         if path == "/api/isps/detect":   # look up every router's ISP now (and Cloudflare Radar)
             self.require(tech=True, perm="devices")
