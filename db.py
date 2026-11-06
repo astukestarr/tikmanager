@@ -373,6 +373,7 @@ CREATE TABLE IF NOT EXISTS ipam_subnets (            -- the core CIDR records (n
   source TEXT NOT NULL DEFAULT 'manual',               -- 'manual' | 'discovered'
   mark_full INTEGER NOT NULL DEFAULT 0, threshold INTEGER, locked INTEGER NOT NULL DEFAULT 0,
   dhcp_size INTEGER, dhcp_used INTEGER, dhcp_pools TEXT,   -- DHCP pool capacity / in-use (MikroTik pool chain, or UniFi range)
+  source_name TEXT,   -- where a non-MikroTik subnet came from (e.g. a UniFi site/console), when there's no device_id
   notes TEXT, custom TEXT NOT NULL DEFAULT '{}', first_seen REAL, last_seen REAL,
   created_by TEXT, created_at REAL NOT NULL, updated_at REAL
 );
@@ -450,7 +451,7 @@ class DB:
             c.execute("ALTER TABLE ipam_devices ADD COLUMN source_auto INTEGER NOT NULL DEFAULT 0")
         if "ipam_subnets" in tables:
             scols = {r[1] for r in c.execute("PRAGMA table_info(ipam_subnets)")}
-            for col, ddl in (("dhcp_size", "INTEGER"), ("dhcp_used", "INTEGER"), ("dhcp_pools", "TEXT")):
+            for col, ddl in (("dhcp_size", "INTEGER"), ("dhcp_used", "INTEGER"), ("dhcp_pools", "TEXT"), ("source_name", "TEXT")):
                 if col not in scols:
                     c.execute(f"ALTER TABLE ipam_subnets ADD COLUMN {col} {ddl}")
         if "ipam_devices" in tables:

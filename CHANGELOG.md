@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.1-beta.1 - 2026-11-06
+
+- **IPAM: identify UniFi-discovered subnets.** A UniFi subnet has no MikroTik router, so its Router column was blank.
+  It now shows **"UniFi · <site>"** (the console/site the network came from), on the subnet list and detail, so you can
+  tell where it lives. (MikroTik subnets still show their router, linked.)
+
 ## 4.1.0 - 2026-11-06
 
 The 4.1 release. Highlights since 4.0:

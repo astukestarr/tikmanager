@@ -1353,6 +1353,8 @@ class Ipam:
                 name = f"{name} (VLAN {net['vlan']})"
             sid = self._upsert_subnet(org_id, netobj, {"id": None}, None, None, name, now, summary, {})
             summary["unifi_networks"] = summary.get("unifi_networks", 0) + 1
+            site = (net.get("site") or "").strip()   # the UniFi console/site this network lives on - how you identify it
+            self.db.run("UPDATE ipam_subnets SET source_name=? WHERE id=?", (f"UniFi · {site}" if site else "UniFi", sid))
             ds, dp = net.get("dhcp_start"), net.get("dhcp_stop")   # the UniFi DHCP pool range, if the API gave one
             if ds and dp:
                 try:

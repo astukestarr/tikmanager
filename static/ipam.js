@@ -150,6 +150,7 @@ function showSubnets() {
     tr.appendChild(el("td", null, s.org || ""));
     const rc = el("td", "muted");
     if (s.router) { const a = el("a", null, s.router); a.href = "/#router/" + s.device_id; rc.appendChild(a); if (s.interface) rc.appendChild(el("span", "muted small", " · " + s.interface)); }
+    else if (s.source_name) rc.textContent = s.source_name;   // e.g. "UniFi · <site>" for a UniFi-discovered subnet
     else rc.textContent = s.interface || "";
     tr.appendChild(rc);
     const cu = el("td"); cu.appendChild(usageBar(s));
@@ -191,7 +192,7 @@ async function showSubnet(id) {
     const a = el("a", null, d.router); a.href = "/#router/" + d.device_id; a.title = "Open this router";
     rc.appendChild(a); if (d.interface) rc.appendChild(el("span", "muted small", " · " + d.interface));
     meta.appendChild(rc);
-  }
+  } else if (d.source_name) meta.appendChild(chip("Discovered on", d.source_name));   // UniFi-sourced: show its site/console
   if (d.vlan) meta.appendChild(chip("VLAN", d.vlan));
   if (d.vrf) meta.appendChild(chip("VRF", d.vrf));
   meta.appendChild(chip("Gateway", d.gateway || "—"));
