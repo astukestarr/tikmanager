@@ -148,7 +148,10 @@ function showSubnets() {
     tr.appendChild(c0);
     tr.appendChild(el("td", null, s.name || ""));
     tr.appendChild(el("td", null, s.org || ""));
-    tr.appendChild(el("td", "muted", s.interface || ""));
+    const rc = el("td", "muted");
+    if (s.router) { const a = el("a", null, s.router); a.href = "/#router/" + s.device_id; rc.appendChild(a); if (s.interface) rc.appendChild(el("span", "muted small", " · " + s.interface)); }
+    else rc.textContent = s.interface || "";
+    tr.appendChild(rc);
     const cu = el("td"); cu.appendChild(usageBar(s));
     const pb = dhcpPoolBar(s, true);
     if (pb) { const dr = el("div"); dr.style.cssText = "display:flex;align-items:center;gap:4px;margin-top:3px"; const t = el("span", "muted"); t.style.fontSize = "10px"; t.textContent = "DHCP"; dr.appendChild(t); dr.appendChild(pb); cu.appendChild(dr); }
@@ -183,6 +186,12 @@ async function showSubnet(id) {
   const chip = (k, v) => { const c = el("span", "chip"); c.appendChild(el("b", null, k + " ")); c.appendChild(document.createTextNode(v)); return c; };
   meta.appendChild(chip("Name", d.name || "—"));
   meta.appendChild(chip("Client", d.org || "—"));
+  if (d.router) {   // which router this subnet lives on - click through to its page to find the gear behind an IP
+    const rc = el("span", "chip"); rc.appendChild(el("b", null, "Router "));
+    const a = el("a", null, d.router); a.href = "/#router/" + d.device_id; a.title = "Open this router";
+    rc.appendChild(a); if (d.interface) rc.appendChild(el("span", "muted small", " · " + d.interface));
+    meta.appendChild(rc);
+  }
   if (d.vlan) meta.appendChild(chip("VLAN", d.vlan));
   if (d.vrf) meta.appendChild(chip("VRF", d.vrf));
   meta.appendChild(chip("Gateway", d.gateway || "—"));

@@ -151,6 +151,9 @@ class Ipam:
             out["usage"] = round(100 * used / usable) if usable else 0
         if s.get("dhcp_size"):   # how full the DHCP pool is (separate from overall subnet usage)
             out["dhcp_usage"] = round(100 * (s.get("dhcp_used") or 0) / s["dhcp_size"])
+        if s.get("device_id"):   # the router this subnet was discovered on / is gatewayed by - so you can jump to it
+            dev = self.db.one("SELECT name FROM devices WHERE id=?", (s["device_id"],))
+            out["router"] = dev["name"] if dev else None
         return out
 
     # --- sections -----------------------------------------------------------------------------------------------

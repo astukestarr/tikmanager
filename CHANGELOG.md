@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.0-beta.5 - 2026-11-06
+
+- **IPAM: show the router a subnet lives on.** The subnet detail now has a **Router** chip (the MikroTik it was
+  discovered on / is gatewayed by), linking straight to that router's page - so when you're looking at an IP or subnet
+  you can find the gear behind it. The Subnets list's Router column now shows the router name (linked) instead of only
+  the interface.
+
 ## 4.1.0-beta.4 - 2026-11-06
 
 - **DHCP pool utilisation: UniFi networks + a dashboard alert.** UniFi networks now get the same DHCP pool bar as
