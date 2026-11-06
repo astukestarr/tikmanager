@@ -3,6 +3,20 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.0 - 2026-11-06
+
+The 4.1 release. Highlights since 4.0:
+
+- **Help Center** - an in-app **Manual** (every page, with a full **Administration** chapter) and a team-run
+  **Knowledge Base**, reached from a **?** menu in the top bar and at the top of IPAM. Both have live search; admins
+  add, categorise, pin and edit KB articles right in the app.
+- **IPAM: DHCP pool utilisation** - see how full each **DHCP pool** is, separately from overall subnet usage (a subnet
+  can be nearly empty while its pool is full - that's when a client can't get a device online). A pool bar on the subnet
+  detail and list, and a **Dashboard alert** for pools at 85%+. MikroTik pools follow the **next-pool chain** and ignore
+  orphan pools; UniFi networks use their DHCP range.
+- **IPAM: the router behind a subnet** - a **Router** chip on the subnet (and in the list) linking to that router's
+  page, so you can find the gear behind an IP.
+
 ## 4.1.0-beta.5 - 2026-11-06
 
 - **IPAM: show the router a subnet lives on.** The subnet detail now has a **Router** chip (the MikroTik it was
