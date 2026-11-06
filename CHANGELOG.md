@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 3.7.0-beta.25 - 2026-11-05
+
+A global **Customer** selector in the top bar: pick one customer and the whole app follows it - every page, list and
+nav count shows only that customer's data. It defaults to **All customers**, remembers your choice, and is shared with
+the IPAM workspace too. Technicians only; client users already see just their own organization, so nothing changes for
+them. Built on the existing per-request org scoping (`org_scope`), so the account-wide pages (Admin, Settings, Users,
+Integrations, Audit) stay unfiltered.
+
 ## 3.7.0-beta.24 - 2026-11-05
 
 Added a **utilization trend** to the IPAM Dashboard: a 30-day area chart of overall IP utilization, with the change

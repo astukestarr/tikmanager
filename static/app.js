@@ -25,6 +25,11 @@ function uptime(s, short = false) {
 const bps = (n) => (n == null ? "—" : n < 1e6 ? `${(n / 1e3).toFixed(0)} kbps` : `${(n / 1e6).toFixed(1)} Mbps`);
 
 let me = null, view = "dashboard", timer = null;
+// Global "Customer" selector (top bar): "" = all customers, else an org id. Techs only; the whole app follows it.
+let appOrg = "";
+try { appOrg = localStorage.getItem("tm.customer") || ""; } catch { /* private window */ }
+// endpoints that are account-wide, never scoped to one customer (the selector's own source, identity, version, admin)
+const ORG_GLOBAL = /^\/api\/(me|orgs|version|branding|whats-new|messages|admin|integrations|isps\/radar)\b/;
 
 // a page opened before TikManager was upgraded keeps running the old code: reload once the server reports a new
 // version - but not while a dialog is open or someone is typing (the next request after that does it)
@@ -35,6 +40,10 @@ function newVersionLoaded(v) {
 }
 
 async function api(path, opts = {}) {
+  // reads follow the chosen customer, so every page and nav count shows just their data (server scopes via org_scope)
+  if ((opts.method || "GET").toUpperCase() === "GET" && appOrg && me?.kind !== "client" && !ORG_GLOBAL.test(path)) {
+    path += (path.includes("?") ? "&" : "?") + "org=" + encodeURIComponent(appOrg);
+  }
   const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", "X-CSRF-Token": me?.csrf || "", ...(opts.headers || {}) } });
   const sv = r.headers.get("X-TikManager-Version");
   if (sv) setTimeout(() => newVersionLoaded(sv), 0);
@@ -7311,6 +7320,27 @@ async function loadUDevices(key) {
     : `<p class="small muted">No devices matched to this site.</p>`;
 }
 
+// The top-bar "Customer" pulldown: pick one customer and the whole app (every page + the nav counts) follows.
+async function setupCustomerPicker() {
+  if (!isTech() || me.viewing_as) return;   // client users are already locked to their own org; no picker in view-as
+  const sel = $("custSel");
+  if (!sel) return;
+  let orgs = [];
+  try { orgs = await api("/api/orgs"); } catch { return; }
+  sel.innerHTML = `<option value="">All customers</option>` + orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("");
+  if (appOrg && !orgs.some((o) => String(o.id) === appOrg)) { appOrg = ""; try { localStorage.setItem("tm.customer", ""); } catch { /* private */ } }
+  sel.value = appOrg;
+  $("custWrap").classList.remove("hidden");
+  $("custWrap").classList.toggle("allcust", !appOrg);
+  sel.addEventListener("change", () => {
+    appOrg = sel.value;
+    try { localStorage.setItem("tm.customer", appOrg); } catch { /* private */ }
+    $("custWrap").classList.toggle("allcust", !appOrg);
+    refreshNavCounts();                                     // nav badges follow the customer too
+    go(view, location.hash.slice(1).split("/")[1] || "");  // re-render the open page, now scoped
+  });
+}
+
 async function refreshNavCounts() {
   try {
     const devs = (await api("/api/devices")).filter((d) => d.state === "adopted");
@@ -7407,6 +7437,7 @@ async function init() {
     const b = e.target.closest("[data-view]");
     if (b) { $("nav").classList.remove("open"); window.scrollTo({ top: 0 }); go(b.dataset.view, b.dataset.arg); }   // a menu click starts at the top
   });
+  setupCustomerPicker();
   refreshNavCounts();
   setInterval(refreshNavCounts, 60000);
   refreshBell();

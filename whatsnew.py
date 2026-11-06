@@ -234,6 +234,10 @@ SLIDES_3_7 = [
              "address-status donut, actionable alerts (over-threshold, full, offline, stale), a per-client footprint rollup "
              "you can click into, plus device-type, subnet-size and discovered-vs-manual charts. All drawn inline - nothing "
              "extra to load."},
+    {"id": "customer-selector", "title": "Focus the whole app on one customer", "img": None, "view": None, "who": "tech",
+     "text": "A new Customer pulldown at the top of every page. Pick a customer and the entire app follows - every page, "
+             "list and menu count shows only their data - then set it back to All customers when you're done. It remembers "
+             "your choice and carries into the IPAM workspace too."},
 ]
 SLIDES = SLIDES_3_7   # 3.7.0's own slides (3.6.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}

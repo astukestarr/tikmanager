@@ -399,9 +399,18 @@ class Handler(BaseHTTPRequestHandler):
             raise HttpError(403, "Your session token is missing or out of date - reload the page.")
 
     def org_scope(self, s, org_id=None, column="org_id"):
-        """SQL fragment + args limiting rows to what this user may see (clients: only their own organization)."""
+        """SQL fragment + args limiting rows to what this user may see (clients: only their own organization).
+
+        Techs: an explicit org_id wins (a page's own picker); otherwise the global Customer selector
+        (self._req_org, set from ?org= in dispatch) scopes the whole app. Pass org_id="all" to opt a
+        "list every customer" query out of the global selector so its dropdown keeps every option.
+        """
         if s["kind"] == "client":
             return f"{column} = ?", [s["org_id"]]
+        if org_id == "all":
+            return "1=1", []
+        if org_id in (None, "", 0):
+            org_id = getattr(self, "_req_org", None)
         if org_id:
             return f"{column} = ?", [int(org_id)]
         return "1=1", []
@@ -749,6 +758,10 @@ class Handler(BaseHTTPRequestHandler):
         url = urllib.parse.urlparse(self.path)
         path, q = url.path, {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
         self.route_path = path
+        # Global "Customer" selector (top-bar pulldown): a technician narrows the whole app to one customer.
+        # Carried on every read as ?org=<id>; org_scope() below applies it wherever an explicit org isn't passed.
+        og = q.get("org")
+        self._req_org = int(og) if (og or "").isdigit() and og not in ("0",) else None
         try:
             if method == "GET":
                 self.route_get(path, q)
@@ -857,7 +870,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def ipam_get(self, path, q):
         s = self.require_ipam()   # any technician, or a client user whose org has IPAM turned on; writes need 'ipam'
-        org = s["org_id"] if s["kind"] == "client" else None   # clients see only their own organization
+        # clients see only their own organization; techs follow the global Customer selector (?org=), else all
+        org = s["org_id"] if s["kind"] == "client" else self._req_org
 
         def owned(sid):   # a client may only open a subnet in their own organization
             d = ipam.subnet(int(sid))
@@ -870,9 +884,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/ipam/tree":
                 return self.json(ipam.tree(org))
             if path == "/api/ipam/orgs":
-                return self.json({"orgs": ipam.syncable_orgs() if org is None else []})
+                return self.json({"orgs": ipam.syncable_orgs() if s["kind"] != "client" else []})
             if path == "/api/ipam/unifi-probe":   # diagnostic: raw UniFi integration API response for a client
-                if org is not None:
+                if s["kind"] == "client":
                     raise HttpError(403, "Only technicians can do that.")
                 if not getattr(ipam, "unifi", None):
                     raise HttpError(400, "No UniFi connection configured.")
@@ -1068,7 +1082,7 @@ class Handler(BaseHTTPRequestHandler):
                                         else bool(db.one("SELECT 1 FROM net_sites WHERE org_id=?", (s["org_id"],))))})
         if path == "/api/orgs":
             s = self.require()
-            where, args = self.org_scope(s, column="o.id")
+            where, args = self.org_scope(s, "all", column="o.id")   # the customer directory + the top-bar picker: always every customer
             return self.json(db.q(f"""SELECT o.id, o.name, o.client_winbox, o.client_vpn, o.client_ipam, COUNT(d.id) AS devices, SUM(d.online) AS online,
                                        SUM(CASE WHEN d.state='adopted' AND d.online=0 THEN 1 ELSE 0 END) AS offline
                                        FROM orgs o LEFT JOIN devices d ON d.org_id = o.id WHERE {where} GROUP BY o.id ORDER BY o.name""", args))
@@ -1275,7 +1289,8 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require(tech=True)
             fw = q.get("fw") if q.get("fw") in compliance.FRAMEWORKS else "cis8"
             where, args = self.org_scope(s, column="d.org_id")
-            orgs = db.q(f"""SELECT DISTINCT o.id, o.name FROM orgs o JOIN devices d ON d.org_id = o.id WHERE d.state='adopted' AND {where} ORDER BY o.name""", args)
+            lw, la = self.org_scope(s, "all", column="d.org_id")   # the page's own customer dropdown always lists everyone
+            orgs = db.q(f"""SELECT DISTINCT o.id, o.name FROM orgs o JOIN devices d ON d.org_id = o.id WHERE d.state='adopted' AND {lw} ORDER BY o.name""", la)
             org = next((o for o in orgs if str(o["id"]) == str(q.get("org") or "")), None)
             rows = db.q(f"""SELECT d.*, o.name AS org FROM devices d LEFT JOIN orgs o ON o.id = d.org_id
                             WHERE d.state='adopted' AND {where} {"AND d.org_id=?" if org else ""} ORDER BY o.name, d.name""", args + ([org["id"]] if org else []))

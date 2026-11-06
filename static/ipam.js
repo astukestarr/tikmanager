@@ -3,12 +3,19 @@
 
 let me = null, tree = { sections: [], subnets: [], clients: [] }, current = null; // current = {kind:'all'|'section'|'client', id}
 let readonly = false;   // client users may VIEW their own IPAM but change nothing (writes are technician-only)
+// Global "Customer" selector, shared with the main app via localStorage: "" = all, else an org id (techs only)
+let appOrg = "";
+try { appOrg = localStorage.getItem("tm.customer") || ""; } catch { /* private window */ }
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function api(path, opts = {}) {
+  // follow the shared Customer selection on reads, so IPAM shows the same customer as the rest of the app
+  if ((opts.method || "GET").toUpperCase() === "GET" && appOrg && me?.kind === "tech" && !/^\/api\/(me|orgs)\b/.test(path)) {
+    path += (path.includes("?") ? "&" : "?") + "org=" + encodeURIComponent(appOrg);
+  }
   const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", "X-CSRF-Token": me?.csrf || "", ...(opts.headers || {}) } });
   const body = await r.json().catch(() => ({}));
   if (r.status === 401) { location.href = "/login"; throw new Error("Signed out"); }
@@ -1048,6 +1055,26 @@ async function placeDialog(rackId) {
 // ---- load / route -------------------------------------------------------------------------------------------
 async function reload() { tree = await api("/api/ipam/tree"); renderTree(); if (tab !== "subnets") return setTab(tab); if (current?.subnet) await showSubnet(current.subnet); else showSubnets(); }
 
+// Top-bar "Customer" pulldown, shared with the main app: pick one customer and IPAM shows only theirs.
+async function setupCustomerPicker() {
+  if (me.kind !== "tech") return;   // client users see only their own org; no picker
+  const sel = $("custSel"); if (!sel) return;
+  let orgs = [];
+  try { orgs = await api("/api/orgs"); } catch { return; }
+  sel.innerHTML = `<option value="">All customers</option>` + orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("");
+  if (appOrg && !orgs.some((o) => String(o.id) === appOrg)) { appOrg = ""; try { localStorage.setItem("tm.customer", ""); } catch { /* private */ } }
+  sel.value = appOrg;
+  $("custWrap").classList.remove("hidden");
+  $("custWrap").classList.toggle("allcust", !appOrg);
+  sel.addEventListener("change", async () => {
+    appOrg = sel.value;
+    try { localStorage.setItem("tm.customer", appOrg); } catch { /* private */ }
+    $("custWrap").classList.toggle("allcust", !appOrg);
+    current = { kind: "all" };
+    await reload();
+  });
+}
+
 async function init() {
   try { me = await api("/api/me"); } catch (e) { return; }
   readonly = me.kind !== "tech";   // a client user: read-only
@@ -1057,6 +1084,7 @@ async function init() {
   try { tree = await api("/api/ipam/tree"); } catch (e) { $("main").textContent = e.message; return; }
   renderTree(); setTab("dashboard");
   loadLookups();
+  setupCustomerPicker();
 
   // tabs
   $("tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); });

@@ -91,6 +91,12 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
 .topbar { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 24px; background: var(--panel); box-shadow: var(--shadow);
   border-bottom: 1px solid var(--border); }
 .topbar .who { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.cust-pick { display: inline-flex; align-items: center; gap: 7px; }
+.cust-pick .cust-label { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); }
+#custSel { max-width: 220px; height: 34px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg);
+  color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+#custSel:hover, #custSel:focus-visible { border-color: var(--accent); }
+.cust-pick.allcust #custSel { color: var(--muted); font-weight: 500; }
 .icon-btn { all: unset; box-sizing: border-box; display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; cursor: pointer; color: var(--muted); }
 .icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn:hover, .icon-btn:focus-visible { background: var(--bg); color: var(--text); }
@@ -109,7 +115,8 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
   .nav.open { transform: none; }
   .menu-btn { display: inline-grid; }
   .topbar { padding: 8px 12px; gap: 8px; }
-  .topbar .who, #devBadge { display: none; }
+  .topbar .who, #devBadge, .cust-pick .cust-label { display: none; }
+  #custSel { max-width: 150px; }
   .main { padding: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .nav { transition: none; } }
