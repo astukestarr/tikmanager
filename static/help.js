@@ -188,7 +188,7 @@ const MANUAL = [
     ] },
   ] },
 
-  { group: "Clients & admin", items: [
+  { group: "Clients & users", items: [
     { id: "clients", title: "Clients", body: [
       "A client (organisation) groups a customer's sites, devices, subnets and users. Most pages can be narrowed to one client with the top-bar **Customer** selector; the Clients page is where you manage the list itself.",
     ] },
@@ -198,23 +198,78 @@ const MANUAL = [
     { id: "users", title: "Users, roles & client access", body: [
       "**Users** (administrators) manages who can sign in.",
       { ul: [
-        "**Technicians** get a **role**, and the role's permissions decide which pages they see and what they can change (Admin > Technicians > Roles).",
+        "**Technicians** get a **role**, and the role's permissions decide which pages they see and what they can change (Admin > Technicians).",
         "**Client users** sign in to a trimmed, read-only view of only their own organisation — optionally including their IPAM. Invite them by email; you can also allow client sign-in with Microsoft.",
         "**View as** lets an administrator see TikManager exactly as a chosen client user does (read-only), to check what they'll see before you hand it over.",
       ] },
     ] },
-    { id: "admin", title: "Admin settings", body: [
-      "The **Admin** area holds everything that configures TikManager itself:",
+  ] },
+
+  { group: "Administration", items: [
+    { id: "admin", title: "The Admin area", body: [
+      "**Admin** (sidebar → Admin → Settings, or the gear icon) is where you configure TikManager itself. It's split into tabs — **Branding**, **Technicians**, **Integrations**, **API access**, **Collectors** and **Settings** — and you only see the tabs your role's permissions allow, so a technician without administrator rights sees a subset (or none).",
+      "**Every change made in Admin is written to the Audit log** (who, what, when and from where), so there's always a record.",
+      "The sections below walk through each tab in turn.",
+    ] },
+    { id: "admin-branding", title: "Admin · Branding", body: [
+      "Branding is what everyone sees, including clients on the sign-in page. It makes TikManager look like your own tool.",
+      { h: "What you can set" },
       { ul: [
-        "**Integrations** — connect UniFi / UISP, ConnectWise, Cloudflare Radar and more; keys are stored encrypted.",
-        "**Branding** — your name, logo and theme.",
-        "**Technicians & Roles** — accounts and what each role may do.",
-        "**Collectors** — the on-site network agents (see Network collectors).",
-        "**API access** — bearer tokens that let other systems read TikManager data over a read-only API.",
-        "**Updates** — what's running vs. the newest release, and the one-click upgrade.",
-        "**System** — backup schedule, data location and encryption status.",
-        "**Audit log** — a record of every change, who made it and when.",
+        "**Product name** and **Company name** — shown in the top bar and on sign-in.",
+        "**Accent colour** — the theme colour across the app (a live preview updates as you pick).",
+        "**Support email** and **Support phone** — shown to client users so they know how to reach you.",
+        "**Message on the sign-in page** — a short note (maintenance window, a welcome line) shown under the sign-in box.",
       ] },
+      { h: "Logo" },
+      "Upload a **PNG, JPEG or WebP up to 512 KB**; wide logos (about 4:1) look best, as it sits next to the product name. You can replace or remove it any time. Save branding and the change is live immediately for everyone.",
+    ] },
+    { id: "admin-techs", title: "Admin · Technicians & roles", body: [
+      "Technicians are your own staff. This tab lists them and controls what each can do.",
+      { h: "How someone becomes a technician" },
+      "Anyone who signs in with Microsoft from one of your **staff email domains** (set on the Settings tab) is created as a technician automatically. A brand-new account has **no role** and can't do anything until an administrator gives it one — it sits on a \"waiting for a role\" screen. Emails listed as **Administrator emails** (Settings tab) are always full administrators.",
+      { h: "Roles & permissions" },
+      "A **role** is a named set of permissions, and every technician has exactly one. Permissions gate each part of the app — for example devices, configuration changes, alerts, integrations, managing other technicians, and settings. Build the roles that match how your team works (for example a read-only \"Help Desk\" role, a \"Network\" role that can change configuration, and a full \"Admin\" role) and assign one to each person. Change a person's role here any time; it takes effect at their next page load.",
+      "Because permissions decide which **sidebar items and Admin tabs** appear, a role is also how you keep juniors out of destructive actions while still letting them see what they need.",
+    ] },
+    { id: "admin-integrations", title: "Admin · Integrations", body: [
+      "Integrations is the catalog of other systems TikManager pulls from or pushes to. Each system is a card with just the fields it needs — a URL, an API key, an account id — and a short note on where to get them.",
+      { ul: [
+        "Examples: **UniFi / UISP** (pull in their gear and networks), **ConnectWise** (billing reconciliation and tickets), **Cloudflare Radar** (ISP outage data), IP-geolocation, security tools and more.",
+        "**Secrets are encrypted at rest** — on Windows with the machine's DPAPI, on Linux with a key file — and written to `data/secrets.dat`. They never appear in code, logs, the changelog or backups.",
+        "**Blank means off.** A card you don't fill in simply leaves that feature disabled, and the rest of TikManager works without it. Fill a card in and its reports and features light up.",
+      ] },
+      "After entering a key, most cards have a **Test** button so you can confirm the connection before relying on it.",
+    ] },
+    { id: "admin-api", title: "Admin · API access", body: [
+      "API access lets **other systems read from TikManager** over a small HTTP API (`/api/v1`) — for an RMM, a dashboard, or a billing / reporting tool.",
+      { ul: [
+        "Create a **bearer token**; it's shown **once** at creation, so copy it then. Store it in the other system as a secret.",
+        "Each token has its own **scopes** (for example devices, clients, alerts, fleet health) — grant only what that integration needs.",
+        "It is **read-only**: nothing in the API can change a router or a setting. Requests are **rate-limited**, and you can **revoke** a token any time, which immediately stops it working.",
+      ] },
+      "The README's \"Outbound API\" section lists the endpoints and example requests.",
+    ] },
+    { id: "admin-collectors", title: "Admin · Collectors", body: [
+      "Collectors are the on-site network agents for clients with no MikroTik or UniFi (see the **Network collectors** chapter for the full picture).",
+      "On this tab you **create one collector per client**. TikManager shows a **one-time enrol key** and a **copy-paste install command** to run from your RMM or a PowerShell prompt on any Windows box at that client. Afterwards you can set each collector's **scan ranges**, how often it runs, and whether to turn on **SNMP** (with a read-only community string, which is sent only to the agent and never shown back here), or disable it.",
+    ] },
+    { id: "admin-settings", title: "Admin · Settings (system)", body: [
+      "The **Settings** tab holds the server-wide configuration. It's the longest tab; here's each card.",
+      { h: "Version & updates" },
+      "Shows the version you're running against the **newest release on GitHub**, and the changelog for anything newer. Administrators get a one-click **Upgrade now** (also offered as a banner across the app when an update is out). On Linux this pulls and restarts; on Windows it applies what's waiting in the update folder.",
+      { h: "Staff sign-in (Microsoft / Entra ID)" },
+      "Your technicians sign in with Microsoft. Set your **staff email domains** (anyone from these becomes a technician at first sign-in) and your **administrator emails** (always full admins). The **Entra ID** fields — Directory (tenant) ID, Application (client) ID and a client secret — come from an App registration in the Entra admin center; TikManager shows the exact **redirect URI** to paste into that registration.",
+      { h: "Client (customer) Microsoft sign-in" },
+      "**Off by default** — clients use a password and authenticator app. You can instead let client users sign in with Microsoft, either as **guests in your tenant** (B2B-invited, so your Conditional Access applies) or with **their own Microsoft** (needs a multi-tenant app registration). Either way you first invite the client user on the **Users** tab with the \"Microsoft sign-in\" option, which locks them to their email's domain. Your staff sign-in is unaffected.",
+      { h: "Routers" },
+      "The **WireGuard address routers connect to** is baked into the adoption command, so routers know how to reach this server; change it only if that differs from the web address (routers already adopted keep the address they were given). The **latency test target** is the address diagnostics pings for its speed/latency checks.",
+      { h: "Backups" },
+      "Set the **nightly backup time** (server clock) and how many **versions to keep per router** — a new version is saved only when the configuration actually changes, and the oldest is dropped past the limit. Stored configurations are **encrypted**. Optionally keep a **plain-text mirror** of each router's latest config in a folder you choose: handy to `git init` for a free change history, but note those copies are **unencrypted and contain passwords**, so protect that folder.",
+      { h: "Off-site backup, replacement suggestions & about" },
+      "**Off-site backup** copies your backups off the server. **Replacement suggestions** tunes the end-of-life guidance shown per router model. **About this installation** lists the public address, the controller's WireGuard key and network, the data folder, and how many routers and backups are stored.",
+    ] },
+    { id: "admin-audit", title: "Admin · Audit log", body: [
+      "The **Audit log** (sidebar → Admin → Audit log) is the record of **every sign-in and every change**, newest first (the last 500). Each row shows when it happened, who did it, the action, what it affected, the address it came from, and a detail line. Nothing here can be edited — it's your accountability trail for who changed what.",
     ] },
   ] },
 

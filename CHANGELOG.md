@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.0-beta.2 - 2026-11-06
+
+- **Manual: a much deeper Administration chapter.** The brief "Admin settings" page is now a full **Administration**
+  section in the Manual, with its own chapter for each Admin tab - **Branding**, **Technicians & roles**,
+  **Integrations**, **API access**, **Collectors** and **Settings (system)**, plus the **Audit log** - explaining what
+  each field does and how to use it (staff & client Microsoft sign-in, backups and the plain-text mirror, the WireGuard
+  address, version & updates, and more).
+
 ## 4.1.0-beta.1 - 2026-11-06
 
 - **Help Center** - a new **Manual** and **Knowledge Base**, reached from a **?** menu in the top bar (and at the top of
