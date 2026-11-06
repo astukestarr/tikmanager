@@ -1,30 +1,38 @@
 # TikManager
 
-A self-hosted MikroTik RouterOS controller for MSPs and IT teams: adopt routers with one command, monitor them (health,
-uptime, ISPs, packet loss), back up their configuration nightly, upgrade firmware safely on a schedule, push scripts and
-run commands, build WireGuard and IPsec tunnels with guided wizards, run on-demand diagnostics (live traffic, speed and
-link tests), keep them secure and compliant, give people remote access, and give each client a read-only view of their
-own routers. It installs on an Ubuntu server with one command and updates itself from the web page with one click.
+A self-hosted **network management platform** for MSPs and IT teams, built around MikroTik RouterOS: adopt routers with
+one command, monitor them (health, uptime, ISPs, packet loss), back up their configuration nightly, upgrade firmware
+safely on a schedule, push scripts and run commands, build WireGuard and IPsec tunnels with guided wizards, run
+on-demand diagnostics, keep them secure and compliant, and give people remote access. On top of that it gives you:
 
-Python 3 standard library only on the server (plus Ubuntu's `python3-cryptography` for encrypting stored configs),
-SQLite, WireGuard and Caddy. No build step, no package manager.
+- **IPAM** - a full IP Address Management workspace that **discovers** subnets, live IP usage and VLANs from your
+  managed MikroTiks and UniFi/UISP, with a visual IP map, a capacity dashboard, VLANs, VRFs, devices and more.
+- **Network collectors** - a lightweight agent you push from PowerShell or an RMM to a box at a client that has **no**
+  MikroTik or UniFi, so its network (and, over SNMP, its devices and VLANs) still shows up in IPAM.
+- **A global Customer selector** - pick one client and the whole app follows, so you can focus on one at a time.
 
-| Every router at a glance | One router: health, traffic, upgrades |
+It installs on an Ubuntu server with one command and updates itself from the web page with one click. Python 3 standard
+library only on the server (plus Ubuntu's `python3-cryptography` for encrypting stored configs), SQLite, WireGuard and
+Caddy. No build step, no package manager.
+
+| IPAM: a live operations dashboard | IPAM: a visual map of every IP |
 |---|---|
+| ![IPAM dashboard](docs/screenshots/ipam-dashboard.jpg) | ![IPAM visual map](docs/screenshots/ipam-map.jpg) |
+| **Network collectors for clients with no MikroTik or UniFi** | **Focus the whole app on one customer** |
+| ![Collectors](docs/screenshots/collectors.jpg) | ![Customer selector](docs/screenshots/dashboard-overview.jpg) |
+| **Every router at a glance** | **One router: health, traffic, upgrades** |
 | ![Routers list](docs/screenshots/routers.jpg) | ![Router page](docs/screenshots/router.jpg) |
 | **Firewall rules, edited like WebFig - with automatic undo** | **Where every router is** |
 | ![Firewall rule editor](docs/screenshots/firewall-rule.jpg) | ![Site map](docs/screenshots/site-map.jpg) |
-| **Sign-in attempts on TikManager, its server and every router** | |
-| ![Security page](docs/screenshots/security.jpg) | |
 
-*(Screenshots from dev mode with simulated routers.)*
+*(Screenshots from dev mode with simulated routers - no real client data.)*
 
 MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report it privately: [SECURITY.md](SECURITY.md).
 
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
-- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [Subnets in use](#subnets-in-use) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
+- Using it: [Routers](#routers) · [Maps](#maps-where-routers-are-and-whats-behind-them) · [WireGuard port](#changing-the-wireguard-port) · [Winbox](#winbox-through-tikmanager) · [Firewall & NAT](#firewall--nat-rules) · [IPAM](#ipam-ip-address-management) · [Collectors](#network-collectors-clients-with-no-mikrotik-or-unifi) · [Discovered](#discovered-mikrotiks-not-in-tikmanager-yet) · [Security](#security-sign-in-attempts-everywhere) · [Alerts](#alerts-connectwise-tickets-and-teams) · [Clients and their users](#clients-and-their-users) ·
   [Configuration backups](#configuration-backups) · [Router upgrades](#router-upgrades-routeros-and-firmware) ·
   [Site-to-site VPN](#site-to-site-vpn) · [Router Wizard](#router-wizard-wireguard-and-ipsec-tunnels) · [Remote access](#remote-access-wireguard-for-windows) · [Router health](#router-health-dashboard) · [Diagnostics](#diagnostics-traffic-watch-packet-sniffer-link-test) · [Compliance](#compliance) · [Tasks](#tasks-scripts-groups-schedules-automatic-firmware-updates) ·
   [Integrations](#integrations) · [Admin](#admin)
@@ -449,17 +457,41 @@ Nothing runs until you run it.
 first checks it for passwords, keys, public IP addresses, e-mail addresses and client names, and each finding must be
 removed or confirmed. Sharing needs a GitHub token (classic, only the `public_repo` scope) on Admin > Integrations.
 
-## Subnets in use
+## IPAM: IP address management
 
-**Subnets** lists every LAN subnet on every approved router, grouped by client: subnet, name (the interface comment),
-router, interface, gateway address and usable addresses. It's read from the routers each time they're polled, so it
-stays current without anyone keeping a spreadsheet.
-- **Overlaps** between a client's own subnets are flagged and tinted - two sites using the same range can't be joined
-  with a site-to-site VPN without renumbering one. **Only overlaps** shows just those.
-- The **MikroTik default** (192.168.88.0/24) is marked, and so are ranges **also used at other clients** (fine on their
-  own; worth knowing before connecting two networks).
-- Search by subnet, name, router or client - or type an IP address to find the subnet it belongs to.
-- **Export CSV** downloads what's shown. Client users see only their own subnets.
+**IPAM** (Network > Subnets (IPAM), or `/ipam`) is a full IP Address Management workspace in the spirit of phpIPAM, but
+it *knows your gear*. Organise address space by client and by free-form sections, with nested subnets, VLANs, VRFs,
+devices, locations and racks - and a **visual map of every IP** (used, reserved, DHCP, gateway or free) at a glance.
+
+![IPAM visual map](docs/screenshots/ipam-subnets.jpg)
+
+- **Discovery, not data entry.** *Sync from routers* reads a client's managed MikroTiks and UniFi/UISP and fills IPAM in:
+  the subnets on each device, who's actually using each address (router addresses, DHCP leases, ARP, neighbours), and the
+  **VLANs** - both routed (`/interface/vlan`) and layer-2 bridge VLANs, plus UniFi's network VLANs. It **never overwrites
+  anything you typed by hand**, and leaves TikManager's own management range alone. Sync one client or the whole estate.
+- **A real dashboard:** capacity, a 30-day utilization trend, subnet-health bands, an address-status donut, actionable
+  alerts (over-threshold, full, offline, stale) and a per-client footprint rollup you can click into.
+- **Promote a found IP to a device** in one click - the device-create form opens pre-filled with what's known (name, IP,
+  client) and links the address to it.
+- **Overlaps** between a client's own subnets are flagged; the **MikroTik default** (192.168.88.0/24) is marked.
+- VLANs / VRFs / devices / locations / racks tabs, DNS & PTR fields, and **CSV import/export** (phpIPAM-compatible;
+  import only ever adds). Turn on a per-client toggle (Admin > Clients) to let a client see **their own** IPAM, read-only.
+
+## Network collectors: clients with no MikroTik or UniFi
+
+Some client sites have nothing TikManager manages. A **collector** fixes that: a lightweight agent you install on a
+Windows box there - **push it from PowerShell or an RMM** (Syncro, NinjaOne…) with a one-line command. It scans the LAN
+(ping, ARP, reverse-DNS) and reports live hosts straight into IPAM, under the client its enroll key belongs to.
+
+![Collectors](docs/screenshots/collectors.jpg)
+
+- Create one per client on **Admin > Collectors**; you get a one-time key and a ready install command. Scan ranges and
+  interval are configured in TikManager and pulled by the agent (no reinstall to change them).
+- Turn on **SNMP (v2c)** and give it a read-only community string, and the agent also reads device names and models
+  (typed as switch / router / firewall / AP), **VLANs off any SNMP switch**, and ARP tables - all folded into IPAM.
+  Community strings are sent only to the agent, never shown on the admin page.
+- The agent is dependency-free (no Python or binary on the box), and everything it reports follows the same rule as
+  router sync: it never overwrites your manual records or richer router/UniFi data.
 
 ## Discovered: MikroTiks not in TikManager yet
 

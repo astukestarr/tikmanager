@@ -300,6 +300,18 @@ function addrDialog(subnetId, a, ip) {
   box.appendChild(field("DNS name", inp("f_dns", a?.dns_name || "")));
   box.appendChild(field("PTR (reverse DNS)", inp("f_ptr", a?.ptr || "")));
   box.appendChild(field("Notes", inp("f_notes", a?.notes || "")));
+  // promote this IP to a device: opens the device-create dialog pre-filled with what we already know
+  const theIp = a?.ip || ip || "";
+  if (theIp && !readonly) {
+    const row = el("div", "pad-t");
+    const mk = el("button", "btn", "Make this IP a device →"); mk.type = "button";
+    mk.addEventListener("click", () => {
+      $("dlg").close();
+      const org = (tree.subnets.find((s) => s.id === subnetId) || {}).org_id || "";
+      deviceDialog({ name: a?.hostname || theIp, management_ip: theIp, org_id: org });
+    });
+    row.appendChild(mk); box.appendChild(row);
+  }
   openDlg(a?.id ? "Edit " + a.ip : "New address", box, async () => {
     await post("/api/ipam/addresses", { id: a?.id, subnet_id: subnetId, ip: $("f_ip").value, status: $("f_status").value,
       hostname: $("f_host").value, mac: $("f_mac").value, owner: $("f_owner").value, dns_name: $("f_dns").value, ptr: $("f_ptr").value, notes: $("f_notes").value });

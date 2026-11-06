@@ -584,11 +584,17 @@ class Ipam:
         if b.get("id"):
             cols = ", ".join(f"{k}=?" for k in fields)
             self.db.run(f"UPDATE ipam_devices SET {cols} WHERE id=?", (*fields.values(), int(b["id"])))
-            return int(b["id"])
-        return self.db.run("INSERT INTO ipam_devices (name, type_id, location_id, org_id, management_ip, description, notes, "
-                           "created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                           (name, fields["type_id"], fields["location_id"], fields["org_id"], fields["management_ip"],
-                            fields["description"], fields["notes"], user, now, now))
+            did = int(b["id"])
+        else:
+            did = self.db.run("INSERT INTO ipam_devices (name, type_id, location_id, org_id, management_ip, description, notes, "
+                              "created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                              (name, fields["type_id"], fields["location_id"], fields["org_id"], fields["management_ip"],
+                               fields["description"], fields["notes"], user, now, now))
+        # link the address at this management IP to the device, so "make this IP a device" connects the two
+        if fields["management_ip"]:
+            self.db.run("UPDATE ipam_addresses SET ipam_device_id=? WHERE ipam_device_id IS NULL AND ip=? AND subnet_id IN "
+                        "(SELECT id FROM ipam_subnets WHERE COALESCE(org_id,0)=?)", (did, fields["management_ip"], fields["org_id"] or 0))
+        return did
 
     def device_delete(self, did):
         self.db.run("DELETE FROM ipam_devices WHERE id=?", (int(did),))

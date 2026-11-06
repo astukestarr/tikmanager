@@ -12,7 +12,7 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "3.7.0"    # the release these slides describe (its betas included)
+RELEASE = "4.0.0"    # the release these slides describe (the 3.7 beta cycle shipped as 4.0)
 SINCE = "3.6.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
@@ -204,7 +204,7 @@ SLIDES_3_6 = [
              "a router or a setting. See the endpoints and examples in the README's \"Outbound API\" section."},
 ]
 SLIDES_3_7 = [
-    {"id": "ipam", "title": "IPAM: IP Address Management", "img": None, "view": None, "who": "tech",
+    {"id": "ipam", "title": "IPAM: IP Address Management", "img": "ipam", "view": None, "who": "tech",
      "text": "A new IPAM workspace (Network > IPAM) in the spirit of phpIPAM, but it knows your routers. Organise address space "
              "by client and by free-form sections, with nested subnets and a visual map of every IP - used, reserved, DHCP, "
              "gateway or free - at a glance. IPv4 now; IPv6 is coming."},
@@ -228,13 +228,16 @@ SLIDES_3_7 = [
      "text": "A new per-client IPAM toggle in Admin > Clients. Turn it on and that client's users can open IPAM read-only, scoped to "
              "just their own organisation - their subnets, addresses, VLANs and devices, with no editing. Everything stays "
              "technician-only to change."},
-    {"id": "ipam-dashboard", "title": "IPAM: a real operations dashboard", "img": None, "view": None, "who": "tech",
+    {"id": "ipam-dashboard", "title": "IPAM: a real operations dashboard", "img": "ipam-dashboard", "view": None, "who": "tech",
      "text": "The IPAM Dashboard is rebuilt for running many clients at once: hero tiles (clients, subnets, overall IP "
              "utilization, devices, and what needs attention), an IP-capacity gauge, a subnet-health breakdown, an "
              "address-status donut, actionable alerts (over-threshold, full, offline, stale), a per-client footprint rollup "
              "you can click into, plus device-type, subnet-size and discovered-vs-manual charts. All drawn inline - nothing "
              "extra to load."},
-    {"id": "customer-selector", "title": "Focus the whole app on one customer", "img": None, "view": None, "who": "tech",
+    {"id": "ipam-ip-to-device", "title": "IPAM: turn a found IP into a device", "img": "ipam-device", "view": None, "who": "tech",
+     "text": "Found an IP you want to track as infrastructure? Open it and hit \"Make this IP a device\" - the device form "
+             "opens pre-filled with what's already known (name, IP, client), and the address is linked to the new device."},
+    {"id": "customer-selector", "title": "Focus the whole app on one customer", "img": "customer-selector", "view": None, "who": "tech",
      "text": "A new Customer pulldown at the top of every page. Pick a customer and the entire app follows - every page, "
              "list and menu count shows only their data - then set it back to All customers when you're done. It remembers "
              "your choice and carries into the IPAM workspace too."},
@@ -242,11 +245,11 @@ SLIDES_3_7 = [
      "text": "IPAM's \"Sync from routers\" now has an All clients option that discovers your whole estate in one go, in the "
              "background with a progress count. VLAN discovery is more complete too - every VLAN a router reports now shows "
              "on the VLANs tab, including layer-2 VLANs defined purely by bridge VLAN filtering (no IP of their own)."},
-    {"id": "collectors", "title": "Network collectors for unmanaged clients", "img": None, "view": "admin", "who": "tech",
+    {"id": "collectors", "title": "Network collectors for unmanaged clients", "img": "collectors", "view": "admin", "who": "tech",
      "text": "Install a lightweight agent on a Windows box at a client with no MikroTik or UniFi - push it from your RMM or "
              "paste a one-line command. It scans the LAN (ping, ARP, reverse-DNS) and reports live hosts into IPAM under that "
              "client. Create one per client on Admin > Collectors."},
-    {"id": "collectors-snmp", "title": "Collectors: SNMP device & VLAN discovery", "img": None, "view": "admin", "who": "tech",
+    {"id": "collectors-snmp", "title": "Collectors: SNMP device & VLAN discovery", "img": "collectors-snmp", "view": "admin", "who": "tech",
      "text": "Turn on SNMP (v2c) for a collector and give it a read-only community string. It then reads device names and "
              "models (typed as switch / router / firewall / AP), VLANs off any SNMP switch, and ARP tables - all folded into "
              "IPAM. Community strings are sent only to the agent, never shown on the admin page."},
@@ -256,7 +259,7 @@ IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"4.0.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")

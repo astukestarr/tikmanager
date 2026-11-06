@@ -3,6 +3,28 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.0.0 - 2026-11-05
+
+A major release. TikManager grew from a MikroTik controller into a **network management platform** for MSPs - with
+full IP address management, agent-based discovery for networks it doesn't manage, and a client-first way of working.
+
+- **IPAM - a complete IP Address Management workspace** (`/ipam`), in the spirit of phpIPAM but aware of your gear.
+  Sections and per-client views, nested subnets, a visual IP map (used / reserved / DHCP / gateway / free), VLANs,
+  VRFs, devices, locations and racks, DNS/PTR, CSV import/export - and a dashboard with capacity, a 30-day utilization
+  trend, subnet health and alerts. It **discovers subnets, live IP usage and VLANs straight from the managed MikroTiks
+  and UniFi/UISP** (routed and layer-2 bridge VLANs), overlaid on your manual records and never clobbering them. Sync
+  one client or the whole estate at once. Promote a discovered IP to a **device** in one click - the device form opens
+  pre-filled (name, IP, client) and the address is linked to it. Clients can get a read-only view of their own IPAM.
+- **Network collectors** - a lightweight agent you install on a Windows box at a client with **no MikroTik or UniFi**,
+  pushable from PowerShell or an RMM. It scans the LAN (ping, ARP, reverse-DNS) and, with **SNMP (v2c)** turned on,
+  reads device names/models, VLANs and ARP tables off any SNMP switch - all folded into IPAM under that client.
+- **A global Customer selector** at the top of the whole app: pick one customer and every page, list and count follows,
+  so you can focus on one client at a time. Defaults to all customers and remembers your choice.
+- Plus everything from the 3.7 cycle: parallel and whole-estate sync, UniFi network/VLAN discovery, and more (see the
+  3.7.0-beta entries below).
+
+Upgrading from 3.x is automatic - new tables are created on first boot; nothing to migrate.
+
 ## 3.7.0-beta.30 - 2026-11-05
 
 Collectors: **SNMP can be turned on when you create a collector**, not only afterwards - the New collector dialog now has
