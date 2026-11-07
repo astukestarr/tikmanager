@@ -1105,8 +1105,8 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, admin=True)
             orgs = db.q("SELECT id, name FROM orgs WHERE active=1 ORDER BY name")
             return self.json({"collectors": collectors.list(), "orgs": orgs, "public_url": settings.public_url})
-        if path == "/api/kb":   # Knowledge Base articles (anyone signed in reads; administrators write)
-            s = self.require()
+        if path == "/api/kb":   # Knowledge Base articles (technicians read; administrators write)
+            s = self.require(tech=True)   # internal team notes - never exposed to client-portal users
             return self.json({"articles": kb.list(), "can_edit": self.can(s, "settings")})   # same gate as the write routes (admin=True -> 'settings')
         if path == "/api/version":   # current version, newest release, upgrade progress (admins)
             self.require(tech=True, admin=True)

@@ -419,6 +419,9 @@ function setTab(t) {
 async function init() {
   try { me = await api("/api/me"); } catch { return; }
   const body = document.querySelector(".help-body");
+  // The Knowledge Base is internal team notes - technicians only. Client-portal users see the Manual alone.
+  const client = me?.kind === "client";
+  if (client) { const kbTab = document.querySelector('#tabs [data-tab="kb"]'); if (kbTab) kbTab.hidden = true; }
   $("tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { kbCat = ""; setTab(b.dataset.tab); } });
   $("sideToggle").addEventListener("click", () => body.classList.toggle("side-open"));
   $("sideBackdrop").addEventListener("click", () => body.classList.remove("side-open"));
@@ -462,9 +465,9 @@ async function init() {
     }
   });
 
-  // open on the tab from the hash (#manual / #kb)
+  // open on the tab from the hash (#manual / #kb); clients only ever get the Manual
   const h = location.hash.slice(1);
-  tab = h === "kb" ? "kb" : "manual";
+  tab = (h === "kb" && !client) ? "kb" : "manual";
   render();
   if (tab === "kb") { await loadKb(); kb.loaded = true; render(); }
 }

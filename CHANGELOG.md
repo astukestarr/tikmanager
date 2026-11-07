@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.1 - 2026-11-08
+
+The 4.1.1 patch. Since 4.1.0:
+
+- **Security: the Knowledge Base is technician-only.** Its read endpoint was open to any signed-in account, which
+  included client-portal users, so a client could read your team's internal how-to notes. It now requires a technician
+  session (writes were already administrator-only), and the Help Center hides the Knowledge Base tab for client users -
+  they keep the Manual.
+- **IPAM: UniFi-discovered subnets are now identified.** A UniFi subnet has no MikroTik router, so its Router column
+  was blank; it now shows **"UniFi · <site>"** (the console/site it came from), on the subnet list and detail.
+
+## 4.1.1-beta.2 - 2026-11-06
+
+- **Security: Knowledge Base is technician-only.** The `/api/kb` read endpoint was open to any signed-in account,
+  which included client-portal users, so a client could read your team's internal how-to notes. It now requires a
+  technician session (writes were already administrator-only). The Help Center hides the Knowledge Base tab for
+  client users; they keep the Manual.
+
 ## 4.1.1-beta.1 - 2026-11-06
 
 - **IPAM: identify UniFi-discovered subnets.** A UniFi subnet has no MikroTik router, so its Router column was blank.
