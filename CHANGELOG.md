@@ -3,6 +3,22 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.2 - 2026-11-08
+
+- **The Knowledge Base refuses to store secrets.** Saving a KB article whose body looks like it contains a live
+  credential - an API key/token format (AWS, GitHub, Google, Slack, a JWT or a PEM private key) or a labelled
+  `password=`/`secret=`/`api_key=` with a real random value - is now rejected with a message pointing to Admin >
+  Integrations. Placeholders (`YOUR_KEY`, `<secret>`, `$env:TOKEN`) and ordinary mentions of "password" are not
+  flagged. Belt-and-suspenders after making the Knowledge Base technician-only in 4.1.1.
+
+## 4.1.2-beta.1 - 2026-11-08
+
+- **Knowledge Base refuses to store secrets.** Saving a KB article whose body looks like it contains a live
+  credential - an API key/token format (AWS, GitHub, Google, Slack, a JWT or a PEM private key) or a labelled
+  `password=`/`secret=`/`api_key=` with a real random value - is now rejected with a message pointing to Admin >
+  Integrations. Placeholders (`YOUR_KEY`, `<secret>`, `$env:TOKEN`) and ordinary mentions of "password" are not
+  flagged. Belt-and-suspenders after making the Knowledge Base technician-only in 4.1.1.
+
 ## 4.1.1 - 2026-11-08
 
 The 4.1.1 patch. Since 4.1.0:
