@@ -3,7 +3,8 @@ on the Logs page and the router's Logs tab, with alert rules.
 
 - Lines arrive over the WireGuard tunnel (secevents.py listens and hands each one here as well). They're buffered and
   written in batches; at most LINES_PER_MINUTE per router are kept, so one misbehaving router can't flood the database.
-- Kept KEEP_DAYS days and at most MAX_PER_DEVICE lines per router (a chatty core router can't push out the others).
+- Kept for the retention set on Admin > Settings (default KEEP_DAYS, up to MAX_KEEP_DAYS days), and at most a per-router
+  line cap that scales with that window (a chatty core router can't push out the others).
 - Alert rules (Logs page > Alert rules, administrators): text or /regex/, optional topics and minimum severity, which
   routers (all, a client, a tag or one router), and "N matching lines within M minutes". A rule that fires becomes an
   alert (ticket / Teams / email / webhooks, alerts.py) that clears once fewer than N lines match in the window.
@@ -14,8 +15,10 @@ import secrets as pysecrets
 import threading
 import time
 
-KEEP_DAYS = 14
-MAX_PER_DEVICE = 20000
+KEEP_DAYS = 14            # default days kept; Admin > Settings can set 1..MAX_KEEP_DAYS (setting "log_keep_days")
+MAX_KEEP_DAYS = 30
+MIN_PER_DEVICE = 20000    # safety cap per router; scales with retention so a longer window isn't truncated for a normal router
+PER_DEVICE_PER_DAY = 3000 # ~lines/day budget a chatty core router can't exceed (it can't push the others out)
 LINES_PER_MINUTE = 300
 SEVERITIES = ["debug", "info", "warning", "error", "critical"]
 PRI_SEV = {0: "critical", 1: "critical", 2: "critical", 3: "error", 4: "warning", 5: "info", 6: "info", 7: "debug"}
@@ -69,11 +72,21 @@ class RouterLogs:
         if rows:
             self.db.many("INSERT INTO router_logs (ts, device_id, topics, severity, message) VALUES (?,?,?,?,?)", rows)
 
+    def keep_days(self) -> int:
+        """Days of router logs to keep (Admin > Settings), clamped to 1..MAX_KEEP_DAYS; default KEEP_DAYS."""
+        try:
+            n = int(self.db.setting("log_keep_days", KEEP_DAYS) or KEEP_DAYS)
+        except (TypeError, ValueError):
+            n = KEEP_DAYS
+        return max(1, min(MAX_KEEP_DAYS, n))
+
     def prune(self):
-        self.db.run("DELETE FROM router_logs WHERE ts < ?", (time.time() - KEEP_DAYS * 86400,))
-        for r in self.db.q("SELECT device_id, COUNT(*) AS n FROM router_logs GROUP BY device_id HAVING n > ?", (MAX_PER_DEVICE,)):
+        days = self.keep_days()
+        cap = max(MIN_PER_DEVICE, days * PER_DEVICE_PER_DAY)
+        self.db.run("DELETE FROM router_logs WHERE ts < ?", (time.time() - days * 86400,))
+        for r in self.db.q("SELECT device_id, COUNT(*) AS n FROM router_logs GROUP BY device_id HAVING n > ?", (cap,)):
             self.db.run("""DELETE FROM router_logs WHERE device_id=? AND id <= (SELECT id FROM router_logs WHERE device_id=?
-                           ORDER BY id DESC LIMIT 1 OFFSET ?)""", (r["device_id"], r["device_id"], MAX_PER_DEVICE))
+                           ORDER BY id DESC LIMIT 1 OFFSET ?)""", (r["device_id"], r["device_id"], cap))
 
     def loop(self):
         while True:

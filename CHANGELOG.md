@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.2.0-beta.1 - 2026-11-08
+
+- **Choose how long logs are kept (up to 30 days).** A new **Log retention** panel on Admin > Settings sets how many
+  days of router syslog lines (the Logs page - logins, DHCP, firewall `log=yes` traffic) and Traffic Flow conversations
+  (the router Flows tab) TikManager keeps - 1 to 30 days each, up from a fixed 14 and 7. The per-router safety caps now
+  scale with the window, so a longer retention isn't quietly truncated for a normal router. Older data is still pruned
+  hourly, and lowering a value frees space right away. Note: 30 days of Flows can use a lot of disk on a busy router -
+  keep an eye on the Data folder size (About this installation).
+
 ## 4.1.5 - 2026-11-08
 
 - **Admin tabs wrap on a phone.** In 4.1.4 the tab row scrolled sideways, so Settings (the last tab) was off-screen

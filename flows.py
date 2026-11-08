@@ -7,7 +7,8 @@
 - Collector: one UDP socket on the tunnel address; IPFIX (v10) and NetFlow v9 with templates. Each record becomes a
   conversation - the local side (private or the router's own networks), the remote side, the service port, who started
   it (in / out), bytes each way - summed into BUCKET-second buckets, at most MAX_KEYS conversations per router per bucket
-  (the rest is counted as "other"). Kept KEEP_DAYS days, at most MAX_ROWS rows per router.
+  (the rest is counted as "other"). Kept for the retention set on Admin > Settings (default KEEP_DAYS, up to
+  MAX_KEEP_DAYS days), with a per-router row cap that scales with that window.
 - Shown with names (DHCP leases), country and organisation (IPinfo Lite, geoip.py) and service names. Blocked: the
   samples region blocking's log rules send (router logs, prefix tm-geo), so it shows what was dropped.
 """
@@ -27,8 +28,10 @@ from routeros import RouterError
 FLOW_PORT = int(os.environ.get("TM_FLOW_PORT", "2055"))
 BUCKET = 600
 MAX_KEYS = 4000
-KEEP_DAYS = 7
-MAX_ROWS = 1_500_000
+KEEP_DAYS = 7              # default days kept; Admin > Settings can set 1..MAX_KEEP_DAYS (setting "flow_keep_days")
+MAX_KEEP_DAYS = 30
+MAX_ROWS = 1_500_000      # floor for the per-router row cap; scales up with retention (see prune)
+ROWS_PER_DAY = 120_000    # ~rows/day budget: longer windows raise the cap so a normal router isn't truncated
 MIN_MEM = 100 * 1024 * 1024       # 64 MB routers are left out
 # protecting TikManager itself: a busy core router can send thousands of flow packets a second, and reading them all would
 # starve everything else. Each router gets PACKETS_PER_SEC packets read per second (template packets always); the rest are
@@ -288,10 +291,20 @@ class Flows:
                         packets=packets+excluded.packets, flows=flows+excluded.flows""",
                      [(*k, *v) for k, v in rows.items()])
 
+    def keep_days(self) -> int:
+        """Days of flow history to keep (Admin > Settings), clamped to 1..MAX_KEEP_DAYS; default KEEP_DAYS."""
+        try:
+            n = int(self.db.setting("flow_keep_days", KEEP_DAYS) or KEEP_DAYS)
+        except (TypeError, ValueError):
+            n = KEEP_DAYS
+        return max(1, min(MAX_KEEP_DAYS, n))
+
     def prune(self):
-        self.db.run("DELETE FROM flows WHERE ts < ?", (time.time() - KEEP_DAYS * 86400,))
-        for r in self.db.q("SELECT device_id, COUNT(*) AS n FROM flows GROUP BY device_id HAVING n > ?", (MAX_ROWS,)):
-            cut = self.db.one("SELECT ts FROM flows WHERE device_id=? ORDER BY ts DESC LIMIT 1 OFFSET ?", (r["device_id"], MAX_ROWS))
+        days = self.keep_days()
+        cap = max(MAX_ROWS, days * ROWS_PER_DAY)
+        self.db.run("DELETE FROM flows WHERE ts < ?", (time.time() - days * 86400,))
+        for r in self.db.q("SELECT device_id, COUNT(*) AS n FROM flows GROUP BY device_id HAVING n > ?", (cap,)):
+            cut = self.db.one("SELECT ts FROM flows WHERE device_id=? ORDER BY ts DESC LIMIT 1 OFFSET ?", (r["device_id"], cap))
             if cut:
                 self.db.run("DELETE FROM flows WHERE device_id=? AND ts <= ?", (r["device_id"], cut["ts"]))
 
@@ -434,7 +447,7 @@ class Flows:
 
     def query(self, d, f):
         """Flows for one router: f = hours, q, local, remote, port, proto, dir, country, org, view (all / blocked), limit."""
-        hours = max(1, min(KEEP_DAYS * 24, int(f.get("hours") or 24)))
+        hours = max(1, min(self.keep_days() * 24, int(f.get("hours") or 24)))
         since = time.time() - hours * 3600
         names, cn = self.names(d), self.geo.names()
         if f.get("view") == "blocked":

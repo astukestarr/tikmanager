@@ -2566,6 +2566,13 @@ async function adminSystem() {
         <span class="mono">${esc(s.backup_mirror_dir)}</span></label>
       <p class="small muted">Off by default: the copies are <b>not encrypted</b> and contain passwords (files are readable only by TikManager). Make that folder a git repository
         (<span class="mono">git init</span>) and every change is committed - a free history - or point your own backup tool at it.</p></div>
+    <div class="card"><h2>Log retention</h2><div class="row">
+      <label class="field">Router logs (Logs page) <input id="sLogDays" type="number" min="1" max="30" value="${s.log_keep_days}"> days</label>
+      <label class="field">Traffic flows (router Flows tab) <input id="sFlowDays" type="number" min="1" max="30" value="${s.flow_keep_days}"> days</label>
+      <button class="btn primary" type="button" id="sKeepSave">Save</button><span class="status" id="sKeepStatus"></span></div>
+      <p class="small muted">How long syslog lines (logins, DHCP, firewall <span class="mono">log=yes</span> traffic) and Traffic Flow conversations are kept, 1–30 days.
+        Older data is removed hourly; lowering a value frees space right away. <b>Flows at 30 days can use a lot of disk on a busy router</b>
+        (every conversation, every 10 minutes) — watch the Data folder size under About this installation.</p></div>
     <div class="card" id="lcAdmin"><h2>Replacement suggestions</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>About this installation</h2><div class="grid2">
       ${[["Public address", s.public_url], ["WireGuard address", s.wg_endpoint], ["Controller WireGuard key", s.wg_server_pubkey], ["Tunnel network", s.wg_network],
@@ -2587,6 +2594,10 @@ async function adminSystem() {
   $("sSave").addEventListener("click", async () => {
     try { await post("/api/admin/system", { backup_hour: $("sHour").value, backup_keep_versions: $("sKeep").value, backup_mirror: $("sMirror").checked }); say("sStatus", "Saved.", true); }
     catch (e) { say("sStatus", e.message); }
+  });
+  $("sKeepSave").addEventListener("click", async () => {
+    try { await post("/api/admin/system", { log_keep_days: $("sLogDays").value, flow_keep_days: $("sFlowDays").value }); say("sKeepStatus", "Saved.", true); }
+    catch (e) { say("sKeepStatus", e.message); }
   });
 }
 

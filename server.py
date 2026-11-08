@@ -1086,6 +1086,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({**sysconf.public(), "wg_server_pubkey": settings.wg_server_pubkey, "data_dir": str(settings.data_dir),
                               "backup_hour": backups.hour, "backup_keep_versions": backups.keep_versions, "public_url": settings.public_url,
                               "backup_mirror": backups.mirror_on, "backup_mirror_dir": str(backups.mirror_dir()),
+                              "log_keep_days": routerlogs.keep_days(), "flow_keep_days": flowlog.keep_days(),
                               "wg_endpoint": settings.wg_endpoint, "wg_network": settings.wg_network,
                               "encryption": "AES-256-GCM" if backups.vault.available else "not available (dev)",
                               "routers": db.one("SELECT COUNT(*) AS n FROM devices WHERE state='adopted'")["n"],
@@ -3846,18 +3847,33 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/system":
             s = self.require(tech=True, admin=True)
             b = self.body()
-            try:
-                hour, keep = int(b.get("backup_hour")), int(b.get("backup_keep_versions"))
-            except (TypeError, ValueError):
-                raise HttpError(400, "Enter whole numbers.") from None
-            if not 0 <= hour <= 23 or not 1 <= keep <= 100:
-                raise HttpError(400, "Backup hour must be 0-23 and versions to keep 1-100.")
-            db.set_setting("backup_hour", hour)
-            db.set_setting("backup_keep_versions", keep)
+            detail = []
+            if "backup_hour" in b or "backup_keep_versions" in b:   # the Backups card
+                try:
+                    hour, keep = int(b.get("backup_hour")), int(b.get("backup_keep_versions"))
+                except (TypeError, ValueError):
+                    raise HttpError(400, "Enter whole numbers.") from None
+                if not 0 <= hour <= 23 or not 1 <= keep <= 100:
+                    raise HttpError(400, "Backup hour must be 0-23 and versions to keep 1-100.")
+                db.set_setting("backup_hour", hour)
+                db.set_setting("backup_keep_versions", keep)
+                backups.prune()
+                detail.append(f"backup hour {hour}, keep {keep} versions")
             if "backup_mirror" in b:
                 db.set_setting("backup_mirror", "1" if b.get("backup_mirror") else "0")
-            backups.prune()
-            db.audit(s["email"], "system settings changed", ip=self.client_ip(), detail=f"backup hour {hour}, keep {keep} versions")
+            if "log_keep_days" in b or "flow_keep_days" in b:   # the Log retention card
+                try:
+                    lk, fk = int(b.get("log_keep_days")), int(b.get("flow_keep_days"))
+                except (TypeError, ValueError):
+                    raise HttpError(400, "Enter whole numbers.") from None
+                if not (1 <= lk <= 30 and 1 <= fk <= 30):
+                    raise HttpError(400, "Keep router logs and flows for 1 to 30 days.")
+                db.set_setting("log_keep_days", lk)
+                db.set_setting("flow_keep_days", fk)
+                routerlogs.prune()   # apply right away so shrinking the window frees space now
+                flowlog.prune()
+                detail.append(f"logs {lk}d, flows {fk}d")
+            db.audit(s["email"], "system settings changed", ip=self.client_ip(), detail="; ".join(detail))
             return self.json({"ok": True})
         if m := re.fullmatch(r"/api/users/(\d+)/role", path):
             s = self.require(tech=True, admin=True)

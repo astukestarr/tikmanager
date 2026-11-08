@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "4.1.0"    # the release these slides describe
-SINCE = "4.0.0"      # the full release before it
+RELEASE = "4.2.0"    # the release these slides describe
+SINCE = "4.1.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -266,12 +266,19 @@ SLIDES_4_1 = [
              "as it fills. Capacity follows the MikroTik next-pool chain (overflow pools count) and ignores orphan pools "
              "nothing uses."},
 ]
-SLIDES = SLIDES_4_1   # 4.1's own slides (4.0.0 was released, so only the new work shows)
+SLIDES_4_2 = [
+    {"id": "log-retention", "title": "Keep logs and flows for up to 30 days", "img": None, "view": "admin", "who": "techadmin",
+     "text": "Admin > Settings > Log retention sets how long TikManager keeps router syslog lines (the Logs page - logins, "
+             "DHCP, firewall log=yes traffic) and Traffic Flow conversations (the router Flows tab) - 1 to 30 days each, up "
+             "from a fixed 14 and 7. The per-router caps scale with the window, so a longer retention isn't truncated. Note: "
+             "30 days of Flows can use a lot of disk on a busy router, so watch the Data folder size."},
+]
+SLIDES = SLIDES_4_2   # 4.2's own slides (4.1.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"4.1.0": {"since": "4.0.0", "slides": SLIDES_4_1}, "4.0.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"4.2.0": {"since": "4.1.0", "slides": SLIDES_4_2}, "4.1.0": {"since": "4.0.0", "slides": SLIDES_4_1}, "4.0.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")
