@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.2.0-beta.2 - 2026-11-08
+
+- **Log retention card shows what logs cost.** The Log retention panel now shows the data folder size, the database
+  size (where logs and flows live), and the current router-log line count and flow row count - so you can see the
+  disk impact before raising a retention value.
+
 ## 4.2.0-beta.1 - 2026-11-08
 
 - **Choose how long logs are kept (up to 30 days).** A new **Log retention** panel on Admin > Settings sets how many

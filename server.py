@@ -1083,10 +1083,24 @@ class Handler(BaseHTTPRequestHandler):
             return self.static("setup.html")
         if path == "/api/admin/system":
             self.require(tech=True, admin=True)
+            data_bytes = 0
+            for fpath in Path(settings.data_dir).rglob("*"):   # size of everything under the data folder (metadata only - fast)
+                try:
+                    if fpath.is_file():
+                        data_bytes += fpath.stat().st_size
+                except OSError:
+                    pass
+            try:
+                db_bytes = Path(db.path).stat().st_size
+            except OSError:
+                db_bytes = 0
             return self.json({**sysconf.public(), "wg_server_pubkey": settings.wg_server_pubkey, "data_dir": str(settings.data_dir),
                               "backup_hour": backups.hour, "backup_keep_versions": backups.keep_versions, "public_url": settings.public_url,
                               "backup_mirror": backups.mirror_on, "backup_mirror_dir": str(backups.mirror_dir()),
                               "log_keep_days": routerlogs.keep_days(), "flow_keep_days": flowlog.keep_days(),
+                              "data_dir_bytes": data_bytes, "db_bytes": db_bytes,
+                              "router_log_lines": db.one("SELECT COUNT(*) AS n FROM router_logs")["n"],
+                              "flow_rows": db.one("SELECT COUNT(*) AS n FROM flows")["n"],
                               "wg_endpoint": settings.wg_endpoint, "wg_network": settings.wg_network,
                               "encryption": "AES-256-GCM" if backups.vault.available else "not available (dev)",
                               "routers": db.one("SELECT COUNT(*) AS n FROM devices WHERE state='adopted'")["n"],

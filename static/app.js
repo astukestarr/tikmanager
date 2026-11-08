@@ -2570,9 +2570,11 @@ async function adminSystem() {
       <label class="field">Router logs (Logs page) <input id="sLogDays" type="number" min="1" max="30" value="${s.log_keep_days}"> days</label>
       <label class="field">Traffic flows (router Flows tab) <input id="sFlowDays" type="number" min="1" max="30" value="${s.flow_keep_days}"> days</label>
       <button class="btn primary" type="button" id="sKeepSave">Save</button><span class="status" id="sKeepStatus"></span></div>
+      <p class="small muted">Data folder: <b>${flBytes(s.data_dir_bytes || 0)}</b> (database ${flBytes(s.db_bytes || 0)}) ·
+        router logs <b>${(s.router_log_lines || 0).toLocaleString()}</b> lines · flows <b>${(s.flow_rows || 0).toLocaleString()}</b> rows.</p>
       <p class="small muted">How long syslog lines (logins, DHCP, firewall <span class="mono">log=yes</span> traffic) and Traffic Flow conversations are kept, 1–30 days.
         Older data is removed hourly; lowering a value frees space right away. <b>Flows at 30 days can use a lot of disk on a busy router</b>
-        (every conversation, every 10 minutes) — watch the Data folder size under About this installation.</p></div>
+        (every conversation, every 10 minutes) — the database figure above is most of what logs and flows cost.</p></div>
     <div class="card" id="lcAdmin"><h2>Replacement suggestions</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>About this installation</h2><div class="grid2">
       ${[["Public address", s.public_url], ["WireGuard address", s.wg_endpoint], ["Controller WireGuard key", s.wg_server_pubkey], ["Tunnel network", s.wg_network],
