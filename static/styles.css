@@ -47,7 +47,7 @@
 body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
 a { color: var(--info); }
 h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px; }
-.muted { color: var(--muted); } .small { font-size: 12px; } .mono { font-family: var(--mono); }
+.muted { color: var(--muted); } .small { font-size: 12px; } .mono { font-family: var(--mono); overflow-wrap: anywhere; }
 .hidden { display: none !important; }
 
 /* layout: full-height sidebar (logo, who's signed in, menu) beside the top bar and the page */
@@ -144,9 +144,9 @@ button.btn:hover { border-color: var(--muted); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger { color: var(--bad); }
 button:disabled { opacity: .5; cursor: default; }
-input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; max-width: 100%; }
 input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
-label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+label.field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; font-size: 13px; color: var(--muted); }
 label.field input, label.field select { color: var(--text); }
 .table-wrap { overflow-x: auto; }
 .table-wrap.scroll-y { overflow-y: auto; max-height: 460px; }   /* long lists (e.g. upgrade jobs) scroll inside the card instead of running off the page */
@@ -209,8 +209,11 @@ pre.cfg span { display: block; }
 .auth .brand-logo { height: 40px; }
 .brand-wordmark { max-width: none; }
 .logo-preview { height: 48px; max-width: 220px; object-fit: contain; border: 1px dashed var(--border); border-radius: 8px; padding: 4px; background: var(--bg); }
-.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-top: 12px; }
-.tabs button { all: unset; cursor: pointer; padding: 8px 14px; border-bottom: 2px solid transparent; color: var(--muted); }
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-top: 12px;
+  overflow-x: auto; scrollbar-width: none; }   /* too many tabs for a phone -> scroll the row, don't widen the page */
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { all: unset; cursor: pointer; padding: 8px 14px; border-bottom: 2px solid transparent; color: var(--muted);
+  flex: 0 0 auto; white-space: nowrap; }       /* each tab keeps its size; the row scrolls instead */
 .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 input[type=color] { width: 56px; height: 34px; padding: 2px; }
 .nowrap { white-space: nowrap; }
@@ -877,7 +880,7 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
    after the .bell-pop / .help-pop base rules above so it overrides them - equal specificity, later wins.) */
 @media (max-width: 600px) {
   .bell-pop, .help-pop {
-    position: fixed; top: 64px; left: auto; right: max(8px, env(safe-area-inset-right, 0px));
+    position: fixed; top: 64px; left: 0; right: 0; margin-left: auto; margin-right: auto;   /* centre it: equal gutters on any phone */
     width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 78px); overflow-y: auto;
   }
 }

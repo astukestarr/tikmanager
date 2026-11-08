@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.4 - 2026-11-08
+
+- **More mobile fixes.** The Admin tab row (Branding … Settings) was stretching the page wider than the screen on a
+  phone - it now scrolls on its own. Wide form controls and long file paths on the Settings tab no longer run off the
+  edge (controls cap at the column width; long paths wrap). And the Messages / Help dropdowns are now centred on a
+  phone instead of being pinned to the right. Desktop is unchanged.
+
 ## 4.1.3 - 2026-11-08
 
 - **Mobile top bar fixes.** On a phone the Messages and Help dropdowns are anchored to their icon, which sits in the
