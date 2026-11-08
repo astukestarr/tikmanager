@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.5 - 2026-11-08
+
+- **Admin tabs wrap on a phone.** In 4.1.4 the tab row scrolled sideways, so Settings (the last tab) was off-screen
+  until you swiped. The tabs now wrap onto two rows instead, so every tab - including Settings - is visible without
+  scrolling. Desktop is unchanged (one row).
+
 ## 4.1.4 - 2026-11-08
 
 - **More mobile fixes.** The Admin tab row (Branding … Settings) was stretching the page wider than the screen on a

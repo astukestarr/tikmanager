@@ -127,6 +127,9 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
   #custWrap { min-width: 0; }
   #custSel { max-width: 120px; min-width: 44px; }
   #logout { white-space: nowrap; padding-left: 10px; padding-right: 10px; }
+  /* show every tab at once instead of a scroll strip, so you don't have to swipe to reach Settings */
+  .tabs { flex-wrap: wrap; row-gap: 2px; }
+  .tabs button { padding: 8px 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .nav { transition: none; } }
 
