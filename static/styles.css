@@ -119,6 +119,15 @@ h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px;
   #custSel { max-width: 150px; }
   .main { padding: 16px; }
 }
+/* Phones: keep the top bar on one line (trim what's optional, don't let Sign out wrap). */
+@media (max-width: 600px) {
+  .topbar { gap: 5px; }
+  .ver-chip, .ver-check { display: none; }      /* version is in the sidebar footer and Admin > Updates */
+  /* let the customer picker shrink (its text truncates) so the bar fits any phone instead of overflowing */
+  #custWrap { min-width: 0; }
+  #custSel { max-width: 120px; min-width: 44px; }
+  #logout { white-space: nowrap; padding-left: 10px; padding-right: 10px; }
+}
 @media (prefers-reduced-motion: reduce) { .nav { transition: none; } }
 
 /* components */
@@ -863,6 +872,15 @@ dialog.wn::backdrop { background: rgba(0, 0, 0, .45); }
 .help-item { all: unset; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer;
   color: var(--text); font-size: 14px; }
 .help-item:hover, .help-item:focus-visible { background: var(--accent-soft); }
+/* On a phone the bell / help icons sit mid-bar (customer picker + Sign out are to their right), so a dropdown anchored
+   to its trigger's right edge runs off the LEFT of the screen. Pin these popups into the viewport instead. (Placed
+   after the .bell-pop / .help-pop base rules above so it overrides them - equal specificity, later wins.) */
+@media (max-width: 600px) {
+  .bell-pop, .help-pop {
+    position: fixed; top: 64px; left: auto; right: max(8px, env(safe-area-inset-right, 0px));
+    width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 78px); overflow-y: auto;
+  }
+}
 .help-item .hi-ic { width: 18px; text-align: center; }
 .help-item .hi-sub { display: block; font-size: 12px; color: var(--muted); }
 .help-item .hi-main { display: flex; flex-direction: column; gap: 1px; }

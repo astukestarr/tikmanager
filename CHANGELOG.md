@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.1.3 - 2026-11-08
+
+- **Mobile top bar fixes.** On a phone the Messages and Help dropdowns are anchored to their icon, which sits in the
+  middle of the top bar, so they used to run off the left edge of the screen (the content was clipped). They now pin
+  into the viewport. The top bar also stays on one line - the version chip is hidden (it's in the sidebar and Admin >
+  Updates), Sign out no longer wraps, and the customer picker shrinks to fit instead of pushing items off-screen.
+
 ## 4.1.2 - 2026-11-08
 
 - **The Knowledge Base refuses to store secrets.** Saving a KB article whose body looks like it contains a live
