@@ -1560,15 +1560,15 @@ async function users() {
 }
 
 // --- Admin: branding, technicians, system ---------------------------------------------------------------------
-const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["api", "API access"], ["collectors", "Collectors"], ["system", "Settings"]];
-const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), api: can("settings"), collectors: can("settings"), system: can("settings") || can("alerts") })[k];
+const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["api", "API access"], ["collectors", "Collectors"], ["security", "Updates & Security"], ["system", "Settings"]];
+const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), api: can("settings"), collectors: can("settings"), security: can("settings"), system: can("settings") || can("alerts") })[k];
 async function admin(tab) {
   tab = tab && adminTabOk(tab) ? tab : (ADMIN_TABS.find(([k]) => adminTabOk(k)) || ["techs"])[0];
   $("main").innerHTML = `<h1>Admin</h1><div class="tabs" role="tablist">
       ${ADMIN_TABS.filter(([k]) => adminTabOk(k)).map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" class="${k === tab ? "active" : ""}">${l}</button>`).join("")}
     </div><div id="adminBody"></div>`;
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => admin(b.dataset.tab)));
-  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, api: adminApi, collectors: adminCollectors, system: adminSystem };
+  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, api: adminApi, collectors: adminCollectors, security: adminSecurity, system: adminSystem };
   await (tabs[tab] || adminBranding)();
 }
 
@@ -2664,12 +2664,19 @@ function autoUpdateRow(s) {
     <p class="small muted">${esc(a.detail || "")}${fix}</p>`;
 }
 
+// Admin > Updates & Security: the version/update controls and the off-site backup destination, split out of Settings.
+async function adminSecurity() {
+  $("adminBody").innerHTML = `
+    <div class="card" id="verCard"><h2>Version &amp; updates</h2><p class="muted">Loading…</p></div>
+    <div class="card" id="offCard"><h2>Off-site backup</h2><p class="muted">Loading…</p></div>`;
+  versionCard();
+  offsiteCard();
+}
+
 async function adminSystem() {
   const s = await api("/api/admin/system");
   const f = (id, label, val, o = {}) => `<label class="field">${label} <input id="${id}" value="${esc(val || "")}" placeholder="${esc(o.ph || "")}" ${o.type ? `type="${o.type}"` : ""} spellcheck="false" ${o.auto ? `autocomplete="${o.auto}"` : ""}></label>`;
   $("adminBody").innerHTML = `
-    <div class="card" id="verCard"><h2>Version &amp; updates</h2><p class="muted">Loading…</p></div>
-    <div class="card" id="offCard"><h2>Off-site backup</h2><p class="muted">Loading…</p></div>
     <div class="card" id="archiveCard"><h2>Log archiving</h2><p class="muted">Loading…</p></div>
     <div class="card" id="wgCard"><h2>WireGuard port</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>Staff sign-in</h2>
@@ -2726,8 +2733,6 @@ async function adminSystem() {
       ${autoUpdateRow(s)}
       <p class="small muted">The public address is set when TikManager is installed (the HTTPS certificate depends on it).</p></div>`;
   setBars($("main"));
-  versionCard();
-  offsiteCard();
   archiveCard();
   lcAdminCard();
   wgPortCard();

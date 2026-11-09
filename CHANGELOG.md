@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.4.0-beta.3 - 2026-11-09
+
+- **New Admin tab: Updates & Security.** The **Version & updates** card (with its server/website security grades) and
+  **Off-site backup** move out of the long Settings page into their own tab, so updates and security sit together.
+
 ## 4.4.0-beta.2 - 2026-11-09
 
 - The Tunnels page heading now reads **TikManager Tunnels**.
