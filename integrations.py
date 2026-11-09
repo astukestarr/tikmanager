@@ -32,6 +32,12 @@ FIELDS = {   # name -> secret?
              "host": False, "port": False, "security": False, "username": False, "password": True},   # mailer.py
     "offsite": {"kind": False, "host": False, "port": False, "username": False, "password": True, "folder": False, "url": False,
                 "verify": False, "what": False, "passphrase": True, "schedule": False, "keep": False, "hour": False},   # offsite.py
+    "archive": {"dest": False, "enabled": False, "what": False, "keep_months": False, "passphrase": True,   # logarchive.py / archivedest.py
+                "path": False,   # local folder / mount
+                "host": False, "port": False, "username": False, "password": True, "url": False, "folder": False, "verify": False,   # ftp/ftps/webdav
+                "s3_endpoint": False, "s3_region": False, "s3_bucket": False, "s3_access_key": False, "s3_secret_key": True, "s3_prefix": False,
+                "az_account": False, "az_container": False, "az_prefix": False, "az_endpoint": False, "az_sas": True, "az_key": True,
+                "g_sa_json": True, "g_folder_id": False},   # Google Drive service-account key + folder id
 }
 DEFAULTS = {"cw": {"site": "api-na.myconnectwise.net", "codebase": "v4_6_release", "active_only": "1"}, "itg": {"region": "us", "sync": "1"},
             "github": {"library": "astukestarr/routeros-scripts"}}
@@ -91,7 +97,7 @@ class Integrations:
         for k, secret in FIELDS[kind].items():
             if k not in data:
                 continue
-            v = str(data.get(k) or "").strip()[:4000 if k in ("show_types", "webhook") else 300]
+            v = str(data.get(k) or "").strip()[:8000 if k == "g_sa_json" else 4000 if k in ("show_types", "webhook") else 300]
             if secret and not v:
                 continue   # blank = keep the saved secret
             c[k] = v

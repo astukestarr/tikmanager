@@ -267,11 +267,16 @@ SLIDES_4_1 = [
              "nothing uses."},
 ]
 SLIDES_4_2 = [
-    {"id": "log-retention", "title": "Keep logs and flows for up to 30 days", "img": None, "view": "admin", "who": "techadmin",
+    {"id": "log-retention", "title": "Choose how long logs are kept", "img": None, "view": "admin", "who": "techadmin",
      "text": "Admin > Settings > Log retention sets how long TikManager keeps router syslog lines (the Logs page - logins, "
-             "DHCP, firewall log=yes traffic) and Traffic Flow conversations (the router Flows tab) - 1 to 30 days each, up "
-             "from a fixed 14 and 7. The per-router caps scale with the window, so a longer retention isn't truncated. Note: "
-             "30 days of Flows can use a lot of disk on a busy router, so watch the Data folder size."},
+             "DHCP, firewall log=yes traffic) and Traffic Flow conversations (the router Flows tab) - 1 to 90 days each, up "
+             "from a fixed 14 and 7. The card shows the data folder and database size so you can see what logs cost before "
+             "raising a value."},
+    {"id": "log-archiving", "title": "Archive logs for years (compliance)", "img": None, "view": "admin", "who": "techadmin",
+     "text": "Admin > Settings > Log archiving keeps logs and flows for the long term, off this server. Each completed month "
+             "is written as one compressed CSV on/after the 1st of the next month and kept forever by default - to a local "
+             "folder or mount, Amazon S3 (or S3-compatible), Azure Blob, Google Drive, FTPS/FTP or WebDAV. While it's on, a "
+             "month is always kept locally until it has been safely archived, whatever the retention window is."},
 ]
 SLIDES = SLIDES_4_2   # 4.2's own slides (4.1.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}

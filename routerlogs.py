@@ -16,7 +16,7 @@ import threading
 import time
 
 KEEP_DAYS = 14            # default days kept; Admin > Settings can set 1..MAX_KEEP_DAYS (setting "log_keep_days")
-MAX_KEEP_DAYS = 30
+MAX_KEEP_DAYS = 90
 MIN_PER_DEVICE = 20000    # safety cap per router; scales with retention so a longer window isn't truncated for a normal router
 PER_DEVICE_PER_DAY = 3000 # ~lines/day budget a chatty core router can't exceed (it can't push the others out)
 LINES_PER_MINUTE = 300
@@ -53,6 +53,7 @@ class RouterLogs:
         self.buf, self.lock = [], threading.Lock()
         self._rate = {}
         self._pruned = 0
+        self.archive = None   # set to the LogArchive by server.py; keeps a month until it's archived (archive-aware prune)
 
     # --- intake ---------------------------------------------------------------------------------------------
     def add(self, device_id: int, raw: str, ts=None):
@@ -83,10 +84,19 @@ class RouterLogs:
     def prune(self):
         days = self.keep_days()
         cap = max(MIN_PER_DEVICE, days * PER_DEVICE_PER_DAY)
-        self.db.run("DELETE FROM router_logs WHERE ts < ?", (time.time() - days * 86400,))
+        cutoff = time.time() - days * 86400
+        if self.archive is not None:   # don't delete a complete month until it's been archived off-appliance
+            try:
+                floor = self.archive.floor("logs")
+                if floor is not None:
+                    cutoff = min(cutoff, floor)
+            except Exception as e:  # noqa: BLE001 - never let archiving break pruning
+                print(f"routerlogs: archive floor: {e}")
+        self.db.run("DELETE FROM router_logs WHERE ts < ?", (cutoff,))
         for r in self.db.q("SELECT device_id, COUNT(*) AS n FROM router_logs GROUP BY device_id HAVING n > ?", (cap,)):
-            self.db.run("""DELETE FROM router_logs WHERE device_id=? AND id <= (SELECT id FROM router_logs WHERE device_id=?
-                           ORDER BY id DESC LIMIT 1 OFFSET ?)""", (r["device_id"], r["device_id"], cap))
+            # trim a chatty router past the cap, but never a row newer than cutoff (an unarchived month is protected)
+            self.db.run("""DELETE FROM router_logs WHERE device_id=? AND ts < ? AND id <= (SELECT id FROM router_logs WHERE device_id=?
+                           ORDER BY id DESC LIMIT 1 OFFSET ?)""", (r["device_id"], cutoff, r["device_id"], cap))
 
     def loop(self):
         while True:

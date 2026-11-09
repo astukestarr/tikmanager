@@ -29,7 +29,7 @@ FLOW_PORT = int(os.environ.get("TM_FLOW_PORT", "2055"))
 BUCKET = 600
 MAX_KEYS = 4000
 KEEP_DAYS = 7              # default days kept; Admin > Settings can set 1..MAX_KEEP_DAYS (setting "flow_keep_days")
-MAX_KEEP_DAYS = 30
+MAX_KEEP_DAYS = 90
 MAX_ROWS = 1_500_000      # floor for the per-router row cap; scales up with retention (see prune)
 ROWS_PER_DAY = 120_000    # ~rows/day budget: longer windows raise the cap so a normal router isn't truncated
 MIN_MEM = 100 * 1024 * 1024       # 64 MB routers are left out
@@ -159,6 +159,7 @@ class Flows:
         self.budget = {}        # exporter address -> [second, packets read this second, packets dropped this minute, minute]
         self.overload = {}      # exporter address -> minutes in a row over budget
         self._pruned = 0
+        self.archive = None     # set to the LogArchive by server.py; keeps a month until it's archived (archive-aware prune)
 
     # --- turning it on / off ---------------------------------------------------------------------------------
     def enable(self, d, sample=1):
@@ -302,11 +303,19 @@ class Flows:
     def prune(self):
         days = self.keep_days()
         cap = max(MAX_ROWS, days * ROWS_PER_DAY)
-        self.db.run("DELETE FROM flows WHERE ts < ?", (time.time() - days * 86400,))
+        cutoff = time.time() - days * 86400
+        if self.archive is not None:   # keep a complete month until it's archived off-appliance
+            try:
+                floor = self.archive.floor("flows")
+                if floor is not None:
+                    cutoff = min(cutoff, floor)
+            except Exception as e:  # noqa: BLE001 - never let archiving break pruning
+                print(f"flows: archive floor: {e}")
+        self.db.run("DELETE FROM flows WHERE ts < ?", (cutoff,))
         for r in self.db.q("SELECT device_id, COUNT(*) AS n FROM flows GROUP BY device_id HAVING n > ?", (cap,)):
             cut = self.db.one("SELECT ts FROM flows WHERE device_id=? ORDER BY ts DESC LIMIT 1 OFFSET ?", (r["device_id"], cap))
-            if cut:
-                self.db.run("DELETE FROM flows WHERE device_id=? AND ts <= ?", (r["device_id"], cut["ts"]))
+            if cut:   # trim past the cap, but never a row newer than cutoff (an unarchived month is protected)
+                self.db.run("DELETE FROM flows WHERE device_id=? AND ts <= ? AND ts < ?", (r["device_id"], cut["ts"], cutoff))
 
     def listen(self):
         host = self.target_ip()

@@ -55,6 +55,8 @@ from geoip import GeoError, GeoIP
 from threatlists import SOURCES as THREAT_SOURCES, ThreatError, ThreatLists
 from regionblock import RegionBlock, RegionError
 from flows import Flows, MIN_MEM as FLOWS_MIN_MEM
+from logarchive import LogArchive
+import archivedest
 from devkind import kind as device_kind, KINDS as DEVICE_KINDS
 from routerlogs import RouterLogs, SEVERITIES as LOG_SEVERITIES
 from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
@@ -169,6 +171,9 @@ geo = GeoIP(settings.data_dir, lambda: integ.config("ipinfo").get("token", ""), 
 threats = ThreatLists(settings.data_dir, dev=settings.dev)   # known bad networks (Spamhaus DROP + FireHOL Level 1)
 region = RegionBlock(db, settings, poller.client, geo, autoblock, threats)   # region (country) blocking + known bad networks per client
 flowlog = Flows(db, settings, geo, poller.client, routerlogs)
+archive = LogArchive(db, settings, integ, routerlogs, flowlog)   # long-term log/flow archiving to your own storage (compliance)
+routerlogs.archive = archive   # archive-aware prune: keep a complete month locally until it's been archived off-appliance
+flowlog.archive = archive
 msgs = Messages(db)
 roles = Roles(db, settings.tech_admins.split(","))
 checks = Checks(db, poller.client)   # critical checks: addresses a client's routers must reach (pinged from each router)
@@ -1716,6 +1721,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/offsite":   # off-site backup settings + last result
             self.require(tech=True, admin=True)
             return self.json(offsite.public())
+        if path == "/api/admin/archive":   # log archiving settings + last result
+            self.require(tech=True, admin=True)
+            return self.json(archive.public())
         if m := re.fullmatch(r"/api/devices/(\d+)/winbox", path):   # the router's Winbox service + open sessions to it
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -3462,6 +3470,27 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=offsite.run, args=("manual",), daemon=True, name="offsite-now").start()
             db.audit(s["email"], "off-site backup started", offsite.where(), self.client_ip())
             return self.json({"ok": True})
+        if path == "/api/admin/archive":   # log archiving settings
+            s = self.require(tech=True, admin=True)
+            try:
+                archive.save(self.body())
+            except ValueError as e:
+                raise HttpError(400, str(e)) from None
+            db.audit(s["email"], "log archiving settings changed", archive.where(), self.client_ip())
+            return self.json({"ok": True, **archive.public()})
+        if path == "/api/admin/archive/test":
+            self.require(tech=True, admin=True)
+            try:
+                return self.json({"ok": True, "detail": archive.test()})
+            except archivedest.ArchiveError as e:
+                return self.json({"ok": False, "detail": str(e)})
+        if path == "/api/admin/archive/run":   # archive any complete, not-yet-archived months now (in the background)
+            s = self.require(tech=True, admin=True)
+            if archive.running:
+                raise HttpError(400, "An archive run is already going.")
+            threading.Thread(target=archive.run, args=("manual",), daemon=True, name="archive-now").start()
+            db.audit(s["email"], "log archive run started", archive.where(), self.client_ip())
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/winbox/(open|fix|enable)", path):
             # opening: any technician - the session's router login is read-only for read-only technicians; fixing the
             # router's Winbox service changes the router, so that needs write access
@@ -3880,8 +3909,8 @@ class Handler(BaseHTTPRequestHandler):
                     lk, fk = int(b.get("log_keep_days")), int(b.get("flow_keep_days"))
                 except (TypeError, ValueError):
                     raise HttpError(400, "Enter whole numbers.") from None
-                if not (1 <= lk <= 30 and 1 <= fk <= 30):
-                    raise HttpError(400, "Keep router logs and flows for 1 to 30 days.")
+                if not (1 <= lk <= 90 and 1 <= fk <= 90):
+                    raise HttpError(400, "Keep router logs and flows for 1 to 90 days.")
                 db.set_setting("log_keep_days", lk)
                 db.set_setting("flow_keep_days", fk)
                 routerlogs.prune()   # apply right away so shrinking the window frees space now
@@ -4273,6 +4302,7 @@ def main():
     observatory.start()
     reach.start_loop()
     offsite.start()
+    archive.start()
     wgport.start_loop()
     alerts.start()
     unifi.start()

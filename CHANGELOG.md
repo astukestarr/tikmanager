@@ -3,6 +3,18 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.2.0-beta.3 - 2026-11-08
+
+- **Log archiving for long-term (compliance) retention.** A new **Log archiving** panel on Admin > Settings keeps
+  router logs and traffic flows off this server for years. Each completed calendar month is written as one compressed
+  CSV on/after the 1st of the following month, and kept forever by default (an optional months ceiling prunes old
+  archives). Destinations: a **local folder / mounted drive**, **Amazon S3** (and any S3-compatible store - Backblaze
+  B2, Wasabi, MinIO, Cloudflare R2, DigitalOcean Spaces), **Azure Blob Storage** (SAS token or account key),
+  **Google Drive** (service account), **FTPS/FTP** and **WebDAV** - all with standard-library HTTP (no extra packages),
+  optionally encrypted with a passphrase. Local pruning is now **archive-aware**: a completed month is always kept on
+  the appliance until it has been safely archived, so a 31-day month is never lost even with a short retention window.
+- **Local log retention can now go up to 90 days** (was 30), for both router logs and flows.
+
 ## 4.2.0-beta.2 - 2026-11-08
 
 - **Log retention card shows what logs cost.** The Log retention panel now shows the data folder size, the database

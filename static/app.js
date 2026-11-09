@@ -2351,6 +2351,90 @@ async function offsiteCard() {
   });
 }
 
+// Admin > Settings: long-term log/flow archiving to your own storage (compliance) - one compressed CSV per month
+async function archiveCard() {
+  const el = $("archiveCard");
+  if (!el) return;
+  let o;
+  try { o = await api("/api/admin/archive"); } catch (e) { el.innerHTML = `<h2>Log archiving</h2><p class="status err">${esc(e.message)}</p>`; return; }
+  const v = (k) => esc(o[k] || "");
+  const st = o.state || {};
+  const through = (k) => st[k] ? esc(st[k]) : "—";
+  el.innerHTML = `<div class="row"><h2>Log archiving</h2>${o.configured ? `<span class="pill up-done">On</span>` : `<span class="pill">Off</span>`}<span class="spacer"></span>
+      ${o.running ? `<span class="status">Archiving…</span>` : st.last_run ? `<span class="small ${st.last_ok ? "status ok" : "status err"}">${st.last_ok ? "Last run" : "Last run failed"} ${ago(st.last_run)}</span>` : ""}</div>
+    <p class="muted small">Keep <b>router logs</b> and <b>traffic flows</b> for the long term (compliance) off this server. Each completed calendar month is written as one
+      compressed CSV on/after the 1st of the next month, and kept forever by default. While this is on, a month is always kept locally until it has been safely
+      archived - whatever the Log retention window above is set to.</p>
+    ${o.configured ? `<p class="small">Archived through — logs: <b>${through("logs_through")}</b>, flows: <b>${through("flows_through")}</b>${o.where ? ` · to ${esc(o.where)}` : ""}</p>` : ""}
+    ${st.last_detail ? `<p class="small ${st.last_ok ? "" : "status err"}">${esc(st.last_detail)}</p>` : ""}
+    <label class="chk"><input type="checkbox" id="arEnabled" ${o.enabled ? "checked" : ""}> Archive logs off this server</label>
+    <div class="grid2">
+      <label class="field">What <select id="arWhat"><option value="both">Router logs and flows</option><option value="logs">Router logs only</option><option value="flows">Flows only</option></select></label>
+      <label class="field">Where <select id="arDest">
+        <option value="local">Local folder / mounted drive</option><option value="s3">Amazon S3 (or S3-compatible: Backblaze B2, Wasabi, MinIO, R2, Spaces)</option>
+        <option value="azure">Azure Blob Storage</option><option value="gdrive">Google Drive (service account)</option>
+        <option value="ftps">FTPS (FTP over TLS)</option><option value="ftp">FTP (unencrypted connection - set a passphrase)</option><option value="webdav">WebDAV</option></select></label>
+
+      <label class="field ar" data-for="local">Folder / mount path <input id="arPath" value="${v("path")}" placeholder="/mnt/archive  or  D:\\\\tikmanager-archive" spellcheck="false"></label>
+
+      <label class="field ar" data-for="ftps ftp">FTP server <input id="arHost" value="${v("host")}" placeholder="nas.example.com" spellcheck="false"></label>
+      <label class="field ar" data-for="ftps ftp">Port <input id="arPort" value="${v("port")}" placeholder="21" inputmode="numeric"></label>
+      <label class="field ar" data-for="webdav">WebDAV address <input id="arUrl" value="${v("url")}" placeholder="https://cloud.example.com/remote.php/dav/files/archive/" spellcheck="false"></label>
+      <label class="field ar" data-for="ftps ftp webdav">Folder <input id="arFolder" value="${v("folder")}" placeholder="tikmanager-logs" spellcheck="false"></label>
+      <label class="field ar" data-for="ftps ftp webdav">User name <input id="arUser" value="${v("username")}" autocomplete="off" spellcheck="false"></label>
+      <label class="field ar" data-for="ftps ftp webdav">Password <input id="arPass" type="password" autocomplete="new-password" placeholder="${o.password_set ? "saved - leave blank to keep" : ""}"></label>
+
+      <label class="field ar" data-for="s3">Bucket <input id="arS3Bucket" value="${v("s3_bucket")}" placeholder="my-log-archive" spellcheck="false"></label>
+      <label class="field ar" data-for="s3">Region <input id="arS3Region" value="${v("s3_region")}" placeholder="us-east-1" spellcheck="false"></label>
+      <label class="field ar" data-for="s3">Endpoint (blank = AWS) <input id="arS3Endpoint" value="${v("s3_endpoint")}" placeholder="s3.us-east-1.amazonaws.com / s3.us-west-002.backblazeb2.com ..." spellcheck="false"></label>
+      <label class="field ar" data-for="s3">Access key ID <input id="arS3Key" value="${v("s3_access_key")}" autocomplete="off" spellcheck="false"></label>
+      <label class="field ar" data-for="s3">Secret access key <input id="arS3Secret" type="password" autocomplete="new-password" placeholder="${o.s3_secret_key_set ? "saved - leave blank to keep" : ""}"></label>
+      <label class="field ar" data-for="s3">Key prefix (optional) <input id="arS3Prefix" value="${v("s3_prefix")}" placeholder="tikmanager" spellcheck="false"></label>
+
+      <label class="field ar" data-for="azure">Storage account <input id="arAzAccount" value="${v("az_account")}" placeholder="mystorageacct" spellcheck="false"></label>
+      <label class="field ar" data-for="azure">Container <input id="arAzContainer" value="${v("az_container")}" placeholder="logs" spellcheck="false"></label>
+      <label class="field ar" data-for="azure">Blob prefix (optional) <input id="arAzPrefix" value="${v("az_prefix")}" placeholder="tikmanager" spellcheck="false"></label>
+      <label class="field ar" data-for="azure">SAS token (recommended) <input id="arAzSas" type="password" autocomplete="new-password" placeholder="${o.az_sas_set ? "saved - leave blank to keep" : "sv=...&sig=..."}"></label>
+      <label class="field ar" data-for="azure">…or account key <input id="arAzKey" type="password" autocomplete="new-password" placeholder="${o.az_key_set ? "saved - leave blank to keep" : "only if no SAS token"}"></label>
+
+      <label class="field ar" data-for="gdrive">Drive folder id <input id="arGFolder" value="${v("g_folder_id")}" placeholder="share this folder with the service account" spellcheck="false"></label>
+    </div>
+    <label class="field ar" data-for="gdrive">Service-account JSON key <textarea id="arGJson" rows="4" spellcheck="false" placeholder="${o.g_sa_json_set ? "saved - leave blank to keep" : "paste the full service-account JSON key"}"></textarea></label>
+    <div class="grid2">
+      <label class="field">Encryption passphrase (12+ characters, optional) <input id="arPhrase" type="password" autocomplete="new-password" placeholder="${o.passphrase_set ? "saved - leave blank to keep" : "required for plain FTP"}"></label>
+      <label class="field">Keep archives for <input id="arKeep" value="${v("keep_months")}" inputmode="numeric" placeholder="0"> months <span class="small muted">(0 = forever)</span></label>
+    </div>
+    <label class="chk ar" data-for="ftps webdav"><input type="checkbox" id="arVerify" ${o.verify === "0" ? "" : "checked"}> Check the storage's certificate (untick only for a self-signed NAS)</label>
+    <p class="small muted">Logs contain IP addresses and host names - set a passphrase (or an encrypted/cloud destination) if that matters. <b>Google Drive:</b> create a
+      service account, download its JSON key, and share the target Drive folder with the service account's email. True immutability (WORM) is set on the storage
+      itself (S3 Object Lock, Azure immutability).</p>
+    <div class="actions"><button class="btn primary" type="button" id="arSave">Save</button><button class="btn" type="button" id="arTest" ${o.configured ? "" : "disabled"}>Test connection</button>
+      <button class="btn" type="button" id="arRun" ${o.configured && !o.running ? "" : "disabled"}>Archive now</button><span class="status" id="arStatus"></span></div>`;
+  $("arWhat").value = o.what; $("arDest").value = o.dest || "local";
+  const show = () => { const d = $("arDest").value; el.querySelectorAll("[data-for]").forEach((x) => x.classList.toggle("hidden", !x.dataset.for.split(" ").includes(d))); };
+  $("arDest").addEventListener("change", show); show();
+  const say = (m, c = "") => { $("arStatus").textContent = m; $("arStatus").className = `status ${c}`; };
+  $("arSave").addEventListener("click", async () => {
+    const b = { enabled: $("arEnabled").checked ? "1" : "", what: $("arWhat").value, dest: $("arDest").value, keep_months: $("arKeep").value,
+      path: $("arPath").value, host: $("arHost").value, port: $("arPort").value, url: $("arUrl").value, folder: $("arFolder").value, username: $("arUser").value,
+      verify: $("arVerify").checked ? "1" : "0", s3_bucket: $("arS3Bucket").value, s3_region: $("arS3Region").value, s3_endpoint: $("arS3Endpoint").value,
+      s3_access_key: $("arS3Key").value, s3_prefix: $("arS3Prefix").value, az_account: $("arAzAccount").value, az_container: $("arAzContainer").value,
+      az_prefix: $("arAzPrefix").value, g_folder_id: $("arGFolder").value };
+    if ($("arPass").value) b.password = $("arPass").value;
+    if ($("arPhrase").value) b.passphrase = $("arPhrase").value;
+    if ($("arS3Secret").value) b.s3_secret_key = $("arS3Secret").value;
+    if ($("arAzSas").value) b.az_sas = $("arAzSas").value;
+    if ($("arAzKey").value) b.az_key = $("arAzKey").value;
+    if ($("arGJson").value.trim()) b.g_sa_json = $("arGJson").value.trim();
+    try { await post("/api/admin/archive", b); await archiveCard(); const s2 = $("arStatus"); if (s2) { s2.textContent = "Saved."; s2.className = "status ok"; } } catch (e) { say(e.message, "err"); }
+  });
+  $("arTest").addEventListener("click", async () => { say("Connecting…"); try { const r = await post("/api/admin/archive/test"); say(r.detail, r.ok ? "ok" : "err"); } catch (e) { say(e.message, "err"); } });
+  $("arRun").addEventListener("click", async () => {
+    try { await post("/api/admin/archive/run"); say("Archiving…"); const poll = setInterval(async () => { const x = await api("/api/admin/archive"); if (!x.running) { clearInterval(poll); archiveCard(); } }, 3000); }
+    catch (e) { say(e.message, "err"); }
+  });
+}
+
 // Admin > Settings: the suggested replacement for each discontinued / old router model, and your own standard per model
 async function lcAdminCard() {
   let x;
@@ -2530,6 +2614,7 @@ async function adminSystem() {
   $("adminBody").innerHTML = `
     <div class="card" id="verCard"><h2>Version &amp; updates</h2><p class="muted">Loading…</p></div>
     <div class="card" id="offCard"><h2>Off-site backup</h2><p class="muted">Loading…</p></div>
+    <div class="card" id="archiveCard"><h2>Log archiving</h2><p class="muted">Loading…</p></div>
     <div class="card" id="wgCard"><h2>WireGuard port</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>Staff sign-in</h2>
       <p class="muted">Your technicians sign in with Microsoft. Anyone from these email domains becomes a technician at first sign-in;
@@ -2567,14 +2652,15 @@ async function adminSystem() {
       <p class="small muted">Off by default: the copies are <b>not encrypted</b> and contain passwords (files are readable only by TikManager). Make that folder a git repository
         (<span class="mono">git init</span>) and every change is committed - a free history - or point your own backup tool at it.</p></div>
     <div class="card"><h2>Log retention</h2><div class="row">
-      <label class="field">Router logs (Logs page) <input id="sLogDays" type="number" min="1" max="30" value="${s.log_keep_days}"> days</label>
-      <label class="field">Traffic flows (router Flows tab) <input id="sFlowDays" type="number" min="1" max="30" value="${s.flow_keep_days}"> days</label>
+      <label class="field">Router logs (Logs page) <input id="sLogDays" type="number" min="1" max="90" value="${s.log_keep_days}"> days</label>
+      <label class="field">Traffic flows (router Flows tab) <input id="sFlowDays" type="number" min="1" max="90" value="${s.flow_keep_days}"> days</label>
       <button class="btn primary" type="button" id="sKeepSave">Save</button><span class="status" id="sKeepStatus"></span></div>
       <p class="small muted">Data folder: <b>${flBytes(s.data_dir_bytes || 0)}</b> (database ${flBytes(s.db_bytes || 0)}) ·
         router logs <b>${(s.router_log_lines || 0).toLocaleString()}</b> lines · flows <b>${(s.flow_rows || 0).toLocaleString()}</b> rows.</p>
-      <p class="small muted">How long syslog lines (logins, DHCP, firewall <span class="mono">log=yes</span> traffic) and Traffic Flow conversations are kept, 1–30 days.
-        Older data is removed hourly; lowering a value frees space right away. <b>Flows at 30 days can use a lot of disk on a busy router</b>
-        (every conversation, every 10 minutes) — the database figure above is most of what logs and flows cost.</p></div>
+      <p class="small muted">How long syslog lines (logins, DHCP, firewall <span class="mono">log=yes</span> traffic) and Traffic Flow conversations are kept, 1–90 days.
+        Older data is removed hourly; lowering a value frees space right away. <b>Flows can use a lot of disk on a busy router</b>
+        (every conversation, every 10 minutes) — the database figure above is most of what logs and flows cost. With <b>Log archiving</b> on (below),
+        a completed month is always kept here until it has been safely archived, whatever this value is.</p></div>
     <div class="card" id="lcAdmin"><h2>Replacement suggestions</h2><p class="muted">Loading…</p></div>
     <div class="card"><h2>About this installation</h2><div class="grid2">
       ${[["Public address", s.public_url], ["WireGuard address", s.wg_endpoint], ["Controller WireGuard key", s.wg_server_pubkey], ["Tunnel network", s.wg_network],
@@ -2583,6 +2669,7 @@ async function adminSystem() {
       <p class="small muted">The public address is set when TikManager is installed (the HTTPS certificate depends on it).</p></div>`;
   versionCard();
   offsiteCard();
+  archiveCard();
   lcAdminCard();
   wgPortCard();
   const say = (id, m, ok) => { $(id).textContent = m; $(id).className = `status ${ok ? "ok" : "err"}`; };
