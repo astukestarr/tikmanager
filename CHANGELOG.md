@@ -3,6 +3,10 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.1-beta.2 - 2026-11-09
+
+- DHCP clients: the lease-expiry column header now reads **Expires** (was "Expires after").
+
 ## 4.5.1-beta.1 - 2026-11-09
 
 - **DHCP clients table is colour-coded for readability.** Host names are bold to anchor each row, the type shows as a
