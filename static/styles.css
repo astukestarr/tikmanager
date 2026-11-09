@@ -158,6 +158,14 @@ label.field input, label.field select { color: var(--text); }
 .dhcp-sort { cursor: pointer; user-select: none; }
 .dhcp-sort:hover { text-decoration: underline; }
 .dhcp-sort.on { color: var(--accent); }
+/* DHCP clients table: semantic colour so a wide row reads at a glance */
+.dhcp-tbl tbody tr:nth-child(2n) td { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.dhcp-tbl tbody tr:hover td { background: var(--accent-soft); }
+.dhcp-tbl td.c-host { font-weight: 600; }
+.lease-type { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; }
+.lease-type.static { color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); }
+.lease-type.dynamic { color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
+td.c-ok, .c-ok { color: var(--good); } td.c-warn { color: var(--warn); font-weight: 600; } td.c-bad { color: var(--bad); font-weight: 600; }
 .tun-off { opacity: .5; }
 .tun-spark { display: block; }
 .tun-spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }

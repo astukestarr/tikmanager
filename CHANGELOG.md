@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.1-beta.1 - 2026-11-09
+
+- **DHCP clients table is colour-coded for readability.** Host names are bold to anchor each row, the type shows as a
+  **Static** (blue) / **Dynamic** (grey) badge, a bound lease's status is green, and the Expires-after time turns amber
+  under 30 minutes and red under 5, so a wide row reads at a glance. Subtle zebra striping and a row highlight on hover.
+  All from the theme palette, so it follows light/dark and the accent themes.
+
 ## 4.5.0 - 2026-11-09
 
 A more capable DHCP clients table on each router's Network tab.

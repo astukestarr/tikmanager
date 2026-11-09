@@ -982,6 +982,7 @@ async function loadDhcp(d) {
   if (!$("dhcpBody")) return;
   const since = (s) => (s == null ? "" : s < 90 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`);
   const dur = (s) => (s == null ? "—" : s <= 0 ? "expired" : s < 90 ? "< 1 min" : s < 3600 ? `${Math.round(s / 60)} min` : s < 86400 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} d`);
+  const expCls = (s, dyn) => (!dyn || s == null ? "" : s <= 0 ? " c-bad" : s < 300 ? " c-bad" : s < 1800 ? " c-warn" : "");   // lease expiry urgency colour
   const write = canWrite();
   const all = x.leases.slice();
   const draw = () => {
@@ -992,11 +993,11 @@ async function loadDhcp(d) {
     const bound = all.filter((l) => l.status === "bound").length;
     const th = (k, label, cls = "") => `<th class="dhcp-sort${cls ? " " + cls : ""}${dhcpView.sort === k ? " on" : ""}" data-sort="${k}" role="button" tabindex="0" aria-sort="${dhcpView.sort === k ? (dhcpView.dir > 0 ? "ascending" : "descending") : "none"}">${label}${dhcpView.sort === k ? (dhcpView.dir > 0 ? " ▲" : " ▼") : ""}</th>`;
     $("dhcpBody").innerHTML = `<p class="small muted">${bound} connected (bound) · ${all.length} leases · read ${since(Date.now() / 1000 - x.read_at) || "just now"}</p>
-      ${rows.length ? `<div class="table-wrap"><table><thead><tr>${th("host", "Host name")}${th("ip", "IP address")}${th("mac", "MAC address")}<th>Network</th>${th("status", "Status")}${th("type", "Type")}${th("last_seen", "Last seen", "nowrap")}${th("expires", "Expires after", "nowrap")}<th>Comment</th>${write ? "<th></th>" : ""}</tr></thead><tbody>
-      ${rows.map((l) => `<tr class="${l.disabled || l.blocked ? "muted" : ""}"><td>${esc(l.host || "—")}</td><td class="mono">${esc(l.address)}</td><td class="mono small">${esc(l.mac)}</td>
+      ${rows.length ? `<div class="table-wrap"><table class="dhcp-tbl"><thead><tr>${th("host", "Host name")}${th("ip", "IP address")}${th("mac", "MAC address")}<th>Network</th>${th("status", "Status")}${th("type", "Type")}${th("last_seen", "Last seen", "nowrap")}${th("expires", "Expires after", "nowrap")}<th>Comment</th>${write ? "<th></th>" : ""}</tr></thead><tbody>
+      ${rows.map((l) => `<tr class="${l.disabled || l.blocked ? "muted" : ""}"><td class="c-host">${esc(l.host || "—")}</td><td class="mono">${esc(l.address)}</td><td class="mono small">${esc(l.mac)}</td>
         <td class="small">${esc(l.server)}${l.interface ? ` <span class="muted">(${esc(l.interface)})</span>` : ""}</td>
-        <td>${l.status === "bound" ? `<span class="dot on"></span>bound` : `<span class="dot off"></span>${esc(l.status || "—")}`}${l.blocked ? ` <span class="pill">blocked</span>` : ""}${l.disabled ? ` <span class="pill">disabled</span>` : ""}</td>
-        <td class="small">${l.dynamic ? "dynamic" : "static"}</td><td class="small nowrap">${since(l.last_seen)}</td><td class="small nowrap">${l.dynamic ? dur(l.expires) : "—"}</td><td class="small">${write && l.id ? `<button class="linkish" type="button" data-editcomment="${esc(String(l.id))}" data-comment="${esc(l.comment || "")}" title="Edit the comment on this lease">${l.comment ? esc(l.comment) : `<span class="muted">＋ comment</span>`}</button>` : `<span class="muted">${esc(l.comment)}</span>`}</td>
+        <td>${l.status === "bound" ? `<span class="dot on"></span><span class="c-ok">bound</span>` : `<span class="dot off"></span>${esc(l.status || "—")}`}${l.blocked ? ` <span class="pill">blocked</span>` : ""}${l.disabled ? ` <span class="pill">disabled</span>` : ""}</td>
+        <td class="small"><span class="lease-type ${l.dynamic ? "dynamic" : "static"}">${l.dynamic ? "dynamic" : "static"}</span></td><td class="small nowrap">${since(l.last_seen)}</td><td class="small nowrap${expCls(l.expires, l.dynamic)}">${l.dynamic ? dur(l.expires) : "—"}</td><td class="small">${write && l.id ? `<button class="linkish" type="button" data-editcomment="${esc(String(l.id))}" data-comment="${esc(l.comment || "")}" title="Edit the comment on this lease">${l.comment ? esc(l.comment) : `<span class="muted">＋ comment</span>`}</button>` : `<span class="muted">${esc(l.comment)}</span>`}</td>
         ${write ? `<td class="nowrap">${l.dynamic && l.id ? `<button class="btn small" type="button" data-makestatic="${esc(String(l.id))}" title="Reserve this IP for this device - converts the dynamic lease to a static one on the router">Make static</button>` : ""}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>` : `<p class="muted small">${all.length ? "Nothing matches." : "This router has no DHCP leases (no DHCP server, or nothing connected)."}</p>`}`;
   };
