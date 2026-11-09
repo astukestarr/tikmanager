@@ -2384,6 +2384,22 @@ class Handler(BaseHTTPRequestHandler):
             db.event(d["id"], d["org_id"], "DHCP lease made static", f"lease {lease_id} by {s['email']}")
             db.audit(s["email"], "DHCP lease made static", f"router {d['identity'] or d['name']}, lease {lease_id}", self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/dhcp/comment", path):   # set/clear a DHCP lease's comment
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router must be approved and online.")
+            lease_id = str(self.body().get("id") or "").strip()
+            comment = str(self.body().get("comment") or "").strip()[:200]
+            if not lease_id:
+                raise HttpError(400, "Which lease?")
+            try:
+                poller.client(d).set_lease_comment(lease_id, comment)
+            except RouterError as e:
+                raise HttpError(502, f"The router didn't accept it: {e}") from None
+            db.event(d["id"], d["org_id"], "DHCP lease comment", f"lease {lease_id} by {s['email']}")
+            db.audit(s["email"], "DHCP lease comment set", f"router {d['identity'] or d['name']}, lease {lease_id}: {comment[:80]}", self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/identity", path):   # change /system identity on the router itself
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))

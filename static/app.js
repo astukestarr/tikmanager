@@ -996,7 +996,7 @@ async function loadDhcp(d) {
       ${rows.map((l) => `<tr class="${l.disabled || l.blocked ? "muted" : ""}"><td>${esc(l.host || "—")}</td><td class="mono">${esc(l.address)}</td><td class="mono small">${esc(l.mac)}</td>
         <td class="small">${esc(l.server)}${l.interface ? ` <span class="muted">(${esc(l.interface)})</span>` : ""}</td>
         <td>${l.status === "bound" ? `<span class="dot on"></span>bound` : `<span class="dot off"></span>${esc(l.status || "—")}`}${l.blocked ? ` <span class="pill">blocked</span>` : ""}${l.disabled ? ` <span class="pill">disabled</span>` : ""}</td>
-        <td class="small">${l.dynamic ? "dynamic" : "static"}</td><td class="small nowrap">${since(l.last_seen)}</td><td class="small nowrap">${l.dynamic ? dur(l.expires) : "—"}</td><td class="small muted">${esc(l.comment)}</td>
+        <td class="small">${l.dynamic ? "dynamic" : "static"}</td><td class="small nowrap">${since(l.last_seen)}</td><td class="small nowrap">${l.dynamic ? dur(l.expires) : "—"}</td><td class="small">${write && l.id ? `<button class="linkish" type="button" data-editcomment="${esc(String(l.id))}" data-comment="${esc(l.comment || "")}" title="Edit the comment on this lease">${l.comment ? esc(l.comment) : `<span class="muted">＋ comment</span>`}</button>` : `<span class="muted">${esc(l.comment)}</span>`}</td>
         ${write ? `<td class="nowrap">${l.dynamic && l.id ? `<button class="btn small" type="button" data-makestatic="${esc(String(l.id))}" title="Reserve this IP for this device - converts the dynamic lease to a static one on the router">Make static</button>` : ""}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>` : `<p class="muted small">${all.length ? "Nothing matches." : "This router has no DHCP leases (no DHCP server, or nothing connected)."}</p>`}`;
   };
@@ -1011,6 +1011,22 @@ async function loadDhcp(d) {
       ms.disabled = true; ms.textContent = "Working…";
       try { await post(`/api/devices/${d.id}/dhcp/make-static`, { id: ms.dataset.makestatic }); loadDhcp(d); }
       catch (err) { ms.disabled = false; ms.textContent = "Make static"; toast(err.message); }
+      return;
+    }
+    const ec = e.target.closest("[data-editcomment]");
+    if (ec) {   // a modal, so the live re-read of leases can't wipe a half-typed comment
+      const id = ec.dataset.editcomment, cur = ec.dataset.comment || "";
+      dialog(`<h2>Lease comment</h2>
+        <label class="field">Comment <input id="dhCmt" maxlength="200" value="${esc(cur)}" spellcheck="false" placeholder="e.g. Jenn's laptop, or Reserved for printer"></label>
+        <div class="actions"><button class="btn primary" type="button" id="dhCmtSave">Save</button><button class="btn" type="button" data-close>Cancel</button><span class="status" id="dhCmtMsg"></span></div>`);
+      $("dhCmt").focus();
+      const save = async () => {
+        $("dhCmtSave").disabled = true; $("dhCmtMsg").textContent = "Saving…"; $("dhCmtMsg").className = "status";
+        try { await post(`/api/devices/${d.id}/dhcp/comment`, { id, comment: $("dhCmt").value }); $("dlg").close(); loadDhcp(d); }
+        catch (err) { $("dhCmtSave").disabled = false; $("dhCmtMsg").textContent = err.message; $("dhCmtMsg").className = "status err"; }
+      };
+      $("dhCmtSave").onclick = save;
+      $("dhCmt").onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); save(); } };
     }
   };
   $("dhcpBody").onkeydown = (e) => { const h = e.target.closest && e.target.closest("[data-sort]"); if (h && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); h.click(); } };

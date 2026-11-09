@@ -596,6 +596,10 @@ class RouterOS:
         """Turn a dynamic DHCP lease into a static reservation on the router (/ip/dhcp-server/lease make-static)."""
         self.post("/ip/dhcp-server/lease/make-static", {".id": str(lease_id)})
 
+    def set_lease_comment(self, lease_id, comment):
+        """Set or clear the comment on a DHCP lease."""
+        self._req("PATCH", f"/ip/dhcp-server/lease/{lease_id}", {"comment": str(comment or "")}, timeout=15)
+
     def wireless(self):
         """Radios and who is connected to them, read live for the router page's Wireless tab. Covers the three MikroTik
         radio menus: legacy wireless (wlan, incl. NV2 / Nstreme point-to-point), the newer wifi package and 60 GHz (w60g)."""
@@ -1723,7 +1727,8 @@ def _duration_ms(t: str):
     return ms if ms else None
 
 
-_DEMO_STATIC: dict = {}   # demo only: device id -> set of lease ids a tech turned static (so the change sticks)
+_DEMO_STATIC: dict = {}    # demo only: device id -> set of lease ids a tech turned static (so the change sticks)
+_DEMO_COMMENTS: dict = {}  # demo only: device id -> {lease id: comment} a tech typed
 
 
 class SimRouter:
@@ -2422,19 +2427,24 @@ class SimRouter:
         hosts = ["FrontDesk-PC", "Printer-HP-M404", "iPhone", "Galaxy-S24", "Office-AP", "POS-1", "POS-2", "Camera-NVR", "", "Thermostat", "Laptop-Jenn", "Phone-Yealink"]
         lan = "192.168.88" if self.id % 3 == 0 else f"192.168.{self.id * 10}"
         made = _DEMO_STATIC.get(self.id, set())
+        comments = _DEMO_COMMENTS.get(self.id, {})
         out = []
         for k, h in enumerate(hosts[: 6 + self.id % 6]):
             lid = f"*{self.id}-{k}"
             reserved = h.startswith(("Printer", "POS", "Camera"))
             static = reserved or lid in made
+            comment = comments.get(lid, "Reserved" if reserved else ("Made static" if static else ""))
             out.append({"id": lid, "address": f"{lan}.{20 + k * 3}", "mac": "%02X:%02X:%02X:%02X:%02X:%02X" % tuple(r.randint(0, 255) for _ in range(6)),
                         "host": h, "server": "dhcp-lan", "interface": "bridge", "status": "bound" if k % 5 else "waiting", "dynamic": not static,
                         "disabled": False, "blocked": False, "last_seen": r.randint(1, 3600) if k % 5 else r.randint(86400, 900000),
-                        "expires": None if static else r.randint(60, 600), "comment": "Reserved" if reserved else ("Made static" if static else "")})
+                        "expires": None if static else r.randint(60, 600), "comment": comment})
         return out
 
     def make_static(self, lease_id):
         _DEMO_STATIC.setdefault(self.id, set()).add(str(lease_id))
+
+    def set_lease_comment(self, lease_id, comment):
+        _DEMO_COMMENTS.setdefault(self.id, {})[str(lease_id)] = str(comment or "")
 
     def wireless(self):
         r = random.Random(int(time.time() // 10) + self.id)   # changes a little every 10 s, like a live radio

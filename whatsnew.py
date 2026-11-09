@@ -298,8 +298,9 @@ SLIDES_4_4 = [
 SLIDES_4_5 = [
     {"id": "dhcp-make-static", "title": "DHCP clients: make static, sort, see expiry", "img": None, "view": "router", "who": "tech",
      "text": "On a router's Network tab the DHCP clients table now sorts by any column (IP, last seen, expires and the "
-             "rest) and shows how long until each lease expires. Each dynamic lease gets a Make static button that "
-             "reserves the IP on the router. Your chosen sort sticks, so the live refresh no longer resets it."},
+             "rest), shows how long until each lease expires, and lets you edit a lease's comment. Each dynamic lease "
+             "gets a Make static button that reserves the IP on the router. Your chosen sort sticks, so the live "
+             "refresh no longer resets it."},
 ]
 SLIDES = SLIDES_4_5   # 4.5's own slides (4.4.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}

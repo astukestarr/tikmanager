@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.0-beta.3 - 2026-11-09
+
+- **DHCP clients: edit a lease's comment.** The Comment column is now editable — click it to set or change the comment
+  on that lease (written to the router, technician + write, audited). It opens in a small dialog, so the live re-read
+  of the leases can't wipe a half-typed comment.
+
 ## 4.5.0-beta.2 - 2026-11-09
 
 - **Fix: the "Upgrade now" banner now opens the Updates & Security tab, not Settings.** When Version & updates moved to
