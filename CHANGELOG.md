@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.0-beta.1 - 2026-11-09
+
+- **DHCP clients: Make static, sortable columns, and a lease-expiry column.** On a router's Network tab the DHCP
+  clients table now lets you **sort** by any column (host, IP, MAC, status, type, last seen, expires), adds an
+  **Expires after** column, and gives each dynamic lease a **Make static** button that reserves the IP on the router
+  (`/ip/dhcp-server/lease make-static`, technician + write, audited). The chosen sort is kept, so the live re-read of
+  the leases no longer bounces you back to IP order.
+
 ## 4.4.0 - 2026-11-09
 
 Server-drive and host-security visibility, plus a tidier Admin.

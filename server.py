@@ -2369,6 +2369,21 @@ class Handler(BaseHTTPRequestHandler):
             db.run("UPDATE devices SET isp_ifaces=?, isp_state=NULL WHERE id=?", (json.dumps(chosen) if chosen else None, d["id"]))
             db.audit(s["email"], "internet links set", f"{d['name']}: {', '.join(chosen) or 'automatic'}", self.client_ip(), org_id=d["org_id"])
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/devices/(\d+)/dhcp/make-static", path):   # convert a dynamic DHCP lease to static
+            s = self.require(tech=True, write=True)
+            d = self.device_for(s, m.group(1))
+            if d["state"] != "adopted" or not d["online"]:
+                raise HttpError(400, "The router must be approved and online.")
+            lease_id = str(self.body().get("id") or "").strip()
+            if not lease_id:
+                raise HttpError(400, "Which lease?")
+            try:
+                poller.client(d).make_static(lease_id)
+            except RouterError as e:
+                raise HttpError(502, f"The router didn't accept it: {e}") from None
+            db.event(d["id"], d["org_id"], "DHCP lease made static", f"lease {lease_id} by {s['email']}")
+            db.audit(s["email"], "DHCP lease made static", f"router {d['identity'] or d['name']}, lease {lease_id}", self.client_ip(), org_id=d["org_id"])
+            return self.json({"ok": True})
         if m := re.fullmatch(r"/api/devices/(\d+)/identity", path):   # change /system identity on the router itself
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))

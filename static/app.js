@@ -966,31 +966,54 @@ async function loadWireless(d) {
   await tick();
 }
 
-// DHCP leases (read live from the router when the page opens or on Refresh)
-const dhcpView = { q: "" };
+// DHCP leases (read live from the router when the page opens or on Refresh). The sort is kept in dhcpView so the
+// periodic/Refresh re-read (loadDhcp runs again) doesn't throw you back to the default order.
+const dhcpView = { q: "", sort: "ip", dir: 1 };
+const ipKey = (a) => (a || "").split(".").map((n) => n.padStart(3, "0")).join(".");
+const dhcpKey = {   // how each sortable column compares (numbers sort numerically, text alphabetically)
+  host: (l) => (l.host || "~").toLowerCase(), ip: (l) => ipKey(l.address), mac: (l) => (l.mac || "").toLowerCase(),
+  status: (l) => l.status || "", type: (l) => (l.dynamic ? "dynamic" : "static"),
+  last_seen: (l) => (l.last_seen == null ? Infinity : l.last_seen), expires: (l) => (l.expires == null ? Infinity : l.expires),
+};
 async function loadDhcp(d) {
   let x;
   try { x = await api(`/api/devices/${d.id}/dhcp`); }
   catch (e) { if ($("dhcpBody")) $("dhcpBody").innerHTML = `<p class="status err small">${esc(e.message)}</p>`; return; }
   if (!$("dhcpBody")) return;
   const since = (s) => (s == null ? "" : s < 90 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`);
-  const ipKey = (a) => a.split(".").map((n) => n.padStart(3, "0")).join(".");
-  const all = x.leases.slice().sort((a, b) => ipKey(a.address).localeCompare(ipKey(b.address)));
+  const dur = (s) => (s == null ? "—" : s <= 0 ? "expired" : s < 90 ? "< 1 min" : s < 3600 ? `${Math.round(s / 60)} min` : s < 86400 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} d`);
+  const write = canWrite();
+  const all = x.leases.slice();
   const draw = () => {
     const q = dhcpView.q.toLowerCase();
-    const rows = all.filter((l) => !q || `${l.host} ${l.address} ${l.mac} ${l.comment}`.toLowerCase().includes(q));
+    const key = dhcpKey[dhcpView.sort] || dhcpKey.ip;
+    const rows = all.filter((l) => !q || `${l.host} ${l.address} ${l.mac} ${l.comment}`.toLowerCase().includes(q))
+      .sort((a, b) => { const ka = key(a), kb = key(b); const c = typeof ka === "number" ? ka - kb : String(ka).localeCompare(String(kb)); return (c || ipKey(a.address).localeCompare(ipKey(b.address))) * dhcpView.dir; });
     const bound = all.filter((l) => l.status === "bound").length;
+    const th = (k, label, cls = "") => `<th class="dhcp-sort${cls ? " " + cls : ""}${dhcpView.sort === k ? " on" : ""}" data-sort="${k}" role="button" tabindex="0" aria-sort="${dhcpView.sort === k ? (dhcpView.dir > 0 ? "ascending" : "descending") : "none"}">${label}${dhcpView.sort === k ? (dhcpView.dir > 0 ? " ▲" : " ▼") : ""}</th>`;
     $("dhcpBody").innerHTML = `<p class="small muted">${bound} connected (bound) · ${all.length} leases · read ${since(Date.now() / 1000 - x.read_at) || "just now"}</p>
-      ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Host name</th><th>IP address</th><th>MAC address</th><th>Network</th><th>Status</th><th>Type</th><th>Last seen</th><th>Comment</th></tr></thead><tbody>
+      ${rows.length ? `<div class="table-wrap"><table><thead><tr>${th("host", "Host name")}${th("ip", "IP address")}${th("mac", "MAC address")}<th>Network</th>${th("status", "Status")}${th("type", "Type")}${th("last_seen", "Last seen", "nowrap")}${th("expires", "Expires after", "nowrap")}<th>Comment</th>${write ? "<th></th>" : ""}</tr></thead><tbody>
       ${rows.map((l) => `<tr class="${l.disabled || l.blocked ? "muted" : ""}"><td>${esc(l.host || "—")}</td><td class="mono">${esc(l.address)}</td><td class="mono small">${esc(l.mac)}</td>
         <td class="small">${esc(l.server)}${l.interface ? ` <span class="muted">(${esc(l.interface)})</span>` : ""}</td>
         <td>${l.status === "bound" ? `<span class="dot on"></span>bound` : `<span class="dot off"></span>${esc(l.status || "—")}`}${l.blocked ? ` <span class="pill">blocked</span>` : ""}${l.disabled ? ` <span class="pill">disabled</span>` : ""}</td>
-        <td class="small">${l.dynamic ? "dynamic" : "static"}</td><td class="small nowrap">${since(l.last_seen)}</td><td class="small muted">${esc(l.comment)}</td></tr>`).join("")}
+        <td class="small">${l.dynamic ? "dynamic" : "static"}</td><td class="small nowrap">${since(l.last_seen)}</td><td class="small nowrap">${l.dynamic ? dur(l.expires) : "—"}</td><td class="small muted">${esc(l.comment)}</td>
+        ${write ? `<td class="nowrap">${l.dynamic && l.id ? `<button class="btn small" type="button" data-makestatic="${esc(String(l.id))}" title="Reserve this IP for this device - converts the dynamic lease to a static one on the router">Make static</button>` : ""}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>` : `<p class="muted small">${all.length ? "Nothing matches." : "This router has no DHCP leases (no DHCP server, or nothing connected)."}</p>`}`;
   };
   $("dhcpQ").value = dhcpView.q;
   $("dhcpQ").oninput = (e) => { dhcpView.q = e.target.value; draw(); };
   $("dhcpRefresh").onclick = () => { $("dhcpBody").innerHTML = `<p class="muted small">Reading leases...</p>`; loadDhcp(d); };
+  $("dhcpBody").onclick = async (e) => {   // delegated: header sort + Make static (dhcpBody persists across draws)
+    const h = e.target.closest("[data-sort]");
+    if (h) { const k = h.dataset.sort; if (dhcpView.sort === k) dhcpView.dir *= -1; else { dhcpView.sort = k; dhcpView.dir = 1; } return draw(); }
+    const ms = e.target.closest("[data-makestatic]");
+    if (ms) {
+      ms.disabled = true; ms.textContent = "Working…";
+      try { await post(`/api/devices/${d.id}/dhcp/make-static`, { id: ms.dataset.makestatic }); loadDhcp(d); }
+      catch (err) { ms.disabled = false; ms.textContent = "Make static"; toast(err.message); }
+    }
+  };
+  $("dhcpBody").onkeydown = (e) => { const h = e.target.closest && e.target.closest("[data-sort]"); if (h && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); h.click(); } };
   draw();
 }
 

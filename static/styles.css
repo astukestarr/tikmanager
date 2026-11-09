@@ -155,6 +155,9 @@ label.field input, label.field select { color: var(--text); }
 /* Tunnels page: live bandwidth table */
 .tun-sort { cursor: pointer; user-select: none; white-space: nowrap; }
 .tun-sort.on { color: var(--accent); }
+.dhcp-sort { cursor: pointer; user-select: none; }
+.dhcp-sort:hover { text-decoration: underline; }
+.dhcp-sort.on { color: var(--accent); }
 .tun-off { opacity: .5; }
 .tun-spark { display: block; }
 .tun-spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }

@@ -585,12 +585,16 @@ class RouterOS:
         servers = {s.get("name"): s.get("interface", "") for s in self.optional(lambda: self.get("/ip/dhcp-server"), []) or []}
         out = []
         for l in self.optional(lambda: self.get("/ip/dhcp-server/lease"), []) or []:
-            out.append({"address": l.get("active-address") or l.get("address") or "", "mac": l.get("active-mac-address") or l.get("mac-address") or "",
+            out.append({"id": l.get(".id"), "address": l.get("active-address") or l.get("address") or "", "mac": l.get("active-mac-address") or l.get("mac-address") or "",
                         "host": l.get("host-name") or l.get("active-host-name") or "", "server": l.get("server") or "",
                         "interface": servers.get(l.get("server"), ""), "status": l.get("status") or "", "dynamic": l.get("dynamic") == "true",
                         "disabled": l.get("disabled") == "true", "blocked": l.get("blocked") == "true", "last_seen": _dur_s(l.get("last-seen")),
                         "expires": _dur_s(l.get("expires-after")), "comment": l.get("comment") or ""})
         return out
+
+    def make_static(self, lease_id):
+        """Turn a dynamic DHCP lease into a static reservation on the router (/ip/dhcp-server/lease make-static)."""
+        self.post("/ip/dhcp-server/lease/make-static", {".id": str(lease_id)})
 
     def wireless(self):
         """Radios and who is connected to them, read live for the router page's Wireless tab. Covers the three MikroTik
@@ -1719,6 +1723,9 @@ def _duration_ms(t: str):
     return ms if ms else None
 
 
+_DEMO_STATIC: dict = {}   # demo only: device id -> set of lease ids a tech turned static (so the change sticks)
+
+
 class SimRouter:
     """A pretend router: stable identity per device, drifting CPU/traffic, and ~5% of devices offline at any time."""
     MODELS = [("RB5009UG+S+", "rb5009"), ("hAP ax3", "hap-ax3"), ("CCR2004-16G-2S+", "ccr2004"), ("hEX S", "hex-s"), ("CHR", "chr")]
@@ -2414,14 +2421,20 @@ class SimRouter:
         r = random.Random(self.id * 101)
         hosts = ["FrontDesk-PC", "Printer-HP-M404", "iPhone", "Galaxy-S24", "Office-AP", "POS-1", "POS-2", "Camera-NVR", "", "Thermostat", "Laptop-Jenn", "Phone-Yealink"]
         lan = "192.168.88" if self.id % 3 == 0 else f"192.168.{self.id * 10}"
+        made = _DEMO_STATIC.get(self.id, set())
         out = []
         for k, h in enumerate(hosts[: 6 + self.id % 6]):
-            static = h.startswith(("Printer", "POS", "Camera"))
-            out.append({"address": f"{lan}.{20 + k * 3}", "mac": "%02X:%02X:%02X:%02X:%02X:%02X" % tuple(r.randint(0, 255) for _ in range(6)),
+            lid = f"*{self.id}-{k}"
+            reserved = h.startswith(("Printer", "POS", "Camera"))
+            static = reserved or lid in made
+            out.append({"id": lid, "address": f"{lan}.{20 + k * 3}", "mac": "%02X:%02X:%02X:%02X:%02X:%02X" % tuple(r.randint(0, 255) for _ in range(6)),
                         "host": h, "server": "dhcp-lan", "interface": "bridge", "status": "bound" if k % 5 else "waiting", "dynamic": not static,
                         "disabled": False, "blocked": False, "last_seen": r.randint(1, 3600) if k % 5 else r.randint(86400, 900000),
-                        "expires": None if static else r.randint(60, 600), "comment": "Reserved" if static else ""})
+                        "expires": None if static else r.randint(60, 600), "comment": "Reserved" if reserved else ("Made static" if static else "")})
         return out
+
+    def make_static(self, lease_id):
+        _DEMO_STATIC.setdefault(self.id, set()).add(str(lease_id))
 
     def wireless(self):
         r = random.Random(int(time.time() // 10) + self.id)   # changes a little every 10 s, like a live radio
