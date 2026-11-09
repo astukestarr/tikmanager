@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.4.0-beta.1 - 2026-11-09
+
+- **Server drive usage, shown graphically.** Admin > Settings > Log retention now draws a usage bar for the whole
+  server drive - its total size, how much is used, and how much is free - above the TikManager data-folder breakdown,
+  so you can see the headroom behind the retention windows at a glance (the bar turns amber past 75% and red past 90%).
+- **Automatic security updates check.** Admin > Settings > About this installation shows whether the host installs
+  security updates automatically (Debian/Ubuntu `unattended-upgrades`): **On**, **Off** (with the one command to turn
+  it back on), or not applicable on non-APT hosts. Mirrors `deploy/check.sh` so the same host check is visible in the UI.
+
 ## 4.3.0 - 2026-11-08
 
 - **Off-site backup can write to the same destinations as log archiving.** Admin > Settings > Off-site backup now

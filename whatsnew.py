@@ -12,8 +12,8 @@ from pathlib import Path
 
 from version import __version__
 
-RELEASE = "4.3.0"    # the release these slides describe
-SINCE = "4.2.0"      # the full release before it
+RELEASE = "4.4.0"    # the release these slides describe
+SINCE = "4.3.0"      # the full release before it
 
 # id, title, text, screenshot (static/whatsnew/<img>.jpg) or None, where "Show me" goes (a page) or None, who: tech / all
 SLIDES_2_0 = [
@@ -288,12 +288,19 @@ SLIDES_4_3 = [
              "mounted drive, Amazon S3 (or S3-compatible - Backblaze B2, Wasabi, MinIO, R2, Spaces), Azure Blob Storage and "
              "Google Drive, as well as FTPS/FTP and WebDAV. The same encrypted TikManager backup - just more places to keep it."},
 ]
-SLIDES = SLIDES_4_3   # 4.3's own slides (4.2.0 was released, so only the new work shows)
+SLIDES_4_4 = [
+    {"id": "server-drive", "title": "Server drive usage at a glance", "img": None, "view": "admin", "who": "techadmin",
+     "text": "Admin > Settings > Log retention now draws a usage bar for the whole server drive - total, used and how "
+             "much is free - above the TikManager data-folder figures, so you can see the headroom behind the retention "
+             "windows. About this installation also shows an Automatic security updates check: whether the host installs "
+             "security updates on its own (Debian/Ubuntu unattended-upgrades), with the one command to fix it if it is off."},
+]
+SLIDES = SLIDES_4_4   # 4.4's own slides (4.3.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}
 
 # Every release's tour stays here, so Admin > Settings > Version & updates can show past ones. When a new release line
 # starts, add its tour as a new entry (keep its screenshots under their own names) and point RELEASE / SINCE / SLIDES at it.
-TOURS = {"4.3.0": {"since": "4.2.0", "slides": SLIDES_4_3}, "4.2.0": {"since": "4.1.0", "slides": SLIDES_4_2}, "4.1.0": {"since": "4.0.0", "slides": SLIDES_4_1}, "4.0.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
+TOURS = {"4.4.0": {"since": "4.3.0", "slides": SLIDES_4_4}, "4.3.0": {"since": "4.2.0", "slides": SLIDES_4_3}, "4.2.0": {"since": "4.1.0", "slides": SLIDES_4_2}, "4.1.0": {"since": "4.0.0", "slides": SLIDES_4_1}, "4.0.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.7.0": {"since": "3.6.0", "slides": SLIDES_3_7}, "3.6.0": {"since": "3.5.0", "slides": SLIDES_3_6}, "3.5.0": {"since": "3.4.0", "slides": SLIDES_3_5}, "3.4.0": {"since": "3.2.0", "slides": SLIDES_3_3 + SLIDES_3_4}, "3.3.0": {"since": "3.2.0", "slides": SLIDES_3_3}, "3.2.0": {"since": "3.1.0", "slides": SLIDES_3_2}, "3.1.0": {"since": "3.0.0", "slides": SLIDES_3_1},
          "2.0.0": {"since": "1.46.1", "slides": SLIDES_2_0}, "1.46.0": {"since": "1.45.1", "slides": SLIDES_1_46}}
 CHANGELOG = Path(__file__).resolve().parent / "CHANGELOG.md"
 STABLE = re.compile(r"^## (\d+)\.(\d+)\.(\d+)(?: - (\S+))?\s*$")

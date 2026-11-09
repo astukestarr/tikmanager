@@ -58,6 +58,7 @@ from flows import Flows, MIN_MEM as FLOWS_MIN_MEM
 from logarchive import LogArchive
 import archivedest
 from tunnels import Tunnels
+import hoststat
 from devkind import kind as device_kind, KINDS as DEVICE_KINDS
 from routerlogs import RouterLogs, SEVERITIES as LOG_SEVERITIES
 from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
@@ -1106,6 +1107,7 @@ class Handler(BaseHTTPRequestHandler):
                               "backup_mirror": backups.mirror_on, "backup_mirror_dir": str(backups.mirror_dir()),
                               "log_keep_days": routerlogs.keep_days(), "flow_keep_days": flowlog.keep_days(),
                               "data_dir_bytes": data_bytes, "db_bytes": db_bytes,
+                              "disk": hoststat.disk(settings.data_dir), "auto_updates": hoststat.auto_updates(),
                               "router_log_lines": db.one("SELECT COUNT(*) AS n FROM router_logs")["n"],
                               "flow_rows": db.one("SELECT COUNT(*) AS n FROM flows")["n"],
                               "wg_endpoint": settings.wg_endpoint, "wg_network": settings.wg_network,

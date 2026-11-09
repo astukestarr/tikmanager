@@ -2638,6 +2638,32 @@ function colShowInstall(install, token, c) {
   });
 }
 
+// A graphical read-out of the server drive: used vs free, coloured as it fills. Widths are applied by setBars()
+// after render (the security policy forbids inline style attributes).
+function diskMeter(s) {
+  const d = s.disk;
+  if (!d || !d.total) {
+    return `<p class="small muted">Server drive usage is unavailable on this host.</p>`;
+  }
+  const cls = d.pct >= 90 ? "hot" : d.pct >= 75 ? "warm" : "";
+  return `<div class="meter">
+    <div class="row"><b>Server drive</b><span class="small muted mono">${esc(s.data_dir || "")}</span></div>
+    <div class="bar"><i data-pct="${d.pct}" class="${cls}"></i></div>
+    <p class="small muted"><b>${flBytes(d.free)}</b> free of <b>${flBytes(d.total)}</b> — ${flBytes(d.used)} used (${d.pct}%).</p>
+  </div>`;
+}
+
+// The "Automatic security updates" line for the About card: a pass/warn/neutral chip plus a short fix hint.
+function autoUpdateRow(s) {
+  const a = s.auto_updates || {};
+  let chip = `<span class="pill">n/a</span>`;
+  if (a.applicable && a.ok === true) chip = `<span class="pill sec-pill-ok">On</span>`;
+  else if (a.applicable && a.ok === false) chip = `<span class="pill sec-pill-warn">Off</span>`;
+  const fix = a.fix ? ` <span class="mono">${esc(a.fix)}</span>` : "";
+  return `<div class="kv"><span>Automatic security updates</span><span>${chip}</span></div>
+    <p class="small muted">${esc(a.detail || "")}${fix}</p>`;
+}
+
 async function adminSystem() {
   const s = await api("/api/admin/system");
   const f = (id, label, val, o = {}) => `<label class="field">${label} <input id="${id}" value="${esc(val || "")}" placeholder="${esc(o.ph || "")}" ${o.type ? `type="${o.type}"` : ""} spellcheck="false" ${o.auto ? `autocomplete="${o.auto}"` : ""}></label>`;
@@ -2685,7 +2711,8 @@ async function adminSystem() {
       <label class="field">Router logs (Logs page) <input id="sLogDays" type="number" min="1" max="90" value="${s.log_keep_days}"> days</label>
       <label class="field">Traffic flows (router Flows tab) <input id="sFlowDays" type="number" min="1" max="90" value="${s.flow_keep_days}"> days</label>
       <button class="btn primary" type="button" id="sKeepSave">Save</button><span class="status" id="sKeepStatus"></span></div>
-      <p class="small muted">Data folder: <b>${flBytes(s.data_dir_bytes || 0)}</b> (database ${flBytes(s.db_bytes || 0)}) ·
+      ${diskMeter(s)}
+      <p class="small muted">TikManager data folder: <b>${flBytes(s.data_dir_bytes || 0)}</b> (database ${flBytes(s.db_bytes || 0)}) ·
         router logs <b>${(s.router_log_lines || 0).toLocaleString()}</b> lines · flows <b>${(s.flow_rows || 0).toLocaleString()}</b> rows.</p>
       <p class="small muted">How long syslog lines (logins, DHCP, firewall <span class="mono">log=yes</span> traffic) and Traffic Flow conversations are kept, 1–90 days.
         Older data is removed hourly; lowering a value frees space right away. <b>Flows can use a lot of disk on a busy router</b>
@@ -2696,7 +2723,9 @@ async function adminSystem() {
       ${[["Public address", s.public_url], ["WireGuard address", s.wg_endpoint], ["Controller WireGuard key", s.wg_server_pubkey], ["Tunnel network", s.wg_network],
          ["Data folder", s.data_dir], ["Approved routers", s.routers], ["Stored backup versions", s.backups]]
         .map(([k, v]) => `<div class="kv"><span>${k}</span><span class="mono">${esc(v)}</span></div>`).join("")}</div>
+      ${autoUpdateRow(s)}
       <p class="small muted">The public address is set when TikManager is installed (the HTTPS certificate depends on it).</p></div>`;
+  setBars($("main"));
   versionCard();
   offsiteCard();
   archiveCard();
