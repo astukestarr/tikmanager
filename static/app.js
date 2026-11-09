@@ -3354,7 +3354,7 @@ function showUpdate(u) {
   if (u.url) $("ubNotes").href = u.url;
   $("ubGo").classList.toggle("hidden", busy);
   $("ubClose").classList.toggle("hidden", busy);
-  $("ubGo").onclick = () => go("admin", "system");
+  $("ubGo").onclick = () => go("admin", "security");   // Version & updates now lives on the Updates & Security tab
   $("ubClose").onclick = () => {
     try { localStorage.setItem("updateSnooze", JSON.stringify({ v: u.latest, until: Date.now() + 86400000 })); } catch {}
     banner.classList.add("hidden");

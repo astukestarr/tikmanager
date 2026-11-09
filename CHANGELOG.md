@@ -3,6 +3,11 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.0-beta.2 - 2026-11-09
+
+- **Fix: the "Upgrade now" banner now opens the Updates & Security tab, not Settings.** When Version & updates moved to
+  the Updates & Security tab, the update banner's button still went to Settings. It now lands on the right tab.
+
 ## 4.5.0-beta.1 - 2026-11-09
 
 - **DHCP clients: Make static, sortable columns, and a lease-expiry column.** On a router's Network tab the DHCP
