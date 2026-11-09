@@ -31,7 +31,11 @@ FIELDS = {   # name -> secret?
     "mail": {"provider": False, "from_address": False, "from_name": False, "tenant_id": False, "client_id": False, "client_secret": True,
              "host": False, "port": False, "security": False, "username": False, "password": True},   # mailer.py
     "offsite": {"kind": False, "host": False, "port": False, "username": False, "password": True, "folder": False, "url": False,
-                "verify": False, "what": False, "passphrase": True, "schedule": False, "keep": False, "hour": False},   # offsite.py
+                "verify": False, "what": False, "passphrase": True, "schedule": False, "keep": False, "hour": False,   # offsite.py
+                "path": False,   # local folder / mount
+                "s3_endpoint": False, "s3_region": False, "s3_bucket": False, "s3_access_key": False, "s3_secret_key": True, "s3_prefix": False,
+                "az_account": False, "az_container": False, "az_prefix": False, "az_endpoint": False, "az_sas": True, "az_key": True,
+                "g_sa_json": True, "g_folder_id": False},   # same destinations as log archiving (archivedest.py)
     "archive": {"dest": False, "enabled": False, "what": False, "keep_months": False, "passphrase": True,   # logarchive.py / archivedest.py
                 "path": False,   # local folder / mount
                 "host": False, "port": False, "username": False, "password": True, "url": False, "folder": False, "verify": False,   # ftp/ftps/webdav
@@ -88,7 +92,8 @@ class Integrations:
                 return all(c.get(k) for k in ("tenant_id", "client_id", "client_secret", "from_address"))
             return bool(c.get("host") and (c.get("from_address") or c.get("username")))
         if kind == "offsite":
-            return bool(c.get("url") if c.get("kind") == "webdav" else c.get("host"))
+            need = {"local": "path", "webdav": "url", "s3": "s3_bucket", "azure": "az_account", "gdrive": "g_folder_id"}.get(c.get("kind"), "host")
+            return bool(c.get(need))
         need = {"cw": ("site", "company", "public_key", "private_key", "client_id"), "teams": ("webhook",), "github": ("token",), "ipinfo": ("token",), "cloudflare": ("token",)}.get(kind, ("api_key",))
         return all(c.get(k) for k in need)
 

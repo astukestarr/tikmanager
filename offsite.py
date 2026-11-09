@@ -32,11 +32,12 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import archivedest
 from version import __version__
 
 MAGIC = b"TMBAK1"
 PREFIX = "tikmanager-"
-KINDS = ("ftps", "ftp", "webdav")
+KINDS = ("local", "ftps", "ftp", "webdav", "s3", "azure", "gdrive")   # same destinations as log archiving (archivedest.py)
 
 
 class OffsiteError(Exception):
@@ -84,19 +85,14 @@ class OffsiteBackup:
                 "last": self.last(), "running": self.running}
 
     def save(self, b):
-        b = {k: str(v).strip() for k, v in (b or {}).items() if k in ("kind", "host", "port", "username", "password", "folder", "url",
-                                                                      "verify", "what", "passphrase", "schedule", "keep", "hour", "clear")} | (
+        keys = ("kind", "host", "port", "username", "password", "folder", "url", "verify", "what", "passphrase", "schedule", "keep", "hour",
+                "path", "s3_endpoint", "s3_region", "s3_bucket", "s3_access_key", "s3_secret_key", "s3_prefix",
+                "az_account", "az_container", "az_prefix", "az_endpoint", "az_sas", "az_key", "g_sa_json", "g_folder_id")
+        b = {k: str(v).strip() for k, v in (b or {}).items() if k in keys} | (
             {"clear": b.get("clear")} if isinstance(b.get("clear"), list) else {})
         cur = {**self.config(), **{k: v for k, v in b.items() if k != "clear"}}
         if cur["kind"] not in KINDS:
-            raise ValueError("Pick FTPS, FTP or WebDAV.")
-        if cur["kind"] == "webdav":
-            u = urllib.parse.urlparse(cur.get("url") or "")
-            if u.scheme != "https" or not u.hostname:
-                raise ValueError("Enter the WebDAV address starting with https:// (plain http would send the password unencrypted), "
-                                 "e.g. https://cloud.example.com/remote.php/dav/files/backup/")
-        elif not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", cur.get("host") or ""):
-            raise ValueError("Enter the FTP server's host name or IP address.")
+            raise ValueError("Pick where to back up to.")
         if cur.get("port") and not (cur["port"].isdigit() and 0 < int(cur["port"]) < 65536):
             raise ValueError("The port is a number from 1 to 65535.")
         if cur["what"] not in ("scripts", "full") or cur["schedule"] not in ("daily", "off"):
@@ -109,6 +105,10 @@ class OffsiteBackup:
             raise ValueError("A full backup holds the master key, so it must be encrypted - set a passphrase.")
         if cur["kind"] == "ftp" and not (b.get("passphrase") or self.integ.config("offsite").get("passphrase")):
             raise ValueError("Plain FTP sends everything readable - set a passphrase so the backup is encrypted (or use FTPS).")
+        try:   # the destination's own field validation (missing bucket, folder, SAS, path, etc.) with friendly messages
+            archivedest.make({**cur, "dest": cur["kind"]})
+        except archivedest.ArchiveError as e:
+            raise ValueError(str(e)) from None
         self.integ.save("offsite", b)
 
     def last(self):
@@ -147,118 +147,43 @@ class OffsiteBackup:
                 tar.addfile(info, io.BytesIO(data))
         return buf.getvalue()
 
-    # --- destinations ---------------------------------------------------------------------------------------------
-    def _ctx(self, c):
-        ctx = ssl.create_default_context()
-        if c.get("verify") == "0":   # a NAS with a self-signed certificate
-            ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
-        return ctx
-
-    def _ftp(self, c):
-        try:
-            f = ftplib.FTP_TLS(context=self._ctx(c), timeout=60) if c["kind"] == "ftps" else ftplib.FTP(timeout=60)
-            f.connect(c["host"], int(c.get("port") or 21))
-            f.login(c.get("username") or "anonymous", c.get("password") or "")
-            if c["kind"] == "ftps":
-                f.prot_p()
-            for part in [p for p in (c.get("folder") or "").replace("\\", "/").split("/") if p]:
-                try:
-                    f.cwd(part)
-                except ftplib.error_perm:
-                    f.mkd(part)
-                    f.cwd(part)
-            return f
-        except (ftplib.all_errors, ssl.SSLError) as e:
-            raise OffsiteError(f"FTP: {e}") from None
-
-    def _dav(self, c, method, name="", data=None, headers=None):
-        base = c["url"].rstrip("/") + "/" + "/".join(urllib.parse.quote(p) for p in (c.get("folder") or "").split("/") if p)
-        url = base.rstrip("/") + "/" + urllib.parse.quote(name) if name else base.rstrip("/") + "/"
-        auth = base64.b64encode(f"{c.get('username') or ''}:{c.get('password') or ''}".encode()).decode()
-        req = urllib.request.Request(url, data=data, method=method, headers={"Authorization": f"Basic {auth}", "User-Agent": f"TikManager/{__version__}", **(headers or {})})
-        try:
-            with urllib.request.urlopen(req, timeout=120, context=self._ctx(c)) as r:
-                return r.status, r.read(1024 * 1024)
-        except urllib.error.HTTPError as e:
-            return e.code, e.read(2000)
-        except (urllib.error.URLError, ssl.SSLError, TimeoutError, OSError) as e:
-            raise OffsiteError(f"WebDAV: {getattr(e, 'reason', e)}") from None
-
-    def _dav_folder(self, c):
-        parts, acc = [p for p in (c.get("folder") or "").split("/") if p], []
-        for p in parts:   # create each level (405 / 301 = already there)
-            acc.append(p)
-            code, _ = self._dav({**c, "folder": "/".join(acc)}, "MKCOL")
-            if code not in (201, 405, 301, 200):
-                raise OffsiteError(f"WebDAV: couldn't create the folder {'/'.join(acc)} (HTTP {code})")
+    # --- destination (shared with log archiving: local / FTPS / FTP / WebDAV / S3 / Azure / Google Drive) ----------
+    def _backend(self):
+        c = self.config()
+        return archivedest.make({**c, "dest": c.get("kind")})
 
     def upload(self, name, data):
-        c = self.config()
-        if c["kind"] == "webdav":
-            self._dav_folder(c)
-            code, body = self._dav(c, "PUT", name, data, {"Content-Type": "application/octet-stream"})
-            if code not in (200, 201, 204):
-                raise OffsiteError(f"WebDAV upload failed (HTTP {code}){' - check the user name and password' if code in (401, 403) else ''}")
-            return
-        f = self._ftp(c)
         try:
-            f.storbinary(f"STOR {name}", io.BytesIO(data))
-        except ftplib.all_errors as e:
-            raise OffsiteError(f"FTP upload failed: {e}") from None
-        finally:
-            try:
-                f.quit()
-            except ftplib.all_errors:
-                pass
+            self._backend().put(name, data)
+        except archivedest.ArchiveError as e:
+            raise OffsiteError(str(e)) from None
 
     def listing(self):
-        c = self.config()
-        if c["kind"] == "webdav":
-            code, body = self._dav(c, "PROPFIND", headers={"Depth": "1"})
-            if code not in (200, 207):
-                return []
-            names = [urllib.parse.unquote(h.text.rstrip("/").rsplit("/", 1)[-1]) for h in ET.fromstring(body).iter("{DAV:}href") if h.text]
-        else:
-            f = self._ftp(c)
-            try:
-                names = f.nlst()
-            except ftplib.all_errors:
-                names = []
-            finally:
-                try:
-                    f.quit()
-                except ftplib.all_errors:
-                    pass
-        return sorted({n.rsplit("/", 1)[-1] for n in names if n.rsplit("/", 1)[-1].startswith(PREFIX) and n.endswith((".tmbak", ".json"))})
+        try:
+            names = self._backend().names("")
+        except archivedest.ArchiveError:
+            return []
+        return sorted({n.rsplit("/", 1)[-1] for n in names
+                       if n.rsplit("/", 1)[-1].startswith(PREFIX) and n.endswith((".tmbak", ".json"))})
 
     def delete(self, name):
-        c = self.config()
-        if c["kind"] == "webdav":
-            self._dav(c, "DELETE", name)
-            return
-        f = self._ftp(c)
         try:
-            f.delete(name)
-        except ftplib.all_errors:
+            self._backend().delete(name)
+        except archivedest.ArchiveError:
             pass
-        finally:
-            try:
-                f.quit()
-            except ftplib.all_errors:
-                pass
 
     # --- running ----------------------------------------------------------------------------------------------------
     def test(self):
-        name = f"{PREFIX}connection-test-{int(time.time())}.json"
-        self.upload(name, json.dumps({"test": True, "from": "TikManager"}).encode())
-        self.delete(name)
-        return f"Connected and wrote a test file to {self.where()} (then removed it)."
+        try:
+            return self._backend().check()
+        except archivedest.ArchiveError as e:
+            raise OffsiteError(str(e)) from None
 
     def where(self):
-        c = self.config()
-        if c["kind"] == "webdav":
-            return f"{c.get('url', '').rstrip('/')}/{c.get('folder') or ''}".rstrip("/")
-        return f"{c['kind'].upper()} {c.get('host')}/{c.get('folder') or ''}".rstrip("/")
+        try:
+            return self._backend().label()
+        except archivedest.ArchiveError:
+            return (self.config().get("kind") or "").upper()
 
     def run(self, trigger="manual"):
         with self.lock:

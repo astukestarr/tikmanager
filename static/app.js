@@ -2313,35 +2313,65 @@ async function offsiteCard() {
       Encrypted with your passphrase before it leaves the server.</p>
     ${last.detail ? `<p class="small ${last.ok ? "" : "status err"}">${esc(last.detail)}</p>` : ""}
     <div class="grid2">
-      <label class="field">Where <select id="ofKind"><option value="ftps">FTPS (FTP over TLS) - recommended</option><option value="webdav">WebDAV (Nextcloud, ownCloud, Synology, QNAP, Box ...)</option>
-        <option value="ftp">FTP (unencrypted connection - backup must be encrypted)</option></select></label>
+      <label class="field">Where <select id="ofKind">
+        <option value="local">Local folder / mounted drive</option><option value="s3">Amazon S3 (or S3-compatible: Backblaze B2, Wasabi, MinIO, R2, Spaces)</option>
+        <option value="azure">Azure Blob Storage</option><option value="gdrive">Google Drive (service account)</option>
+        <option value="ftps">FTPS (FTP over TLS)</option><option value="ftp">FTP (unencrypted connection - backup must be encrypted)</option>
+        <option value="webdav">WebDAV (Nextcloud, ownCloud, Synology, QNAP, Box ...)</option></select></label>
       <label class="field">What <select id="ofWhat"><option value="full">Full - everything to rebuild TikManager</option><option value="scripts">Scripts only</option></select></label>
-      <label class="field of-ftp">FTP server <input id="ofHost" value="${v("host")}" placeholder="nas.example.com" spellcheck="false"></label>
-      <label class="field of-ftp">Port <input id="ofPort" value="${v("port")}" placeholder="21" inputmode="numeric"></label>
-      <label class="field of-dav">WebDAV address <input id="ofUrl" value="${v("url")}" placeholder="https://cloud.example.com/remote.php/dav/files/backup/" spellcheck="false"></label>
-      <label class="field">Folder <input id="ofFolder" value="${v("folder")}" placeholder="tikmanager" spellcheck="false"></label>
-      <label class="field">User name <input id="ofUser" value="${v("username")}" autocomplete="off" spellcheck="false"></label>
-      <label class="field">Password <input id="ofPass" type="password" autocomplete="new-password" placeholder="${o.password_set ? "saved - leave blank to keep" : ""}"></label>
+
+      <label class="field ofd" data-for="local">Folder / mount path <input id="ofPath" value="${v("path")}" placeholder="/mnt/backup  or  D:\\\\tikmanager-backup" spellcheck="false"></label>
+
+      <label class="field ofd" data-for="ftps ftp">FTP server <input id="ofHost" value="${v("host")}" placeholder="nas.example.com" spellcheck="false"></label>
+      <label class="field ofd" data-for="ftps ftp">Port <input id="ofPort" value="${v("port")}" placeholder="21" inputmode="numeric"></label>
+      <label class="field ofd" data-for="webdav">WebDAV address <input id="ofUrl" value="${v("url")}" placeholder="https://cloud.example.com/remote.php/dav/files/backup/" spellcheck="false"></label>
+      <label class="field ofd" data-for="ftps ftp webdav">Folder <input id="ofFolder" value="${v("folder")}" placeholder="tikmanager" spellcheck="false"></label>
+      <label class="field ofd" data-for="ftps ftp webdav">User name <input id="ofUser" value="${v("username")}" autocomplete="off" spellcheck="false"></label>
+      <label class="field ofd" data-for="ftps ftp webdav">Password <input id="ofPass" type="password" autocomplete="new-password" placeholder="${o.password_set ? "saved - leave blank to keep" : ""}"></label>
+
+      <label class="field ofd" data-for="s3">Bucket <input id="ofS3Bucket" value="${v("s3_bucket")}" placeholder="my-backups" spellcheck="false"></label>
+      <label class="field ofd" data-for="s3">Region <input id="ofS3Region" value="${v("s3_region")}" placeholder="us-east-1" spellcheck="false"></label>
+      <label class="field ofd" data-for="s3">Endpoint (blank = AWS) <input id="ofS3Endpoint" value="${v("s3_endpoint")}" placeholder="s3.us-west-002.backblazeb2.com ..." spellcheck="false"></label>
+      <label class="field ofd" data-for="s3">Access key ID <input id="ofS3Key" value="${v("s3_access_key")}" autocomplete="off" spellcheck="false"></label>
+      <label class="field ofd" data-for="s3">Secret access key <input id="ofS3Secret" type="password" autocomplete="new-password" placeholder="${o.s3_secret_key_set ? "saved - leave blank to keep" : ""}"></label>
+      <label class="field ofd" data-for="s3">Key prefix (optional) <input id="ofS3Prefix" value="${v("s3_prefix")}" placeholder="tikmanager" spellcheck="false"></label>
+
+      <label class="field ofd" data-for="azure">Storage account <input id="ofAzAccount" value="${v("az_account")}" placeholder="mystorageacct" spellcheck="false"></label>
+      <label class="field ofd" data-for="azure">Container <input id="ofAzContainer" value="${v("az_container")}" placeholder="backups" spellcheck="false"></label>
+      <label class="field ofd" data-for="azure">Blob prefix (optional) <input id="ofAzPrefix" value="${v("az_prefix")}" placeholder="tikmanager" spellcheck="false"></label>
+      <label class="field ofd" data-for="azure">SAS token (recommended) <input id="ofAzSas" type="password" autocomplete="new-password" placeholder="${o.az_sas_set ? "saved - leave blank to keep" : "sv=...&sig=..."}"></label>
+      <label class="field ofd" data-for="azure">…or account key <input id="ofAzKey" type="password" autocomplete="new-password" placeholder="${o.az_key_set ? "saved - leave blank to keep" : "only if no SAS token"}"></label>
+
+      <label class="field ofd" data-for="gdrive">Drive folder id <input id="ofGFolder" value="${v("g_folder_id")}" placeholder="share this folder with the service account" spellcheck="false"></label>
+
       <label class="field">Encryption passphrase (12+ characters) <input id="ofPhrase" type="password" autocomplete="new-password" placeholder="${o.passphrase_set ? "saved - leave blank to keep" : "required for full backups"}"></label>
       <label class="field">Schedule <select id="ofSched"><option value="daily">Daily</option><option value="off">Only when I click Back up now</option></select></label>
       <label class="field">At (server time) <select id="ofHour">${[...Array(24).keys()].map((h) => `<option value="${h}" ${String(h) === String(o.hour) ? "selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("")}</select></label>
       <label class="field">Copies to keep on the storage <input id="ofKeep" value="${v("keep")}" inputmode="numeric"></label>
     </div>
-    <label class="chk"><input type="checkbox" id="ofVerify" ${o.verify === "0" ? "" : "checked"}> Check the storage's certificate (untick only for a NAS with a self-signed certificate)</label>
+    <label class="field ofd" data-for="gdrive">Service-account JSON key <textarea id="ofGJson" rows="4" spellcheck="false" placeholder="${o.g_sa_json_set ? "saved - leave blank to keep" : "paste the full service-account JSON key"}"></textarea></label>
+    <label class="chk ofd" data-for="ftps webdav"><input type="checkbox" id="ofVerify" ${o.verify === "0" ? "" : "checked"}> Check the storage's certificate (untick only for a NAS with a self-signed certificate)</label>
     <p class="small muted"><b>Keep the passphrase somewhere else too</b> (e.g. your password manager) - without it a backup can't be opened, and it's what you'll need if
       this server is gone. If the storage is on your LAN and you blocked this server from the LAN (Connectivity test > How to fix), allow just the storage's address:
       <span class="mono">sudo ufw insert 1 allow out to &lt;storage IP&gt;</span>. Restore steps: README > "Restoring from an off-site backup".</p>
     <div class="actions"><button class="btn primary" type="button" id="ofSave">Save</button><button class="btn" type="button" id="ofTest" ${o.configured ? "" : "disabled"}>Test connection</button>
       <button class="btn" type="button" id="ofRun" ${o.configured && !o.running ? "" : "disabled"}>Back up now</button><span class="status" id="ofStatus"></span></div>`;
-  $("ofKind").value = o.kind; $("ofWhat").value = o.what; $("ofSched").value = o.schedule;
-  const kind = () => { const dav = $("ofKind").value === "webdav"; el.querySelectorAll(".of-ftp").forEach((x) => x.classList.toggle("hidden", dav)); el.querySelectorAll(".of-dav").forEach((x) => x.classList.toggle("hidden", !dav)); };
+  $("ofKind").value = o.kind || "ftps"; $("ofWhat").value = o.what; $("ofSched").value = o.schedule;
+  const kind = () => { const d = $("ofKind").value; el.querySelectorAll("[data-for]").forEach((x) => x.classList.toggle("hidden", !x.dataset.for.split(" ").includes(d))); };
   $("ofKind").addEventListener("change", kind); kind();
   const say = (m, c = "") => { $("ofStatus").textContent = m; $("ofStatus").className = `status ${c}`; };
   $("ofSave").addEventListener("click", async () => {
-    const b = { kind: $("ofKind").value, what: $("ofWhat").value, host: $("ofHost").value, port: $("ofPort").value, url: $("ofUrl").value, folder: $("ofFolder").value,
-      username: $("ofUser").value, schedule: $("ofSched").value, hour: $("ofHour").value, keep: $("ofKeep").value, verify: $("ofVerify").checked ? "1" : "0" };
+    const b = { kind: $("ofKind").value, what: $("ofWhat").value, schedule: $("ofSched").value, hour: $("ofHour").value, keep: $("ofKeep").value,
+      verify: $("ofVerify").checked ? "1" : "0", path: $("ofPath").value, host: $("ofHost").value, port: $("ofPort").value, url: $("ofUrl").value,
+      folder: $("ofFolder").value, username: $("ofUser").value, s3_bucket: $("ofS3Bucket").value, s3_region: $("ofS3Region").value,
+      s3_endpoint: $("ofS3Endpoint").value, s3_access_key: $("ofS3Key").value, s3_prefix: $("ofS3Prefix").value, az_account: $("ofAzAccount").value,
+      az_container: $("ofAzContainer").value, az_prefix: $("ofAzPrefix").value, g_folder_id: $("ofGFolder").value };
     if ($("ofPass").value) b.password = $("ofPass").value;
     if ($("ofPhrase").value) b.passphrase = $("ofPhrase").value;
+    if ($("ofS3Secret").value) b.s3_secret_key = $("ofS3Secret").value;
+    if ($("ofAzSas").value) b.az_sas = $("ofAzSas").value;
+    if ($("ofAzKey").value) b.az_key = $("ofAzKey").value;
+    if ($("ofGJson").value.trim()) b.g_sa_json = $("ofGJson").value.trim();
     try { await post("/api/admin/offsite", b); await offsiteCard(); $("ofStatus").textContent = "Saved."; $("ofStatus").className = "status ok"; } catch (e) { say(e.message, "err"); }
   });
   $("ofTest").addEventListener("click", async () => { say("Connecting…"); try { const r = await post("/api/admin/offsite/test"); say(r.detail, r.ok ? "ok" : "err"); } catch (e) { say(e.message, "err"); } });
