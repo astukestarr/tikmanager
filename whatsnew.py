@@ -277,6 +277,10 @@ SLIDES_4_2 = [
              "is written as one compressed CSV on/after the 1st of the next month and kept forever by default - to a local "
              "folder or mount, Amazon S3 (or S3-compatible), Azure Blob, Google Drive, FTPS/FTP or WebDAV. While it's on, a "
              "month is always kept locally until it has been safely archived, whatever the retention window is."},
+    {"id": "tunnels", "title": "Live tunnel bandwidth", "img": None, "view": "tunnels", "who": "tech",
+     "text": "Monitoring > Tunnels lists every router's WireGuard tunnel to TikManager with its live up/down bandwidth - logs, "
+             "flows, backups, polling and log archiving all ride these tunnels. Sort by throughput, watch each tunnel's "
+             "sparkline and the total in/out across the fleet, with handshake age and online state."},
 ]
 SLIDES = SLIDES_4_2   # 4.2's own slides (4.1.0 was released, so only the new work shows)
 IDS = {s["id"] for s in SLIDES}

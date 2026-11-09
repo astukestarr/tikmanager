@@ -7342,6 +7342,52 @@ async function billingReport(orgId, refresh) {
   }));
 }
 
+// Tunnels: live WireGuard bandwidth for every TikManager<->router tunnel (polled every few seconds by go())
+let tunView = { sort: "bw", dir: -1 };
+function tunRate(b) { b = b || 0; return b >= 1e9 ? (b / 1e9).toFixed(2) + " Gb/s" : b >= 1e6 ? (b / 1e6).toFixed(1) + " Mb/s" : b >= 1e3 ? (b / 1e3).toFixed(0) + " kb/s" : Math.round(b) + " b/s"; }
+function tunAge(s) { if (s == null) return "—"; if (s < 60) return s + "s ago"; if (s < 3600) return Math.round(s / 60) + "m ago"; if (s < 86400) return Math.round(s / 3600) + "h ago"; return Math.round(s / 86400) + "d ago"; }
+function tunSpark(spark) {
+  if (!spark || spark.length < 2) return "";
+  const vals = spark.map((p) => (p[0] || 0) + (p[1] || 0)), max = Math.max(1, ...vals), w = 96, h = 22, step = w / (vals.length - 1);
+  const pts = vals.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`).join(" ");
+  return `<svg class="tun-spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/></svg>`;
+}
+async function tunnelsView() {
+  const d = await api("/api/tunnels");
+  const rows = d.tunnels.slice(), key = tunView.sort, dir = tunView.dir;
+  rows.sort((a, b) => {
+    if (key === "name" || key === "client") return dir * String(a[key] || "").localeCompare(String(b[key] || ""));
+    const av = key === "bw" ? a.in_bps + a.out_bps : (a[key] || 0), bv = key === "bw" ? b.in_bps + b.out_bps : (b[key] || 0);
+    return dir * (av - bv);
+  });
+  const th = (k, label) => `<th data-sort="${k}" class="tun-sort${tunView.sort === k ? " on" : ""}">${label}${tunView.sort === k ? (tunView.dir < 0 ? " ▾" : " ▴") : ""}</th>`;
+  $("main").innerHTML = `<div class="row"><h1>Tunnels</h1><span class="spacer"></span>
+      <span class="small muted">${d.tunnels.length} tunnels · ${d.agg.online} online · WireGuard ${esc(d.interface)}${d.dev ? " · simulated (dev)" : ""} · live every ${d.sample_secs}s</span></div>
+    <p class="muted">Live bandwidth on each router's WireGuard tunnel to TikManager - logs, flows, backups and polling all ride these, and so does log archiving.
+      <b>In</b> is from the router to TikManager; <b>Out</b> is from TikManager to the router.</p>
+    <div class="tiles">
+      <div class="tile"><div class="l">Total in (from routers)</div><div class="v">${tunRate(d.agg.in_bps)}</div></div>
+      <div class="tile"><div class="l">Total out (to routers)</div><div class="v">${tunRate(d.agg.out_bps)}</div></div>
+      <div class="tile"><div class="l">Tunnels online</div><div class="v">${d.agg.online} / ${d.tunnels.length}</div></div>
+    </div>
+    <div class="card"><div class="table-wrap"><table class="tun-table"><thead><tr>
+      ${th("name", "Router")}${th("client", "Client")}<th>Tunnel IP</th>${th("handshake_age", "Handshake")}${th("in_bps", "In ↓")}${th("out_bps", "Out ↑")}<th>Last 2½ min</th><th>Total</th>
+    </tr></thead><tbody>
+    ${rows.length ? rows.map((t) => `<tr class="${t.online ? "" : "tun-off"}">
+        <td><a href="#router/${t.device_id}">${esc(t.name)}</a>${t.online ? "" : ` <span class="pill">offline</span>`}</td>
+        <td class="muted">${esc(t.client)}</td><td class="mono">${esc(t.tunnel_ip)}</td>
+        <td class="small ${t.handshake_age != null && t.handshake_age < 180 ? "" : "muted"}">${tunAge(t.handshake_age)}</td>
+        <td class="mono">${tunRate(t.in_bps)}</td><td class="mono">${tunRate(t.out_bps)}</td>
+        <td>${tunSpark(t.spark)}</td><td class="small muted">↓ ${flBytes(t.in_total)} · ↑ ${flBytes(t.out_total)}</td></tr>`).join("")
+    : `<tr><td colspan="8" class="muted">No adopted routers yet.</td></tr>`}
+    </tbody></table></div></div>`;
+  $("main").querySelectorAll("th[data-sort]").forEach((h) => h.addEventListener("click", () => {
+    const k = h.dataset.sort;
+    if (tunView.sort === k) tunView.dir = -tunView.dir; else { tunView.sort = k; tunView.dir = (k === "name" || k === "client") ? 1 : -1; }
+    tunnelsView();
+  }));
+}
+
 const NAV_ICONS = {
 "dashboard": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"5\" rx=\"1.5\"/><rect x=\"14\" y=\"12\" width=\"7\" height=\"9\" rx=\"1.5\"/><rect x=\"3\" y=\"16\" width=\"7\" height=\"5\" rx=\"1.5\"/></svg>",
 "routers": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"13\" width=\"19\" height=\"7\" rx=\"2\"/><path d=\"M6.5 16.5h.01M10 16.5h.01M8 13l-2-6M16 13l2-6M5 7.5a1.5 1.5 0 1 0 0-.01M19 7.5a1.5 1.5 0 1 0 0-.01\"/></svg>",
@@ -7381,7 +7427,7 @@ const NAV = [
     { view: "sites", label: "Site map" }, { view: "isps", label: "ISPs" }, { view: "discovered", label: "Discovered", who: "tech" },
     { link: "/ipam", label: "Subnets (IPAM)", who: "ipam" }, { view: "vpns", label: "Site-to-site VPN", who: "vpn" }] },
   { group: "Monitoring", icon: "monitor", count: "alerts", items: [
-    { view: "health", label: "Router health", who: "tech" }, { view: "checks", label: "Critical checks", who: "tech" },
+    { view: "health", label: "Router health", who: "tech" }, { view: "tunnels", label: "Tunnels", who: "tech" }, { view: "checks", label: "Critical checks", who: "tech" },
     { view: "alerts", label: "Alerts", who: "tech", count: "alerts" },
     { view: "logs", label: "Logs", who: "tech" }] },
   { group: "Security", icon: "security", items: [
@@ -7553,7 +7599,7 @@ async function refreshNavCounts() {
   } catch (e) { return; }
   renderNav();
 }
-const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, ipsec: ipsecView, diag: diagView, upgrades: upgradesView, backups: backupsView, clients, users, audit, billing: billingPage, admin: (tab) => admin(tab || undefined) };
+const VIEWS = { isps: ispsPage, checks: checksPage, messages: messagesPage, health: healthPage, compliance: compliancePage, blocking: blockingPage, vulns: vulnsPage, unifi: unifiPage, dashboard, routers, sites, subnets: subnetsPage, discovered: discoveredPage, security: securityPage, logs: logsPage, alerts: alertsPage, tasks: tasksView, vpns: vpnsView, vpn: vpnView, wizards: wizardsLanding, wgbuild: wgbuildView, ipsec: ipsecView, diag: diagView, upgrades: upgradesView, backups: backupsView, clients, users, audit, billing: billingPage, tunnels: tunnelsView, admin: (tab) => admin(tab || undefined) };
 async function go(v, arg) {
   view = v;
   rView.hold = false;
@@ -7574,6 +7620,7 @@ async function go(v, arg) {
       upgradesView().then(() => { window.scrollTo({ top: y }); const j = $("upJobs")?.querySelector(".scroll-y"); if (j) j.scrollTop = jy; }).catch(() => {}); }, 20000);
     // Site-to-site VPN list: fresh tunnel states every 30 s (not while a restart is armed or a filter is being used)
     if (v === "health") timer = setInterval(() => { if (hView.busy || document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; healthPage().catch(() => {}); }, 60000);
+    if (v === "tunnels") timer = setInterval(() => { if (document.hidden || document.activeElement?.closest?.("#main input, #main select")) return; const y = window.scrollY; tunnelsView().then(() => window.scrollTo({ top: y })).catch(() => {}); }, 5000);
     if (v === "vpns") timer = setInterval(() => { if (vpnHold || document.hidden || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       (vpnTab === "found" ? vpnFound() : vpnsView()).catch(() => {}); }, 30000);
   } catch (e) { $("main").innerHTML = `<p class="status err">${esc(e.message)}</p>`; }

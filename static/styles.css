@@ -152,6 +152,12 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px s
 label.field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; font-size: 13px; color: var(--muted); }
 label.field input, label.field select { color: var(--text); }
 .table-wrap { overflow-x: auto; }
+/* Tunnels page: live bandwidth table */
+.tun-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.tun-sort.on { color: var(--accent); }
+.tun-off { opacity: .5; }
+.tun-spark { display: block; }
+.tun-spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .table-wrap.scroll-y { overflow-y: auto; max-height: 460px; }   /* long lists (e.g. upgrade jobs) scroll inside the card instead of running off the page */
 .table-wrap.scroll-y thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
 table { width: 100%; border-collapse: collapse; }

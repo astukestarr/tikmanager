@@ -57,6 +57,7 @@ from regionblock import RegionBlock, RegionError
 from flows import Flows, MIN_MEM as FLOWS_MIN_MEM
 from logarchive import LogArchive
 import archivedest
+from tunnels import Tunnels
 from devkind import kind as device_kind, KINDS as DEVICE_KINDS
 from routerlogs import RouterLogs, SEVERITIES as LOG_SEVERITIES
 from webhooks import FORMATS as WEBHOOK_FORMATS, PLACEHOLDERS as WEBHOOK_PLACEHOLDERS, WebhookError, Webhooks
@@ -119,6 +120,7 @@ KEY = master_key()
 sessions = Sessions(db)
 entra = Entra(settings)
 wg = WireGuard(settings)
+tunnels = Tunnels(db, settings, wg)   # live per-router tunnel bandwidth (the Tunnels page)
 poller = Poller(db, settings, KEY)
 thumbs = Thumbs(settings.data_dir)
 brand = Branding(db, settings.data_dir)
@@ -1724,6 +1726,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/archive":   # log archiving settings + last result
             self.require(tech=True, admin=True)
             return self.json(archive.public())
+        if path == "/api/tunnels":   # live per-router WireGuard tunnel bandwidth (Tunnels page)
+            s = self.require(tech=True)
+            where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
+            rows = db.q(f"""SELECT d.id, d.name, o.name AS client, d.tunnel_ip, d.online, d.public_ip, d.wan_ip
+                            FROM devices d LEFT JOIN orgs o ON o.id=d.org_id WHERE d.state='adopted' AND {where} ORDER BY d.name""", args)
+            return self.json(tunnels.snapshot(rows))
         if m := re.fullmatch(r"/api/devices/(\d+)/winbox", path):   # the router's Winbox service + open sessions to it
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -4303,6 +4311,7 @@ def main():
     reach.start_loop()
     offsite.start()
     archive.start()
+    tunnels.start()
     wgport.start_loop()
     alerts.start()
     unifi.start()

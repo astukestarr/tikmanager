@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.2.0-beta.4 - 2026-11-08
+
+- **Live tunnel bandwidth page.** A new **Monitoring > Tunnels** page lists every router's WireGuard tunnel to
+  TikManager with its live up/down bandwidth, read from the controller's per-peer counters (`wg show`) and refreshed
+  every few seconds. Each row shows the router, client, tunnel IP, handshake age, in/out rate, a short sparkline and
+  the cumulative bytes each way; the header totals in/out across the whole fleet. Sortable by throughput, name or
+  client, and it honours the global Customer selector. (Logs, flows, backups, polling and log archiving all ride these
+  tunnels, so this shows the traffic they add.)
+
 ## 4.2.0-beta.3 - 2026-11-08
 
 - **Log archiving for long-term (compliance) retention.** A new **Log archiving** panel on Admin > Settings keeps

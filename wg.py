@@ -59,6 +59,22 @@ class WireGuard:
                 out[parts[0]] = parts[1].rsplit(":", 1)[0].strip("[]")
         return out
 
+    def transfers(self):
+        """{public key: (rx_bytes, tx_bytes, latest_handshake_epoch, endpoint)} from `wg show <if> dump` - cumulative
+        bytes received from / sent to each router over its tunnel, for the live tunnel bandwidth page. Empty in dev."""
+        if self.s.dev:
+            return {}
+        r = subprocess.run(["wg", "show", self.s.wg_interface, "dump"], capture_output=True, text=True, timeout=15)
+        out = {}
+        for line in (r.stdout.splitlines()[1:] if r.returncode == 0 else []):   # the first line is the interface itself
+            p = line.split("\t")   # pubkey, psk, endpoint, allowed-ips, latest-handshake, rx, tx, keepalive
+            if len(p) >= 7 and valid_key(p[0]):
+                try:
+                    out[p[0]] = (int(p[5]), int(p[6]), int(p[4]), "" if p[2] == "(none)" else p[2].rsplit(":", 1)[0].strip("[]"))
+                except ValueError:
+                    pass
+        return out
+
     def sync(self, peers):
         """Re-apply every adopted router's peer (at startup)."""
         for pubkey, ip in peers:
