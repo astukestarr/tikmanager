@@ -3,7 +3,7 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
-## 4.3.0-beta.1 - 2026-11-08
+## 4.3.0 - 2026-11-08
 
 - **Off-site backup can write to the same destinations as log archiving.** Admin > Settings > Off-site backup now
   supports a **local folder / mounted drive**, **Amazon S3** (and any S3-compatible store - Backblaze B2, Wasabi,
