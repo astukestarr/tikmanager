@@ -7420,7 +7420,7 @@ async function tunnelsView() {
     return dir * (av - bv);
   });
   const th = (k, label) => `<th data-sort="${k}" class="tun-sort${tunView.sort === k ? " on" : ""}">${label}${tunView.sort === k ? (tunView.dir < 0 ? " ▾" : " ▴") : ""}</th>`;
-  $("main").innerHTML = `<div class="row"><h1>Tunnels</h1><span class="spacer"></span>
+  $("main").innerHTML = `<div class="row"><h1>TikManager Tunnels</h1><span class="spacer"></span>
       <span class="small muted">${d.tunnels.length} tunnels · ${d.agg.online} online · WireGuard ${esc(d.interface)}${d.dev ? " · simulated (dev)" : ""} · live every ${d.sample_secs}s</span></div>
     <p class="muted">Live bandwidth on each router's WireGuard tunnel to TikManager - logs, flows, backups and polling all ride these, and so does log archiving.
       <b>In</b> is from the router to TikManager; <b>Out</b> is from TikManager to the router.</p>

@@ -3,6 +3,10 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.4.0-beta.2 - 2026-11-09
+
+- The Tunnels page heading now reads **TikManager Tunnels**.
+
 ## 4.4.0-beta.1 - 2026-11-09
 
 - **Server drive usage, shown graphically.** Admin > Settings > Log retention now draws a usage bar for the whole
