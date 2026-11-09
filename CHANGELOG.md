@@ -3,6 +3,25 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.2.0 - 2026-11-08
+
+Long-term log retention, compliance archiving, and a live tunnel bandwidth page.
+
+- **Log retention is now configurable, up to 90 days.** Admin > Settings > Log retention sets how long router logs
+  (the Logs page) and traffic flows (the router Flows tab) are kept - 1 to 90 days each, up from a fixed 14 and 7. The
+  card shows the data folder and database size and the current line/row counts, so you can see what logs cost.
+- **Log archiving for long-term (compliance) retention.** Admin > Settings > Log archiving keeps logs and flows off
+  this server for years: each completed calendar month is written as one compressed CSV on/after the 1st of the next
+  month, kept forever by default (an optional months ceiling prunes old archives). Destinations: a local folder /
+  mounted drive, Amazon S3 (and any S3-compatible store - Backblaze B2, Wasabi, MinIO, Cloudflare R2, DigitalOcean
+  Spaces), Azure Blob Storage, Google Drive, FTPS/FTP and WebDAV - all standard-library (no extra packages), optionally
+  encrypted with a passphrase. Local pruning is archive-aware: a completed month is always kept on the appliance until
+  it has been safely archived, so a 31-day month is never lost even with a short retention window.
+- **Live tunnel bandwidth page (Monitoring > Tunnels).** Every router's WireGuard tunnel to TikManager with its live
+  up/down bandwidth (from the controller's per-peer counters), refreshed every few seconds: router, client, tunnel IP,
+  handshake age, in/out rate, a sparkline and cumulative bytes, with fleet totals. Sortable, and it honours the global
+  Customer selector.
+
 ## 4.2.0-beta.4 - 2026-11-08
 
 - **Live tunnel bandwidth page.** A new **Monitoring > Tunnels** page lists every router's WireGuard tunnel to
