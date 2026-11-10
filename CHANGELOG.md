@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.1-beta.3 - 2026-11-10
+
+- **Clearer empty device lists.** When you select a customer who has no managed devices (for example a client synced
+  from ConnectWise who has no MikroTiks), the device list now says plainly *"<Customer> has no managed devices yet"*
+  with a hint to use **Adopt devices**, instead of the generic "No devices match" that read like a filter problem. The
+  "No devices match" message is still used when your own filters or search exclude everything. Same on the Access
+  points / Routers / Switches pages ("…has no managed access points yet", etc.).
+
 ## 4.5.1-beta.2 - 2026-11-09
 
 - DHCP clients: the lease-expiry column header now reads **Expires** (was "Expires after").

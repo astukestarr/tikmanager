@@ -479,13 +479,22 @@ async function routers(kind) {
         return all.length ? `<select id="fTag" aria-label="Tag"><option value="">Any tag</option>${all.map((t) => `<option>${esc(t)}</option>`).join("")}</select>` : ""; })()}
       <input id="fText" placeholder="Search name, model, version, notes…" aria-label="Search">
     </div><div id="list"></div></div>`;
+  const noun = kind ? title.toLowerCase() : "devices";
+  // Is this scoped set genuinely empty (a customer with no managed devices, or an empty fleet), vs. filtered to nothing?
+  const anyAdopted = devices.some((d) => d.state === "adopted");
+  const custName = appOrg ? (orgs.find((x) => String(x.id) === appOrg) || {}).name : "";
   const draw = () => {
     const o = $("fOrg")?.value, st = $("fState").value, t = $("fText").value.toLowerCase(), tag = $("fTag")?.value;
     const rows = devices.filter((d) => d.state === "adopted" && (!o || String(d.org_id) === o) && (!st || (st === "disc" ? d.lc_status === "discontinued" : st === "old" ? (lcYears(d) ?? 0) >= LC_OLD : !!d.online === (st === "online")))
       && (!tag || (d.tags || []).includes(tag))
       && (!t || `${d.name} ${d.identity} ${d.model} ${d.version} ${d.site} ${d.org} ${(d.tags || []).join(" ")} ${d.notes || ""}`.toLowerCase().includes(t)));
     const cols = [...(isTech() ? ["thumb", "state", "org", "name"] : ["thumb", "state", "name"]), ...(kind ? [] : ["kind"]), "site", "model", "age", "version", "uptime", "cpu", "last_seen"];
-    $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), cols, routerSort) : `<p class="muted">No ${kind ? title.toLowerCase() : "devices"} match.</p>`;
+    // When the customer (or whole fleet) simply has nothing managed, say so plainly instead of the filter-style "No … match".
+    const empty = !anyAdopted
+      ? `<p class="muted">${custName ? `${esc(custName)} has no managed ${noun} yet.` : `No managed ${noun} yet.`}` +
+        `${isTech() ? ` Use <strong>Adopt devices</strong> above to add one.` : ""}</p>`
+      : `<p class="muted">No ${noun} match.</p>`;
+    $("list").innerHTML = rows.length ? table(sortRouters(rows, routerSort), cols, routerSort) : empty;
     bindRows();
     // click a header to sort by it; click it again to reverse
     $("list").querySelectorAll("[data-sort]").forEach((b) => b.addEventListener("click", () => {
