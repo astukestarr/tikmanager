@@ -3,6 +3,34 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.1 - 2026-11-17
+
+- **Fix: upgrades failed on large databases ("Couldn't back up the database - not installed").** The pre-upgrade
+  database backup used SQLite's `serialize()`, which has to hold the whole database in one chunk and refuses past ~2 GB
+  (`unable to serialize 'main'`) - so once a server's logs/flows pushed the database over that size, every "Upgrade now"
+  failed at the backup step. The backup now uses SQLite's online-backup API, copying the database page by page with
+  bounded memory and no size limit (still a consistent snapshot taken by the service's own user and streamed to the
+  root-only backup folder, so the updater's security model is unchanged). The failure message now also includes the
+  real reason when a backup can't be made. If your server is already over the limit, the broken backup runs before the
+  fix installs, so run the fixed updater once by hand as root -
+  `curl -fsSL https://raw.githubusercontent.com/astukestarr/tikmanager/v4.5.1/deploy/self-update.sh -o /tmp/tm-su.sh && sudo bash /tmp/tm-su.sh latest` -
+  and the button works normally afterwards.
+- **"Input firewall has no catch-all drop" now suggests the actual RouterOS command.** The Router health finding used to
+  describe the fix in prose only; it now spells out the command to run -
+  `/ip firewall filter add chain=input action=drop in-interface-list=!LAN comment="drop all not coming from LAN"` -
+  with a reminder to first accept established/related traffic and TikManager's tunnel, and to have an interface list
+  named `LAN` holding your LAN ports, so the drop doesn't lock out management.
+- **Clearer empty device lists.** When you select a customer who has no managed devices (for example a client synced
+  from ConnectWise who has no MikroTiks), the device list now says plainly *"<Customer> has no managed devices yet"*
+  with a hint to use **Adopt devices**, instead of the generic "No devices match" that read like a filter problem. The
+  "No devices match" message is still used when your own filters or search exclude everything. Same on the Access
+  points / Routers / Switches pages.
+- **DHCP clients table is colour-coded for readability.** Host names are bold to anchor each row, the type shows as a
+  **Static** (blue) / **Dynamic** (grey) badge, a bound lease's status is green, and the Expires time turns amber under
+  30 minutes and red under 5, so a wide row reads at a glance. Subtle zebra striping and a row highlight on hover, all
+  from the theme palette so it follows light/dark and the accent themes. The lease-expiry column header now reads
+  **Expires**.
+
 ## 4.5.1-beta.5 - 2026-11-17
 
 - **Fix: upgrades failed on large databases ("Couldn't back up the database - not installed").** The pre-upgrade
