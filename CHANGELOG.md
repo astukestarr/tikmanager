@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.1-beta.5 - 2026-11-17
+
+- **Fix: upgrades failed on large databases ("Couldn't back up the database - not installed").** The pre-upgrade
+  database backup used SQLite's `serialize()`, which has to hold the whole database in one chunk and refuses past ~2 GB
+  (`unable to serialize 'main'`) - so once a server's logs/flows pushed the database over that size, every "Upgrade now"
+  failed at the backup step. The backup now uses SQLite's online-backup API, copying the database page by page with
+  bounded memory and no size limit (still a consistent snapshot taken by the service's own user and streamed to the
+  root-only backup folder, so the updater's security model is unchanged). The failure message now also includes the
+  real reason when a backup can't be made.
+
 ## 4.5.1-beta.4 - 2026-11-17
 
 - **"Input firewall has no catch-all drop" now suggests the actual RouterOS command.** The Router health finding used to

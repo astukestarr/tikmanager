@@ -127,14 +127,28 @@ python3 -c 'import sys; [compile(open(f, encoding="utf-8").read(), f, "exec") fo
 status running "Backing up the current version ($FROM) and the database"
 rm -rf "$PREV"
 cp -a "$CODE" "$PREV"
-# the copy is read by the service's own user (its files, its rights) and streamed to root over stdout, so root never
-# opens anything in the web app's folder; serialize() is a consistent snapshot while TikManager keeps running
+# A consistent snapshot while TikManager keeps running, done by the service's own user: it writes a compact copy into
+# its OWN data folder with SQLite's online-backup API (page by page - bounded memory, and no 2 GB limit the way
+# serialize() has), then streams that copy to the root-owned backup over stdout. Root still never opens a file inside
+# the web app's folder - it only creates $DBCOPY (in its own root-only /var/backups) and reads the service user's stdout.
 DBCOPY="$BACKUPS/backup-before-$VER.db"
-if ! (umask 077; cd / && runuser -u tikmanager -- python3 -I -c \
-      'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); sys.stdout.buffer.write(c.serialize()); c.close()' \
-      "$DATA/tikmanager.db" > "$DBCOPY") || [[ ! -s "$DBCOPY" ]]; then
-  rm -f -- "$DBCOPY"; status failed "Couldn't back up the database - not installed"; exit 1
+TMPDB="$DATA/.backup-$VER.db"
+clean_tmp() { runuser -u tikmanager -- rm -f -- "$TMPDB" "$TMPDB-wal" "$TMPDB-shm" 2>/dev/null || true; }
+clean_tmp
+if ! err=$(cd / && runuser -u tikmanager -- python3 -I -c \
+      'import sqlite3, sys
+src = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
+dst = sqlite3.connect(sys.argv[2])
+with dst:
+    src.backup(dst)
+dst.close(); src.close()' \
+      "$DATA/tikmanager.db" "$TMPDB" 2>&1); then
+  clean_tmp; status failed "Couldn't back up the database - not installed (${err##*: })"; exit 1
 fi
+if ! (umask 077; runuser -u tikmanager -- cat -- "$TMPDB" > "$DBCOPY") || [[ ! -s "$DBCOPY" ]]; then
+  clean_tmp; rm -f -- "$DBCOPY"; status failed "Couldn't save the database backup - not installed"; exit 1
+fi
+clean_tmp
 # keep the newest 3 (root-only folder: only this script writes names there)
 find "$BACKUPS" -maxdepth 1 -type f -name 'backup-before-*.db' -printf '%T@ %p\n' | sort -rn | tail -n +4 | cut -d' ' -f2- \
   | while IFS= read -r old; do rm -f -- "$old"; done
