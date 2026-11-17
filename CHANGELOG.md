@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.5.1-beta.4 - 2026-11-17
+
+- **"Input firewall has no catch-all drop" now suggests the actual RouterOS command.** The Router health finding used to
+  describe the fix in prose only; it now spells out the command to run -
+  `/ip firewall filter add chain=input action=drop in-interface-list=!LAN comment="drop all not coming from LAN"` -
+  with a reminder to first accept established/related traffic and TikManager's tunnel, and to have an interface list
+  named `LAN` holding your LAN ports, so the drop doesn't lock out management.
+
 ## 4.5.1-beta.3 - 2026-11-10
 
 - **Clearer empty device lists.** When you select a customer who has no managed devices (for example a client synced

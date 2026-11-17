@@ -263,7 +263,10 @@ def build(rows, metrics, flaps, now=None):
             if not caught:
                 add(d, "critical" if open_svc else "high", "Exposure", "Input firewall has no catch-all drop",
                     "Anything the router itself offers is reachable from the internet.",
-                    "Add a final input rule: drop everything not from the LAN (like MikroTik's default 'drop all not coming from LAN').")
+                    "Add a final input rule that drops everything not from the LAN (MikroTik's default). First make sure the input "
+                    "chain already accepts established/related traffic and TikManager's tunnel, and that an interface list named "
+                    "LAN holds your LAN ports - then run: "
+                    "/ip firewall filter add chain=input action=drop in-interface-list=!LAN comment=\"drop all not coming from LAN\"")
             for s in services(inv):
                 if s.get("name") in PLAINTEXT and not yes(s.get("disabled")) and s.get("name") not in open_svc:
                     if s["name"] == "www":   # TikManager's own way in (REST) - never disable it; limit who can reach it
