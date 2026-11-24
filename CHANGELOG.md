@@ -3,7 +3,7 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
-## 4.8.0-beta.1 - 2026-11-24
+## 4.8.0 - 2026-11-24
 
 - **Sign in with any OpenID Connect provider (Pocket ID, Authentik, Keycloak, Okta, Google…).** Alongside — or
   instead of — Microsoft, you can now point TikManager at any standards-compliant OIDC identity provider. Set the
@@ -12,9 +12,6 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
   domain-locked, when "Client OIDC sign-in" is on. Microsoft and OIDC can both be configured at once. The ID token's
   **signature is verified against the provider's published keys (RS256/JWKS)** on top of the issuer, audience, nonce,
   expiry and email-verified checks — stdlib only, no new dependencies.
-
-## 4.7.0-beta.1 - 2026-11-24
-
 - **Manage routers without a TikManager WireGuard tunnel.** If your routers are already reachable over your own
   overlay (Netbird, Tailscale, a routed WAN), you can now manage them there instead of building a TikManager tunnel.
   Set **this server's overlay IP** in Admin → Settings, then on **Adopt routers** either run the new *"over your own
@@ -23,6 +20,8 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
   the login). Direct routers get the same controller-only hardening — the `tikmanager` API user and web service are
   locked to the controller's overlay IP — just no WireGuard. Everything works except the WireGuard-only features
   (tunnel bandwidth, the WireGuard Builder). The controller must be able to reach the router back over your overlay.
+
+## 4.6.0 - 2026-11-24
 
 - **Edit any user.** The Users screen gains an **Edit** button on every user (technicians): change their **name** and
   **role**, and for a client user the **clients** they can see and their **sign-in method** - all in one dialog. (The
