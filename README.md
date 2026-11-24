@@ -29,6 +29,10 @@ Caddy. No build step, no package manager.
 
 MIT licensed - see [LICENSE](LICENSE). Found a security problem? Please report it privately: [SECURITY.md](SECURITY.md).
 
+**Contributions:** TikManager is source-available but **not open to outside contributions** - I don't accept pull
+requests, and forking is off. Bug reports and feature ideas via Issues and Discussions are very welcome and do shape
+the roadmap; I just build the changes myself so the auth and router-management code stays to one reviewed standard.
+
 - [Install on a server](#install-on-a-server-ubuntu-2604-lts) · [First run](#first-run) ·
   [Microsoft sign-in](#microsoft-sign-in-for-your-technicians) · [What is configured where](#what-is-configured-where)
 - [Updating TikManager](#updating-tikmanager) - what changed in each version: [CHANGELOG.md](CHANGELOG.md)
