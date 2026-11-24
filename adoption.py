@@ -21,6 +21,12 @@ def command(s, token: str) -> str:
     return f'/tool fetch url="{url}" dst-path=tikmanager.rsc; /import tikmanager.rsc; /file remove tikmanager.rsc'
 
 
+def command_direct(s, token: str) -> str:
+    """Overlay (no-WireGuard) adoption command - the router registers over your own network (e.g. Netbird)."""
+    url = f"{s.public_url}/adopt/{token}?mode=direct"
+    return f'/tool fetch url="{url}" dst-path=tikmanager.rsc; /import tikmanager.rsc; /file remove tikmanager.rsc'
+
+
 def stage1(s, token: str) -> str:
     reg = f"{s.public_url}/adopt/{token}/register"
     return f"""# TikManager - adopt this router (RouterOS 7). Generated {datetime.now():%Y-%m-%d %H:%M}.
@@ -116,3 +122,75 @@ def stage2(s, device: dict, api_password: str) -> str:
 :put "TikManager: registered. A technician will approve this router; it shows online within a minute after that."
 }}
 """
+
+
+def stage1_direct(s, token: str) -> str:
+    """Overlay (no-WireGuard) adoption: the router registers over your own network. TikManager records the address the
+    router reaches it from (its overlay IP) as the management address, then polls it there - no tunnel is built."""
+    reg = f"{s.public_url}/adopt/{token}/register?mode=direct"
+    return f"""# TikManager - adopt this router over your own network, no WireGuard. Generated {datetime.now():%Y-%m-%d %H:%M}.
+# Run it on the router while it can reach {s.public_url} over your overlay (e.g. Netbird); a technician then approves it.
+{{
+:if ([:pick [/system resource get version] 0 1] < "7") do={{ :error "TikManager needs RouterOS v7 or newer" }}
+:local www [/ip service get www port]
+:local serial ""
+:do {{ :set serial [/system routerboard get serial-number] }} on-error={{}}
+:local model [/system resource get board-name]
+:local ident [/system identity get name]
+/tool fetch url={_q(reg)} http-method=post http-header-field="Content-Type: application/x-www-form-urlencoded" http-data=("serial=" . $serial . "&model=" . $model . "&version=" . [/system resource get version] . "&identity=" . $ident . "&www=" . $www) dst-path=tikmanager2.rsc
+:delay 1s
+/import tikmanager2.rsc
+/file remove tikmanager2.rsc
+}}
+"""
+
+
+def _direct_body(s, ip: str, api_password: str) -> str:
+    """The RouterOS commands that set a router up for direct (overlay) management: a controller-only API user and web
+    service, a firewall accept and syslog forwarding - all locked to the controller's overlay IP. No WireGuard.
+    `ip` is the router's own management address (its overlay IP); srv is the controller's overlay IP."""
+    srv = s.direct_controller_ip
+    return f"""{{
+:local tm "tikmanager"
+:if ([:len [/user group find name=$tm]] = 0) do={{ /user group add name=$tm policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp,sniff comment="TikManager" }} else={{ /user group set [find name=$tm] policy=read,write,policy,test,api,rest-api,sensitive,reboot,ftp,sniff }}
+/user remove [find name=$tm]
+/user add name=$tm group=$tm password={_q(api_password)} address={srv}/32 comment="TikManager - do not remove"
+# HTTP management for the controller only. RouterOS 7.2x renamed www "address" to "available-from" - handle both.
+:local www [/ip service get www disabled]
+:local prop "available-from"
+:local addr ""
+:do {{ :local g [:parse ":return [/ip service get www available-from]"]; :set addr [$g] }} on-error={{
+  :set prop "address"; :local g [:parse ":return [/ip service get www address]"]; :set addr [$g] }}
+:local want ""
+:if ($www = true) do={{ /ip service set www disabled=no; :set want "{srv}/32" }} else={{
+  :if ([:len $addr] > 0 && [:typeof [:find [:tostr $addr] "{srv}/"]] = "nil") do={{
+    :foreach a in=$addr do={{ :set want ($want . $a . ",") }}
+    :set want ($want . "{srv}/32")
+  }}
+}}
+:if ([:len $want] > 0) do={{
+  :local setwww [:parse ("/ip service set www " . $prop . "=\\"" . $want . "\\"")]
+  $setwww
+}}
+# Accept the controller (its overlay address) to the input chain - added if missing, else re-pointed and moved to top.
+:if ([:len [/ip firewall filter find comment="TikManager"]] = 0) do={{
+  :if ([:len [/ip firewall filter find]] > 0) do={{
+    /ip firewall filter add chain=input src-address={srv} action=accept comment="TikManager" place-before=0
+  }} else={{ /ip firewall filter add chain=input src-address={srv} action=accept comment="TikManager" }}
+}} else={{
+  /ip firewall filter set [find comment="TikManager"] chain=input src-address={srv} in-interface="" action=accept disabled=no
+  :do {{ /ip firewall filter move [find comment="TikManager"] destination=0 }} on-error={{}}
+}}
+/system logging remove [find action=$tm]
+/system logging action remove [find name=$tm]
+/system logging action add name=$tm target=remote remote={srv} remote-port={s.syslog_port} src-address={ip}
+/system logging add topics=info action=$tm
+/system logging add topics=warning action=$tm
+/system logging add topics=error action=$tm
+/system logging add topics=critical action=$tm
+}}"""
+
+
+def stage2_direct(s, device: dict, api_password: str) -> str:
+    ip = device["tunnel_ip"]
+    return f"# TikManager - settings for this router (managed over your own network at {ip}, no WireGuard). Safe to run again.\n" + _direct_body(s, ip, api_password)

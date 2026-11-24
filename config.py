@@ -60,6 +60,9 @@ class Settings:
     wg_server_ip: str = field(default_factory=lambda: env("WG_SERVER_IP", "10.77.0.1"))
     wg_network: str = field(default_factory=lambda: env("WG_NETWORK", "10.77.0.0/16"))
     wg_server_pubkey: str = field(default_factory=lambda: env("WG_SERVER_PUBKEY"))
+    # Direct / overlay connectivity (no WireGuard): the controller's address as a "direct" router reaches it (e.g. this
+    # server's Netbird/Tailscale IP). Used to source-lock a direct router's API user + web service. Blank = direct mode off.
+    direct_controller_ip: str = field(default_factory=lambda: env("DIRECT_CONTROLLER_IP"))
     syslog_port: int = field(default_factory=lambda: int(env("TM_SYSLOG_PORT", "5514")))
     # where new versions come from (GitHub owner/repo) - root-owned settings file only, never the web pages, because the
     # root updater installs whatever this points at

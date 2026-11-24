@@ -13,7 +13,7 @@ import re
 FIELDS = {   # name -> secret?
     "tech_domains": False, "tech_admins": False,
     "entra_tenant_id": False, "entra_client_id": False, "entra_client_secret": True, "client_ms_mode": False,
-    "wg_endpoint": False, "ping_target": False,
+    "wg_endpoint": False, "ping_target": False, "direct_controller_ip": False,
 }
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[a-z]{2,}$", re.I)
@@ -94,6 +94,13 @@ class AppSettings:
                 if not DOMAIN.match(pt):
                     raise ValueError("The latency test target is an IP address or host name.") from None
         clean["ping_target"] = pt
+        dci = str(data.get("direct_controller_ip", cur.get("direct_controller_ip", "")) or "").strip()
+        if dci:
+            try:
+                ipaddress.ip_address(dci)
+            except ValueError:
+                raise ValueError("The controller's overlay address is an IP address (e.g. this server's Netbird IP).") from None
+        clean["direct_controller_ip"] = dci
         secret = str(data.get("entra_client_secret") or "").strip()
         if data.get("clear_entra_secret"):
             secret_blob = None

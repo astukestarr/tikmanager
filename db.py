@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS devices (
   id INTEGER PRIMARY KEY, org_id INTEGER REFERENCES orgs(id) ON DELETE CASCADE,   -- NULL until a tech approves it
   name TEXT NOT NULL, name_custom INTEGER NOT NULL DEFAULT 0, site TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
   public_ip TEXT, first_seen REAL,
-  tunnel_ip TEXT UNIQUE, wg_pubkey TEXT UNIQUE,
+  tunnel_ip TEXT UNIQUE, wg_pubkey TEXT UNIQUE,   -- tunnel_ip is the management address: WG-assigned, or (direct mode) the router's own reachable IP
+  conn_mode TEXT NOT NULL DEFAULT 'wireguard',     -- 'wireguard' (TikManager tunnel) | 'direct' (reached over your own overlay, e.g. Netbird)
   token_hash TEXT, token_expires REAL,
   state TEXT NOT NULL DEFAULT 'pending',    -- pending (registered, waiting for a tech to approve) / adopted
   adopted_at REAL, last_seen REAL, last_poll REAL, online INTEGER NOT NULL DEFAULT 0, last_error TEXT,
@@ -531,7 +532,7 @@ class DB:
                              ("sec_target", "TEXT"), ("cve_n", "INTEGER"), ("cve_max", "REAL"), ("sec_info", "TEXT"), ("sec_version", "TEXT"),
                              ("sec_checked", "REAL"), ("health", "TEXT"), ("health_at", "REAL"), ("isp_ifaces", "TEXT"), ("isp_state", "TEXT"), ("bgp_state", "TEXT"), ("bgp_at", "REAL"), ("flows_on", "INTEGER NOT NULL DEFAULT 0"), ("flows_prev", "TEXT"), ("flows_sample", "INTEGER NOT NULL DEFAULT 1"), ("isp_info", "TEXT"),
                              ("last_reboot", "REAL"), ("last_reboot_why", "TEXT"), ("tags", "TEXT"), ("kind_override", "TEXT"), ("ping_target", "TEXT"),
-                             ("cw_config_id", "INTEGER")):
+                             ("cw_config_id", "INTEGER"), ("conn_mode", "TEXT NOT NULL DEFAULT 'wireguard'")):
                 if col not in info and "name_custom" in info:   # (older schemas are rebuilt below with every column)
                     c.execute(f"ALTER TABLE devices ADD COLUMN {col} {ddl}")
             if info["org_id"][3] == 1 or "name_custom" not in info:   # org_id NOT NULL (old schema)

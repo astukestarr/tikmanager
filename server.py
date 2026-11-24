@@ -31,7 +31,7 @@ from entra import STATE_COOKIE, AuthError, Entra
 import difflib
 from backups import Backups, normalize
 from poller import Poller
-from routeros import RouterError
+from routeros import RouterError, RouterOS, SimRouter
 from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from wgbuild import WgBuilds, WgError
@@ -67,6 +67,12 @@ from scriptlib import LibraryError, ScriptLibrary, secrets as script_secrets
 import vpninv
 import healthdash
 healthdash.TM_IP = settings.wg_server_ip   # one-click "Limit WebFig to TikManager" uses it
+
+
+def controller_ip_for(d):
+    """The controller's address as this router reaches us from - the WireGuard IP, or (direct mode) the overlay IP.
+    Used wherever a router's API user / web service / firewall is source-locked to the controller."""
+    return settings.direct_controller_ip if (d and d.get("conn_mode") == "direct") else settings.wg_server_ip
 import compliance
 import dashboards
 from messages import Messages
@@ -207,7 +213,7 @@ def switch_https(d, user, cl=None):
     port and certificate it has, limits who can reach it), prove HTTPS answers over the tunnel, and only then switch.
     If HTTPS doesn't answer, www-ssl is put back as it was and TikManager stays on HTTP. Returns a sentence for people."""
     cl = cl or poller.client(d)
-    info = cl.https_setup(settings.wg_server_ip)
+    info = cl.https_setup(controller_ip_for(d))
     try:
         fp = cl.https_test(info["port"])
     except RouterError as e:
@@ -238,12 +244,13 @@ SECURITY_HEADERS = {
 }
 
 
-def winbox_allows_tikmanager(addresses):
-    """A router's Winbox "Available From": empty = anyone; otherwise TikManager's tunnel address must be in a listed network."""
+def winbox_allows_tikmanager(addresses, controller_ip=None):
+    """A router's Winbox "Available From": empty = anyone; otherwise TikManager's address (its WireGuard IP, or the
+    overlay IP for a direct router) must be in a listed network."""
     nets = [a.strip() for a in str(addresses or "").split(",") if a.strip()]
     for n in nets:
         try:
-            if ipaddress.ip_address(settings.wg_server_ip) in ipaddress.ip_network(n, strict=False):
+            if ipaddress.ip_address(controller_ip or settings.wg_server_ip) in ipaddress.ip_network(n, strict=False):
                 return True
         except ValueError:
             continue
@@ -1101,7 +1108,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/auth/callback":
             return self.entra_callback(q)
         if m := re.fullmatch(r"/adopt/([A-Za-z0-9_-]{20,80})", path):
-            return self.adopt_script(m.group(1))
+            return self.adopt_script(m.group(1), q.get("mode"))
         if path == "/api/branding":   # public: the sign-in page uses it too
             return self.json(brand.public())
         if path == "/branding/logo":
@@ -1195,7 +1202,7 @@ class Handler(BaseHTTPRequestHandler):
             where, args = self.org_scope(s, q.get("org_id"), "d.org_id")
             rows = db.q(f"""SELECT d.id, d.org_id, o.name AS org, d.name, d.site, d.state, d.online, d.last_seen, d.identity, d.model,
                             d.version, d.uptime, d.cpu, d.mem_used, d.mem_total, d.tunnel_ip, d.last_error, d.serial, d.public_ip, d.first_seen,
-                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state, d.last_reboot, d.last_reboot_why, d.tags, d.notes, d.board, d.kind_override
+                            d.thumb_slug, d.lc_status, d.lc_made, d.lc_slug, d.lc_suggest, d.lc_suggest_name, d.lc_suggest_why, d.dm_flagged, d.dm_mode, d.sec_target, d.cve_n, d.cve_max, d.sec_checked, d.isp_state, d.last_reboot, d.last_reboot_why, d.tags, d.notes, d.board, d.kind_override, d.conn_mode
                             FROM devices d LEFT JOIN orgs o ON o.id = d.org_id WHERE {where} ORDER BY d.state DESC, o.name, d.name""", args)
             for r in rows:
                 r["isp_state"] = json.loads(r.get("isp_state") or "{}")
@@ -1774,8 +1781,8 @@ class Handler(BaseHTTPRequestHandler):
                     svc = poller.client(d).winbox_service()
                 except RouterError as e:
                     err = str(e)
-            tip = settings.wg_server_ip
-            ok = bool(svc) and not svc["disabled"] and winbox_allows_tikmanager(svc["address"])
+            tip = controller_ip_for(d)
+            ok = bool(svc) and not svc["disabled"] and winbox_allows_tikmanager(svc["address"], tip)
             return self.json({"service": svc, "error": err, "reachable": ok, "tunnel_ip": tip, "host": urllib.parse.urlparse(settings.public_url).hostname,
                               "your_ip": self.client_ip(), "sessions": [x for x in winbox.view(s) if x["device_id"] == d["id"]],
                               "ports": f"{winbox.ports.start}-{winbox.ports.stop - 1}",
@@ -1964,8 +1971,11 @@ class Handler(BaseHTTPRequestHandler):
                               "read": sum(1 for d in polled if d["neighbors_at"]), "oldest": min((d["neighbors_at"] for d in polled if d["neighbors_at"]), default=None)})
         if path == "/api/adoption":
             s = self.require(tech=True)
-            return self.json({"command": adoption.command(settings, self.enroll_token()), "pending": db.one(
-                "SELECT COUNT(*) AS n FROM devices WHERE state='pending'")["n"], "rotated_at": db.setting("enroll_rotated_at")})
+            return self.json({"command": adoption.command(settings, self.enroll_token()),
+                              "direct_command": adoption.command_direct(settings, self.enroll_token()),
+                              "direct_ok": bool(settings.direct_controller_ip), "controller_ip": settings.direct_controller_ip,
+                              "pending": db.one("SELECT COUNT(*) AS n FROM devices WHERE state='pending'")["n"],
+                              "rotated_at": db.setting("enroll_rotated_at")})
         if m := re.fullmatch(r"/api/devices/(\d+)/topology", path):   # network map behind one router, read live
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -2214,7 +2224,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/setup":
             return self.first_run()
         if m := re.fullmatch(r"/adopt/([A-Za-z0-9_-]{20,80})/register", path):
-            return self.adopt_register(m.group(1))
+            return self.adopt_register(m.group(1), q.get("mode"))
         # everything else: signed in + CSRF token
         s = self.session()
         self.check_csrf(s)
@@ -2470,6 +2480,42 @@ class Handler(BaseHTTPRequestHandler):
             db.event(d["id"], org["id"], "moved", f"from {old['name'] if old else 'no client'} to {org['name']} by {s['email']}")
             db.audit(s["email"], "router moved", f"{d['name']}: {old['name'] if old else '-'} -> {org['name']}", self.client_ip(), org_id=org["id"])
             return self.json({"ok": True})
+        if path == "/api/devices/manual":   # add a router reachable over your own network (Netbird etc.) - no WireGuard
+            s = self.require(tech=True, write=True)
+            if not settings.direct_controller_ip:
+                raise HttpError(400, "Set the controller's overlay IP in Admin > Settings before adding routers directly.")
+            b = self.body()
+            host = str(b.get("ip") or "").strip()
+            if not host:
+                raise HttpError(400, "Enter the router's address (its IP on your overlay).")
+            user, pw = str(b.get("admin_user") or "").strip(), str(b.get("admin_pass") or "")
+            if not user:
+                raise HttpError(400, "Enter an admin username TikManager can use once to set the router up.")
+            port = int(b.get("api_port") or 0) or 80
+            tls = int(b.get("api_tls_port") or 0) or None
+            if settings.dev:   # dev stands in for a reachable router
+                cl, ident, board, serial, ver = SimRouter(0, host), host, "RB5009UG+S+", f"SIMD{secrets.randbelow(10**6):06d}", "7.19.4 (stable)"
+            else:
+                cl = RouterOS(host, user, pw, port=port, tls_port=tls)
+                try:   # prove we can reach it and read who it is, before creating anything
+                    res = cl.get("/system/resource") or {}
+                    res = res[0] if isinstance(res, list) else res
+                    idn = cl.get("/system/identity") or [{}]
+                    ident = (idn[0] if isinstance(idn, list) else idn).get("name") or host
+                    rb = cl.optional(lambda: cl.get("/system/routerboard")) or {}
+                    rb = rb[0] if isinstance(rb, list) else rb
+                    board, serial, ver = str(res.get("board-name") or ""), str(rb.get("serial-number") or ""), str(res.get("version") or "")
+                except Exception as e:  # noqa: BLE001 - surface the router/connection error to the tech
+                    raise HttpError(400, f"Couldn't reach the router at {host} over your network: {str(e)[:200]}")
+            d = self.register_router(None, str(ident)[:80], board[:60], serial[:40], ver[:40],
+                                     port, conn_mode="direct", mgmt_ip=host)
+            try:   # set up the controller-only API user + web service, then forget the admin credential
+                cl.provision_direct(settings.direct_controller_ip, derive(KEY, f"router-api:{d['id']}"))
+            except Exception as e:  # noqa: BLE001 - roll the record back so a half-set-up router doesn't linger
+                db.run("DELETE FROM devices WHERE id=? AND state='pending'", (d["id"],))
+                raise HttpError(400, f"Reached the router but couldn't set it up: {str(e)[:200]}")
+            db.audit(s["email"], "router added directly (no WireGuard)", f"{ident} at {host}", self.client_ip())
+            return self.json({"ok": True, "id": d["id"]})
         if path == "/api/dev/register":   # dev only: stands in for a router running the adoption command
             if not settings.dev:
                 raise HttpError(404, "Not found.")
@@ -3577,8 +3623,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "The router must be online.")
             cl = poller.client(d)
             try:
-                if m.group(2) in ("fix", "enable"):   # let TikManager's tunnel address reach Winbox (and turn it on, restricted to that address)
-                    svc = cl.winbox_allow(settings.wg_server_ip, enable=m.group(2) == "enable")
+                if m.group(2) in ("fix", "enable"):   # let TikManager's address reach Winbox (and turn it on, restricted to that address)
+                    svc = cl.winbox_allow(controller_ip_for(d), enable=m.group(2) == "enable")
                     db.audit(s["email"], "router Winbox service changed for TikManager", d["name"], self.client_ip(), org_id=d["org_id"],
                              detail=f"available from: {svc['address'] or 'anywhere'}, {'off' if svc['disabled'] else 'on'}")
                     return self.json({"ok": True, "service": svc})
@@ -4377,16 +4423,43 @@ class Handler(BaseHTTPRequestHandler):
             return dataclasses.replace(settings, wg_server_pubkey=base64.b64encode(b"dev-controller-key-0123456789abc").decode())
         raise HttpError(503, "The controller's WireGuard key isn't configured (WG_SERVER_PUBKEY).")
 
-    def adopt_script(self, t):
+    def adopt_script(self, t, mode=None):
         self.check_enroll(t)
+        if mode == "direct":
+            if not settings.direct_controller_ip:
+                raise HttpError(400, "Direct (overlay) enrollment isn't set up: set the controller's overlay IP in Admin > Settings.")
+            return self.send(200, adoption.stage1_direct(settings, t).encode(), "text/plain; charset=utf-8")
         self.controller_settings()
         self.send(200, adoption.stage1(settings, t).encode(), "text/plain; charset=utf-8")
 
-    def register_router(self, pubkey, identity, model, serial, version, api_port=None):
-        """Create or update the router's record; returns it. A known key keeps its record (re-running the command);
-        anything new waits for a tech to approve it."""
-        d = db.one("SELECT * FROM devices WHERE wg_pubkey=?", (pubkey,))
+    def register_router(self, pubkey, identity, model, serial, version, api_port=None, conn_mode="wireguard", mgmt_ip=None):
+        """Create or update the router's record; returns it. A known key (WireGuard) or serial (direct) keeps its record
+        (re-running the command); anything new waits for a tech to approve it."""
         ip = self.client_ip()
+        if conn_mode == "direct":
+            # Direct (overlay) routers are keyed off serial (fallback identity) and reached at the overlay IP they came
+            # from. mgmt_ip is that address (the request's source), stored in tunnel_ip so the poller/Winbox use it.
+            addr = mgmt_ip or ip
+            keyc, keyv = ("serial", serial) if serial else ("identity", identity)
+            d = db.one(f"SELECT * FROM devices WHERE conn_mode='direct' AND {keyc}=? AND {keyc}<>''", (keyv,)) if keyv else None
+            if d:
+                db.run("UPDATE devices SET identity=COALESCE(NULLIF(?, ''), identity), model=COALESCE(NULLIF(?, ''), model), "
+                       "version=COALESCE(NULLIF(?, ''), version), public_ip=?, tunnel_ip=?, api_port=COALESCE(?, api_port), "
+                       "name=CASE WHEN name_custom=0 AND ?<>'' THEN ? ELSE name END WHERE id=?",
+                       (identity, model, version, ip, addr, api_port, identity, identity, d["id"]))
+                db.event(d["id"], d["org_id"], "re-registered", f"direct from {addr}")
+                return db.one("SELECT * FROM devices WHERE id=?", (d["id"],))
+            if db.one("SELECT COUNT(*) AS n FROM devices WHERE state='pending'")["n"] >= 500:
+                raise HttpError(429, "Too many routers are waiting for approval.")
+            if db.one("SELECT id FROM devices WHERE tunnel_ip=?", (addr,)):   # the management address must be unique (one router per overlay IP)
+                raise HttpError(400, f"Another router is already managed at {addr}. Each router needs its own overlay address.")
+            did = db.run("""INSERT INTO devices (org_id, name, name_custom, identity, model, serial, version, tunnel_ip, conn_mode, state,
+                            public_ip, first_seen, created_at, created_by, api_port) VALUES (NULL,?,0,?,?,?,?,?,'direct','pending',?,?,?,'router',?)""",
+                         (identity or serial or "New router", identity, model, serial, version, addr, ip, now(), now(), api_port))
+            db.event(did, None, "registered", f"direct {model} {serial} from {addr}".strip())
+            db.audit("router", "router registered (direct, waiting for approval)", identity or serial, ip)
+            return db.one("SELECT * FROM devices WHERE id=?", (did,))
+        d = db.one("SELECT * FROM devices WHERE wg_pubkey=?", (pubkey,))
         if d:
             db.run("UPDATE devices SET identity=COALESCE(NULLIF(?, ''), identity), model=COALESCE(NULLIF(?, ''), model), serial=COALESCE(NULLIF(?, ''), serial), "
                    "version=COALESCE(NULLIF(?, ''), version), public_ip=?, api_port=COALESCE(?, api_port), "
@@ -4404,17 +4477,23 @@ class Handler(BaseHTTPRequestHandler):
         db.audit("router", "router registered (waiting for approval)", identity or serial, ip)
         return db.one("SELECT * FROM devices WHERE id=?", (did,))
 
-    def adopt_register(self, t):
+    def adopt_register(self, t, mode=None):
         self.check_enroll(t)
-        cs = self.controller_settings()
         b = self.body()
+        clean = lambda k, n: re.sub(r"[^\w .()+-]", "", str(b.get(k) or ""))[:n].strip()
+        www = str(b.get("www") or "")
+        api_port = int(www) if www.isdigit() and 0 < int(www) < 65536 else None
+        if mode == "direct":
+            if not settings.direct_controller_ip:
+                raise HttpError(400, "Direct (overlay) enrollment isn't set up: set the controller's overlay IP in Admin > Settings.")
+            d = self.register_router(None, clean("identity", 80), clean("model", 60), clean("serial", 40), clean("version", 40),
+                                     api_port, conn_mode="direct", mgmt_ip=self.client_ip())
+            return self.send(200, adoption.stage2_direct(settings, d, derive(KEY, f"router-api:{d['id']}")).encode(), "text/plain; charset=utf-8")
+        cs = self.controller_settings()
         pubkey = str(b.get("pubkey") or "").replace(" ", "+")   # '+' arrives as a space in form encoding
         if not valid_key(pubkey):
             raise HttpError(400, "Missing or invalid WireGuard public key.")
-        clean = lambda k, n: re.sub(r"[^\w .()+-]", "", str(b.get(k) or ""))[:n].strip()
-        www = str(b.get("www") or "")
-        d = self.register_router(pubkey, clean("identity", 80), clean("model", 60), clean("serial", 40), clean("version", 40),
-                                 int(www) if www.isdigit() and 0 < int(www) < 65536 else None)
+        d = self.register_router(pubkey, clean("identity", 80), clean("model", 60), clean("serial", 40), clean("version", 40), api_port)
         port = cs.wg_endpoint.rpartition(":")[2]
         if port.isdigit():   # the port this router will dial (for moving it later: wgport.py)
             db.run("UPDATE devices SET wg_port=? WHERE id=?", (int(port), d["id"]))

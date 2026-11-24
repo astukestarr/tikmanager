@@ -793,6 +793,32 @@ class RouterOS:
     def session_users(self):
         return [u.get("name") for u in self.get("/user") or [] if str(u.get("comment") or "").startswith(self.SESSION_COMMENT)]
 
+    def provision_direct(self, controller_ip, api_password):
+        """Set this router up for direct (overlay) management over the current (admin) connection: a controller-only
+        'tikmanager' API user and web service, locked to the controller's overlay IP. Mirrors adoption.stage2_direct,
+        driven over REST instead of a script. Used by the manual-add flow (no WireGuard)."""
+        tm = "tikmanager"
+        policy = "read,write,policy,test,api,rest-api,sensitive,reboot,ftp,sniff"
+        g = next((x for x in self.get(f"/user/group?name={tm}") or []), None)
+        if g:
+            self._req("PATCH", f"/user/group/{g['.id']}", {"policy": policy}, timeout=15)
+        else:
+            self._req("PUT", "/user/group", {"name": tm, "policy": policy, "comment": "TikManager"}, timeout=15)
+        for u in self.get(f"/user?name={tm}") or []:
+            self.optional(lambda u=u: self._req("DELETE", f"/user/{u['.id']}", timeout=15))
+        self._req("PUT", "/user", {"name": tm, "group": tm, "password": api_password, "address": f"{controller_ip}/32",
+                                   "comment": "TikManager - do not remove"}, timeout=15)
+        svcs = [x for x in self.get("/ip/service") or [] if not _yes(x.get("dynamic")) and not _yes(x.get("connection"))]
+        w = next((x for x in svcs if x.get("name") == "www"), None)
+        if w:   # the plain-HTTP REST service the controller polls over: on, reachable from the controller (keep any existing list)
+            prop = "available-from" if "available-from" in w else "address"
+            addr = w.get(prop) or ""
+            want = f"{controller_ip}/32" if (_yes(w.get("disabled")) or not addr) else (addr if _covers(addr, controller_ip) else f"{addr},{controller_ip}/32")
+            body = {"disabled": "no"}
+            if want != addr:
+                body[prop] = want
+            self._req("PATCH", f"/ip/service/{w['.id']}", body, timeout=15)
+
     NEIGHBOR_KEYS = ("interface", "address", "address4", "mac-address", "identity", "platform", "board", "version",
                      "software-id", "uptime", "discovered-by", "interface-name")
 
@@ -2602,6 +2628,11 @@ class SimRouter:
 
     def session_users(self):
         return list(self._sim().setdefault("users", {}))
+
+    def provision_direct(self, controller_ip, api_password):   # dev: record that direct provisioning ran
+        self._sim().setdefault("users", {})["tikmanager"] = {"group": "tikmanager", "address": f"{controller_ip}/32",
+                                                             "comment": "TikManager - do not remove"}
+        self._sim()["direct_provisioned"] = {"controller_ip": controller_ip}
 
     def winbox_service(self):
         st = self._sim().setdefault("winbox", {"id": "*2", "disabled": self.id % 4 == 0, "port": 8291,

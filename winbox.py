@@ -104,7 +104,9 @@ class WinboxRelay:
             try:
                 cl = self.client_for(d)
                 cl.session_user_remove(x["router_user"])   # a leftover from an earlier session
-                cl.session_user_add(x["router_user"], group, x["password"], self.s.wg_server_ip,
+                # lock the temp login to the controller's address as this router sees it: WireGuard IP, or the overlay IP
+                controller_ip = self.s.direct_controller_ip if d.get("conn_mode") == "direct" else self.s.wg_server_ip
+                cl.session_user_add(x["router_user"], group, x["password"], controller_ip,
                                     f"{user}, opened {time.strftime('%Y-%m-%d %H:%M')}, removed when the session ends")
             except Exception as e:  # noqa: BLE001 - RouterError or similar
                 with self.lock:

@@ -400,7 +400,7 @@ async function approve(id) {
   const [d, orgs] = await Promise.all([api(`/api/devices/${id}`), api("/api/orgs")]);
   if (!orgs.length) { alert("Add the client first (Clients page)."); return; }
   dialog(`<h2>Approve ${esc(d.identity || d.name)}</h2>
-    <p class="muted small">${esc(d.model || "")} · serial <span class="mono">${esc(d.serial || "—")}</span> · RouterOS ${esc(d.version || "")} · registered from <span class="mono">${esc(d.public_ip || "")}</span></p>
+    <p class="muted small">${esc(d.model || "")} · serial <span class="mono">${esc(d.serial || "—")}</span> · RouterOS ${esc(d.version || "")} · registered from <span class="mono">${esc(d.public_ip || "")}</span>${d.conn_mode === "direct" ? ` · <span class="pill">over your own network at ${esc(d.tunnel_ip || "")}</span>` : ""}</p>
     <div class="grid2">
       <label class="field">Client <select id="pOrg">${orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select></label>
       <label class="field">Name in TikManager <input id="pName" value="${esc(d.identity || d.name)}" maxlength="80"></label>
@@ -512,19 +512,48 @@ async function routers(kind) {
 
 async function showAdoption() {
   const r = await api("/api/adoption");
+  const direct = r.direct_ok
+    ? `<div class="code" id="cmdD">${esc(r.direct_command)}</div>
+       <p class="small muted">The router registers over your overlay and TikManager reaches it at the address it comes from (its ${esc(r.controller_ip ? "Netbird-style" : "overlay")} IP). No WireGuard is set up on it. The controller must be able to reach the router back over the overlay.</p>
+       <div class="actions"><button class="btn" type="button" id="copyD">Copy command</button>
+         ${me.dev ? `<button class="btn" type="button" id="simD">Simulate (dev)</button>` : ""}<span class="status" id="cStatusD"></span></div>
+       <h3 style="margin-top:14px">…or add one by its address</h3>
+       <p class="small muted">If the router can't dial out, point TikManager at it. Give an admin login it can use <b>once</b> to set up its own API user — the login isn't stored.</p>
+       <div class="grid2">
+         <label class="field">Router address (its overlay IP) <input id="mIp" placeholder="100.x.y.z"></label>
+         <label class="field">API port <input id="mPort" type="number" placeholder="80"></label>
+         <label class="field">Admin username <input id="mUser" placeholder="admin"></label>
+         <label class="field">Admin password <input id="mPass" type="password"></label>
+       </div>
+       <div class="actions"><button class="btn primary" type="button" id="mAdd">Add router</button><span class="status" id="mStatus"></span></div>`
+    : `<p class="small muted">Set the <b>controller's overlay IP</b> (this server's Netbird/Tailscale address) in <b>Admin → Settings</b> to enable no-WireGuard enrollment.</p>`;
   dialog(`<h2>Adopt routers</h2>
-    <p>Paste this command into any router's terminal (Winbox → New Terminal, or SSH). The router registers itself with its own
-      name and shows up under <strong>Waiting for approval</strong>, where you pick its client.</p>
+    <h3>Over WireGuard (default)</h3>
+    <p>Paste this into any router's terminal (Winbox → New Terminal, or SSH). It builds a tunnel to TikManager, registers itself, and shows under
+      <strong>Waiting for approval</strong>, where you pick its client.</p>
     <div class="code" id="cmd">${esc(r.command)}</div>
     <p class="small muted">Same command for every router. Needs RouterOS 7 and internet access from the router. Routers can't do anything until a
       technician approves them; if this command ever leaks, an admin can replace it.</p>
     <div class="actions"><button class="btn primary" type="button" id="copy">Copy command</button>
       ${me.dev ? `<button class="btn" type="button" id="sim">Simulate a router registering (dev)</button>` : ""}
       ${can("settings") ? `<button class="btn danger" type="button" id="rotate">Replace command</button>` : ""}
-      <button class="btn" type="button" data-close>Done</button><span class="status" id="cStatus"></span></div>`);
+      <span class="status" id="cStatus"></span></div>
+    <h3 style="margin-top:18px">Over your own network (Netbird, Tailscale, routed WAN…)</h3>
+    ${direct}
+    <div class="actions" style="margin-top:14px"><button class="btn" type="button" data-close>Done</button></div>`);
   const say = (t, k) => { $("cStatus").textContent = t; $("cStatus").className = `status ${k || ""}`; };
   $("copy").addEventListener("click", async () => { await navigator.clipboard.writeText($("cmd").textContent); say("Copied.", "ok"); });
   $("sim")?.addEventListener("click", async () => { await post("/api/dev/register"); say("A simulated router registered.", "ok"); });
+  $("copyD")?.addEventListener("click", async () => { await navigator.clipboard.writeText($("cmdD").textContent); const e = $("cStatusD"); e.textContent = "Copied."; e.className = "status ok"; });
+  $("simD")?.addEventListener("click", async () => { try { await post("/api/devices/manual", { ip: `100.64.0.${2 + Math.floor(Math.random() * 250)}`, admin_user: "admin", admin_pass: "x" }); const e = $("cStatusD"); e.textContent = "A simulated direct router was added."; e.className = "status ok"; } catch (err) { const e = $("cStatusD"); e.textContent = err.message; e.className = "status err"; } });
+  $("mAdd")?.addEventListener("click", async () => {
+    const st = $("mStatus"); st.textContent = "Connecting…"; st.className = "status";
+    try {
+      await post("/api/devices/manual", { ip: $("mIp").value.trim(), api_port: +$("mPort").value || 0, admin_user: $("mUser").value.trim(), admin_pass: $("mPass").value });
+      st.textContent = "Added — find it under Waiting for approval."; st.className = "status ok";
+      $("mIp").value = $("mUser").value = $("mPass").value = "";
+    } catch (err) { st.textContent = err.message; st.className = "status err"; }
+  });
   $("rotate")?.addEventListener("click", async (e) => {
     if (e.target.dataset.confirm !== "1") { e.target.dataset.confirm = "1"; e.target.textContent = "Click again - old copies stop working"; return; }
     const n = await post("/api/adoption/rotate");
@@ -2797,6 +2826,9 @@ async function adminSystem() {
         ${f("cfPing", "Latency test target", s.ping_target, { ph: "1.1.1.1" })}</div>
       <p class="small muted">Change the WireGuard address only if routers must reach this server by a different name or port than the web address
         (the adoption command uses it; routers already adopted keep the address they were given).</p>
+      <div class="grid2">${f("cfDirectIp", "This server's overlay IP (no-WireGuard mode)", s.direct_controller_ip, { ph: "e.g. this server's Netbird IP" })}</div>
+      <p class="small muted">Set this to manage routers over your own network (Netbird, Tailscale, a routed WAN) instead of a TikManager WireGuard tunnel.
+        It's the address a router reaches this server at; a direct router's API user and web service are locked to it. Leave blank to keep WireGuard-only.</p>
       <div class="actions"><button class="btn primary" type="button" id="cfSave">Save settings</button><span class="status" id="cfStatus"></span></div>
     </div>
     <div class="card"><h2>Backups</h2><div class="row">
@@ -2834,7 +2866,7 @@ async function adminSystem() {
   $("cfSave").addEventListener("click", async () => {
     try {
       await post("/api/admin/settings", { tech_domains: $("cfDomains").value, tech_admins: $("cfAdmins").value, entra_tenant_id: $("cfTenant").value,
-        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, client_ms_mode: $("cfMsMode").value, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value });
+        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, client_ms_mode: $("cfMsMode").value, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value, direct_controller_ip: $("cfDirectIp").value });
       await adminSystem(); say("cfStatus", "Saved.", true);
     } catch (e) { say("cfStatus", e.message); }
   });
