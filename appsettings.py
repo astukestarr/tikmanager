@@ -13,8 +13,11 @@ import re
 FIELDS = {   # name -> secret?
     "tech_domains": False, "tech_admins": False,
     "entra_tenant_id": False, "entra_client_id": False, "entra_client_secret": True, "client_ms_mode": False,
+    "oidc_issuer": False, "oidc_client_id": False, "oidc_client_secret": True, "oidc_scopes": False,
+    "oidc_label": False, "client_oidc_mode": False,
     "wg_endpoint": False, "ping_target": False, "direct_controller_ip": False,
 }
+SECRET_FIELDS = tuple(k for k, secret in FIELDS.items() if secret)   # encrypted into <name>_enc / <name>_alg
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[a-z]{2,}$", re.I)
 DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,63}$", re.I)
@@ -34,12 +37,13 @@ class AppSettings:
             raw = json.loads(self.db.setting("system_config") or "{}")
         except ValueError:
             return {}
-        if raw.get("entra_client_secret_enc"):
-            try:
-                blob = base64.b64decode(raw["entra_client_secret_enc"])
-                raw["entra_client_secret"] = self.vault.open(blob, raw.get("entra_client_secret_alg") or "aes-gcm", "sysconfig").decode()
-            except Exception:  # noqa: BLE001 - unreadable (key replaced): fall back to the settings file
-                raw["entra_client_secret"] = ""
+        for name in SECRET_FIELDS:
+            if raw.get(f"{name}_enc"):
+                try:
+                    blob = base64.b64decode(raw[f"{name}_enc"])
+                    raw[name] = self.vault.open(blob, raw.get(f"{name}_alg") or "aes-gcm", "sysconfig").decode()
+                except Exception:  # noqa: BLE001 - unreadable (key replaced): fall back to the settings file
+                    raw[name] = ""
         return raw
 
     def apply(self):
@@ -56,7 +60,8 @@ class AppSettings:
 
     def public(self):
         out = {k: ("" if secret else getattr(self.s, k)) for k, secret in FIELDS.items()}
-        out["entra_client_secret_set"] = bool(self.s.entra_client_secret)
+        for name in SECRET_FIELDS:
+            out[f"{name}_set"] = bool(getattr(self.s, name))
         out["redirect_uri"] = f"{self.s.public_url}/auth/callback"
         return out
 
@@ -101,17 +106,27 @@ class AppSettings:
             except ValueError:
                 raise ValueError("The controller's overlay address is an IP address (e.g. this server's Netbird IP).") from None
         clean["direct_controller_ip"] = dci
-        secret = str(data.get("entra_client_secret") or "").strip()
-        if data.get("clear_entra_secret"):
-            secret_blob = None
-        elif secret:
-            blob, alg = self.vault.seal(secret.encode(), "sysconfig")
-            secret_blob = (base64.b64encode(blob).decode(), alg)
-        else:
-            secret_blob = (json.loads(self.db.setting("system_config") or "{}").get("entra_client_secret_enc"),
-                           json.loads(self.db.setting("system_config") or "{}").get("entra_client_secret_alg"))
-        if secret_blob and secret_blob[0]:
-            clean["entra_client_secret_enc"], clean["entra_client_secret_alg"] = secret_blob
+        iss = str(data.get("oidc_issuer", cur.get("oidc_issuer", "")) or "").strip().rstrip("/")
+        if iss and not iss.startswith("https://"):
+            raise ValueError("The OIDC issuer is an https:// URL (e.g. https://id.example.com).")
+        clean["oidc_issuer"] = iss
+        for k in ("oidc_client_id", "oidc_scopes", "oidc_label"):
+            clean[k] = str(data.get(k, cur.get(k, "")) or "").strip()
+        mode = str(data.get("client_oidc_mode", cur.get("client_oidc_mode", "off")) or "off")
+        clean["client_oidc_mode"] = "on" if mode == "on" else "off"
+        for name in SECRET_FIELDS:   # each secret: a new value is sealed, "clear" wipes it, blank keeps the stored one
+            val = str(data.get(name) or "").strip()
+            provider = name.split("_")[0]
+            if data.get(f"clear_{provider}_secret"):
+                blob = None
+            elif val:
+                sb, alg = self.vault.seal(val.encode(), "sysconfig")
+                blob = (base64.b64encode(sb).decode(), alg)
+            else:
+                prev = json.loads(self.db.setting("system_config") or "{}")
+                blob = (prev.get(f"{name}_enc"), prev.get(f"{name}_alg"))
+            if blob and blob[0]:
+                clean[f"{name}_enc"], clean[f"{name}_alg"] = blob
         self.db.set_setting("system_config", json.dumps(clean))
         self.apply()
         return self.public()

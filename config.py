@@ -51,6 +51,14 @@ class Settings:
     #           and access reviews govern them). Single-tenant app is fine.
     #   multi - client users sign in from THEIR OWN Microsoft tenant. Needs the app registration set to multi-tenant.
     client_ms_mode: str = field(default_factory=lambda: env("TM_CLIENT_MS_MODE", "off"))
+    # Generic OIDC sign-in (any standards-compliant IdP: Pocket ID, Authentik, Keycloak, Okta, Google...), alongside
+    # Microsoft. Blank issuer = off. client_oidc_mode (off/on) is whether client users may sign in with OIDC.
+    oidc_issuer: str = field(default_factory=lambda: env("OIDC_ISSUER"))
+    oidc_client_id: str = field(default_factory=lambda: env("OIDC_CLIENT_ID"))
+    oidc_client_secret: str = field(default_factory=lambda: env("OIDC_CLIENT_SECRET"))
+    oidc_scopes: str = field(default_factory=lambda: env("OIDC_SCOPES", "openid profile email"))
+    oidc_label: str = field(default_factory=lambda: env("OIDC_LABEL", "Single sign-on"))
+    client_oidc_mode: str = field(default_factory=lambda: env("TM_CLIENT_OIDC_MODE", "off"))
     tech_admins: str = field(default_factory=lambda: env("TM_TECH_ADMINS"))    # comma-separated emails who are admins
     tech_domains: str = field(default_factory=lambda: env("TM_TECH_DOMAINS"))  # e.g. example.com - who may sign in as a tech
     # WireGuard
@@ -84,6 +92,10 @@ class Settings:
     @property
     def entra_configured(self):
         return all([self.entra_tenant_id, self.entra_client_id, self.entra_client_secret])
+
+    @property
+    def oidc_configured(self):
+        return all([self.oidc_issuer, self.oidc_client_id, self.oidc_client_secret])
 
     @property
     def secure_cookies(self):

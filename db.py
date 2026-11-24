@@ -28,8 +28,9 @@ CREATE TABLE IF NOT EXISTS users (
   disabled INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, last_login REAL,
   entra_oid TEXT,                           -- Microsoft's permanent user ID, bound at first Microsoft sign-in (techs, and MS client users)
   prefs TEXT,                               -- personal settings (JSON): appearance - colour theme and light/dark mode
-  ms_login INTEGER NOT NULL DEFAULT 0,      -- client users who sign in with Microsoft instead of a password/TOTP (Microsoft does MFA)
-  ms_domain TEXT                            -- that client user is locked to this email domain (or tenant id) - hardening
+  ms_login INTEGER NOT NULL DEFAULT 0,      -- SSO users who sign in with an IdP instead of a password/TOTP (the IdP does MFA)
+  ms_domain TEXT,                           -- that SSO user is locked to this email domain (or tenant id) - hardening
+  sso_provider TEXT                         -- which IdP: 'microsoft' | 'oidc' (NULL for password users); entra_oid holds its subject
 );
 -- Extra clients a client user may see (beyond their primary users.org_id). Lets one client login span several orgs.
 CREATE TABLE IF NOT EXISTS user_orgs (
@@ -476,6 +477,9 @@ class DB:
                 c.execute("ALTER TABLE users ADD COLUMN ms_login INTEGER NOT NULL DEFAULT 0")
             if "ms_domain" not in ucols:
                 c.execute("ALTER TABLE users ADD COLUMN ms_domain TEXT")
+            if "sso_provider" not in ucols:
+                c.execute("ALTER TABLE users ADD COLUMN sso_provider TEXT")
+                c.execute("UPDATE users SET sso_provider='microsoft' WHERE entra_oid IS NOT NULL OR (kind='tech')")   # existing SSO/tech users are Microsoft
         if "messages" in tables and "always" not in {r[1] for r in c.execute("PRAGMA table_info(messages)")}:
             c.execute("ALTER TABLE messages ADD COLUMN always INTEGER NOT NULL DEFAULT 0")
         if "net_sites" in tables:

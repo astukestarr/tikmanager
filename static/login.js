@@ -60,9 +60,11 @@ if (inviteToken) {
 } else {
   fetch("/api/login/options").then((r) => r.json()).then((o) => {
     $("ms").classList.toggle("hidden", !o.entra);
+    if ($("oidc")) { $("oidc").classList.toggle("hidden", !o.oidc); if (o.oidc && o.oidc_label) $("oidc").textContent = `Sign in with ${o.oidc_label}`; }
     $("dev").classList.toggle("hidden", !o.dev);
-    $("or").textContent = o.entra || o.dev ? "Clients: sign in with your email" : "Sign in with your email";
+    $("or").textContent = o.entra || o.oidc || o.dev ? "Clients: sign in with your email" : "Sign in with your email";
   });
-  $("ms").addEventListener("click", () => { location.href = "/auth/login"; });
+  $("ms").addEventListener("click", () => { location.href = "/auth/login?provider=microsoft"; });
+  $("oidc")?.addEventListener("click", () => { location.href = "/auth/login?provider=oidc"; });
   $("dev").addEventListener("click", async () => { try { await post("/api/login/dev", {}); location.href = "/"; } catch (e) { status(e.message, "err"); } });
 }

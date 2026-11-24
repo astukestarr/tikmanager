@@ -126,6 +126,8 @@ db = DB(settings.data_dir / "tikmanager.db")
 KEY = master_key()
 sessions = Sessions(db)
 entra = Entra(settings)
+from oidc import Oidc
+oidc = Oidc(settings)
 wg = WireGuard(settings)
 tunnels = Tunnels(db, settings, wg)   # live per-router tunnel bandwidth (the Tunnels page)
 poller = Poller(db, settings, KEY)
@@ -1101,12 +1103,18 @@ class Handler(BaseHTTPRequestHandler):
         if m := re.fullmatch(r"/whatsnew/([a-z0-9-]+)\.jpg", path):   # What's new screenshots (dev-mode data only)
             return self.static(f"whatsnew/{m.group(1)}.jpg")
         if path == "/auth/login":
-            if not settings.entra_configured:
-                raise HttpError(503, "Microsoft sign-in isn't configured yet.")
-            url, state = entra.begin("/")
+            use_oidc = q.get("provider") == "oidc" or (q.get("provider") != "microsoft" and settings.oidc_configured and not settings.entra_configured)
+            if use_oidc:
+                if not settings.oidc_configured:
+                    raise HttpError(503, "OIDC sign-in isn't configured yet.")
+                url, state = oidc.begin("/")
+            else:
+                if not settings.entra_configured:
+                    raise HttpError(503, "Microsoft sign-in isn't configured yet.")
+                url, state = entra.begin("/")
             return self.redirect(url, [("Set-Cookie", cookie(STATE_COOKIE, state, 600, settings.secure_cookies))])
         if path == "/auth/callback":
-            return self.entra_callback(q)
+            return self.sso_callback(q)
         if m := re.fullmatch(r"/adopt/([A-Za-z0-9_-]{20,80})", path):
             return self.adopt_script(m.group(1), q.get("mode"))
         if path == "/api/branding":   # public: the sign-in page uses it too
@@ -1167,7 +1175,8 @@ class Handler(BaseHTTPRequestHandler):
             self.require(tech=True, admin=True)
             return self.json({**updates.info(), "observatory": observatory.info(), "reachability": reach.info()})
         if path == "/api/login/options":
-            return self.json({"entra": settings.entra_configured, "dev": self.dev_login_allowed()})
+            return self.json({"entra": settings.entra_configured, "oidc": settings.oidc_configured,
+                              "oidc_label": settings.oidc_label or "Single sign-on", "dev": self.dev_login_allowed()})
         if path == "/api/me":
             s = self.require()
             # A client login may span several clients (user_orgs). The top-bar picker chooses which one is in context;
@@ -2190,9 +2199,9 @@ class Handler(BaseHTTPRequestHandler):
             if s["kind"] == "client":
                 if s["role"] != "admin":
                     raise HttpError(403, "Only your organization's admins can see its users.")
-                rows = db.q("SELECT id, email, name, kind, role, org_id, ms_login, totp_enabled, disabled, last_login, invite_expires FROM users WHERE org_id=? ORDER BY email", (s["org_id"],))
+                rows = db.q("SELECT id, email, name, kind, role, org_id, ms_login, sso_provider, totp_enabled, disabled, last_login, invite_expires FROM users WHERE org_id=? ORDER BY email", (s["org_id"],))
             else:
-                rows = db.q("""SELECT u.id, u.email, u.name, u.kind, u.role, u.org_id, o.name AS org, u.ms_login, u.totp_enabled, u.disabled, u.last_login, u.invite_expires,
+                rows = db.q("""SELECT u.id, u.email, u.name, u.kind, u.role, u.org_id, o.name AS org, u.ms_login, u.sso_provider, u.totp_enabled, u.disabled, u.last_login, u.invite_expires,
                                (SELECT GROUP_CONCAT(org_id) FROM user_orgs WHERE user_id = u.id) AS extra_orgs
                                FROM users u LEFT JOIN orgs o ON o.id = u.org_id ORDER BY u.kind DESC, o.name, u.email""")
             for r in rows:
@@ -2264,7 +2273,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logout":
             sessions.end(read_cookie(self.headers.get("Cookie"), SESSION_COOKIE))
             db.audit(s["email"], "sign-out", ip=self.client_ip())
-            return self.json({"ok": True, "entra_logout": entra.logout_url() if s["kind"] == "tech" and settings.entra_configured else None},
+            prov = (db.one("SELECT sso_provider FROM users WHERE email=?", (s["email"],)) or {}).get("sso_provider")
+            logout = (oidc.logout_url() if prov == "oidc" and settings.oidc_configured
+                      else entra.logout_url() if (prov == "microsoft" or s["kind"] == "tech") and settings.entra_configured else None)
+            return self.json({"ok": True, "entra_logout": logout},
                              headers=[("Set-Cookie", cookie(SESSION_COOKIE, "", 0, settings.secure_cookies))])
         if path == "/api/orgs":
             s = self.require(tech=True, write=True)
@@ -4069,55 +4081,63 @@ class Handler(BaseHTTPRequestHandler):
         raise HttpError(404, "Not found.")
 
     # --- sign-in ------------------------------------------------------------------------------------------
-    def entra_callback(self, q):
+    def sso_callback(self, q):
+        # Route to whichever provider started this sign-in (each keeps its own pending-state table), so Microsoft and
+        # OIDC can both be configured at once.
+        state = q.get("state", "")
+        prov = oidc if oidc.owns_state(state) else entra
+        provider = "oidc" if prov is oidc else "microsoft"
         try:
-            who, ret = entra.complete(q, read_cookie(self.headers.get("Cookie"), STATE_COOKIE))
+            who, ret = prov.complete(q, read_cookie(self.headers.get("Cookie"), STATE_COOKIE))
         except AuthError as e:
-            db.audit("", "sign-in failed (Microsoft)", ip=self.client_ip(), detail=str(e))
-            secev.record("tikmanager", "login_failed", "", self.client_ip(), "microsoft", str(e)[:200])
+            db.audit("", f"sign-in failed ({provider})", ip=self.client_ip(), detail=str(e))
+            secev.record("tikmanager", "login_failed", "", self.client_ip(), provider, str(e)[:200])
             # the message can carry text from the callback URL (error_description) - always escaped
             return self.send(403, f"<!doctype html><title>TikManager</title><p>{html.escape(str(e))}</p><p><a href='/login'>Back</a></p>".encode(),
                              "text/html; charset=utf-8")
         email = who["email"]
+        sub = who.get("oid") or who.get("sub")   # the IdP's stable subject id (Microsoft 'oid' / OIDC 'sub')
         admins = {x.strip().lower() for x in settings.tech_admins.split(",") if x.strip()}
         domains = {x.strip().lower().lstrip("@") for x in settings.tech_domains.split(",") if x.strip()}
-        # the account is tied to Microsoft's permanent user ID: if an email address is later renamed or reused, the new
-        # holder doesn't inherit the old technician account
-        user = db.one("SELECT * FROM users WHERE entra_oid=?", (who["oid"],)) or db.one("SELECT * FROM users WHERE email=?", (email,))
-        # Client (customer) users may sign in with Microsoft only when it's turned on and the account is set up for it.
+        # the account is tied to the IdP's permanent subject id: a renamed/reused email never inherits the account
+        user = db.one("SELECT * FROM users WHERE sso_provider=? AND entra_oid=?", (provider, sub)) or db.one("SELECT * FROM users WHERE email=?", (email,))
+        # Client (customer) users may use SSO only when it's turned on for clients and the account is set up for it.
         if user and user["kind"] == "client":
-            if not (settings.client_ms_mode in ("guest", "multi") and user["ms_login"]):
+            client_ok = (provider == "microsoft" and settings.client_ms_mode in ("guest", "multi")) or \
+                        (provider == "oidc" and settings.client_oidc_mode == "on")
+            if not (client_ok and user["ms_login"] and (user["sso_provider"] or "microsoft") == provider):
                 raise HttpError(403, "That address belongs to a client account - sign in with your password instead.")
             dom = (user["ms_domain"] or "").strip().lower()
             if dom and not (email.endswith("@" + dom) or (who.get("tid") or "").lower() == dom):
-                db.audit(email, "client Microsoft sign-in refused (wrong domain)", ip=self.client_ip(), org_id=user["org_id"])
-                raise HttpError(403, "This account signs in from a different Microsoft domain - check with your IT provider.")
-            if user["entra_oid"] and user["entra_oid"] != who["oid"]:
-                db.audit(email, "sign-in refused (different Microsoft account)", ip=self.client_ip(), org_id=user["org_id"])
-                raise HttpError(403, f"{email} is linked to a different Microsoft account. Ask your IT provider to reset its sign-in.")
+                db.audit(email, f"client {provider} sign-in refused (wrong domain)", ip=self.client_ip(), org_id=user["org_id"])
+                raise HttpError(403, "This account signs in from a different domain - check with your IT provider.")
+            if user["entra_oid"] and user["entra_oid"] != sub:
+                db.audit(email, "sign-in refused (different account)", ip=self.client_ip(), org_id=user["org_id"])
+                raise HttpError(403, f"{email} is linked to a different sign-in. Ask your IT provider to reset it.")
             if user["disabled"]:
                 raise HttpError(403, "Your account is disabled.")
             if not user["entra_oid"]:
-                db.run("UPDATE users SET entra_oid=? WHERE id=?", (who["oid"], user["id"]))
-            db.audit(email, "client Microsoft sign-in", ip=self.client_ip(), org_id=user["org_id"])
+                db.run("UPDATE users SET entra_oid=?, sso_provider=? WHERE id=?", (sub, provider, user["id"]))
+            db.audit(email, f"client {provider} sign-in", ip=self.client_ip(), org_id=user["org_id"])
             return self.redirect(ret or "/", [("Set-Cookie", self.start_session(user)), ("Set-Cookie", cookie(STATE_COOKIE, "", 0, settings.secure_cookies))])
-        # Technicians must be members of YOUR tenant - never guests or other tenants (only matters in multi-tenant mode).
-        if not who.get("member", True):
+        # Technicians: Microsoft requires membership of YOUR tenant; OIDC trusts the (signature-verified) issuer plus the
+        # tech-domain / admin allowlist below.
+        if provider == "microsoft" and not who.get("member", True):
             raise HttpError(403, "Only accounts from your own Microsoft organization can be technicians.")
-        if user and user["entra_oid"] and user["entra_oid"] != who["oid"]:
-            db.audit(email, "sign-in refused (different Microsoft account)", ip=self.client_ip())
-            raise HttpError(403, f"{email} is linked to a different Microsoft account. An administrator can use "
+        if user and user["entra_oid"] and user["entra_oid"] != sub:
+            db.audit(email, "sign-in refused (different account)", ip=self.client_ip())
+            raise HttpError(403, f"{email} is linked to a different sign-in. An administrator can use "
                                  "Reset sign-in for it on Admin > Technicians.")
         if user and not user["entra_oid"]:
-            db.run("UPDATE users SET entra_oid=? WHERE id=?", (who["oid"], user["id"]))
+            db.run("UPDATE users SET entra_oid=?, sso_provider=? WHERE id=?", (sub, provider, user["id"]))
         if not user:
             if email not in admins and email.split("@")[-1] not in domains:
                 db.audit(email, "sign-in refused (not a technician)", ip=self.client_ip())
                 raise HttpError(403, f"{email} isn't allowed to sign in to TikManager.")
-            uid = db.run("INSERT INTO users (email, name, kind, role, created_at, entra_oid) VALUES (?,?,?,?,?,?)",
-                         (email, who["name"], "tech", ROLE_ADMIN if email in admins else roles.default(), now(), who["oid"]))
+            uid = db.run("INSERT INTO users (email, name, kind, role, created_at, entra_oid, sso_provider) VALUES (?,?,?,?,?,?,?)",
+                         (email, who["name"], "tech", ROLE_ADMIN if email in admins else roles.default(), now(), sub, provider))
             user = db.one("SELECT * FROM users WHERE id=?", (uid,))
-            db.audit(email, "technician account created (first Microsoft sign-in)", ip=self.client_ip(), detail=user["role"])
+            db.audit(email, f"technician account created (first {provider} sign-in)", ip=self.client_ip(), detail=user["role"])
         if user["disabled"]:
             raise HttpError(403, "Your TikManager account is disabled.")
         if user["role"] == ROLE_NONE and email not in admins:
@@ -4282,16 +4302,18 @@ class Handler(BaseHTTPRequestHandler):
             db.run("INSERT OR IGNORE INTO user_orgs (user_id, org_id) VALUES (?,?)", (u["id"], oid))
         result = {"ok": True}
         want = b.get("sign_in")
-        if want == "microsoft" and not u["ms_login"]:   # drop password/TOTP; Microsoft does MFA, locked to their domain
+        cur_sso = (u["sso_provider"] or "microsoft") if u["ms_login"] else None
+        if want in ("microsoft", "oidc") and cur_sso != want:   # SSO: no password/TOTP, the IdP does MFA, locked to their domain
             dom = str(b.get("ms_domain") or u["email"].split("@")[-1]).strip().lower()[:253]
-            db.run("UPDATE users SET ms_login=1, ms_domain=?, password_hash=NULL, totp_secret=NULL, totp_enabled=0, "
-                   "entra_oid=NULL, invite_hash=NULL, invite_expires=NULL WHERE id=?", (dom, u["id"]))
+            db.run("UPDATE users SET ms_login=1, ms_domain=?, sso_provider=?, password_hash=NULL, totp_secret=NULL, totp_enabled=0, "
+                   "entra_oid=NULL, invite_hash=NULL, invite_expires=NULL WHERE id=?", (dom, want, u["id"]))
             sessions.end_all_for(u["id"])
-            db.audit(s["email"], "user set to Microsoft sign-in", u["email"], self.client_ip(), org_id=primary)
-            result.update({"ms": True, "domain": dom, "enabled": settings.client_ms_mode in ("guest", "multi")})
+            db.audit(s["email"], f"user set to {want} sign-in", u["email"], self.client_ip(), org_id=primary)
+            enabled = settings.client_ms_mode in ("guest", "multi") if want == "microsoft" else settings.client_oidc_mode == "on"
+            result.update({"ms": True, "domain": dom, "provider": want, "enabled": enabled})
         elif want == "password" and u["ms_login"]:   # back to password + authenticator: send a fresh invite to set them up
             t = token()
-            db.run("UPDATE users SET ms_login=0, entra_oid=NULL, invite_hash=?, invite_expires=? WHERE id=?",
+            db.run("UPDATE users SET ms_login=0, sso_provider=NULL, entra_oid=NULL, invite_hash=?, invite_expires=? WHERE id=?",
                    (token_hash(t), now() + INVITE_TTL, u["id"]))
             sessions.end_all_for(u["id"])
             db.audit(s["email"], "user set to password sign-in", u["email"], self.client_ip(), org_id=primary)
@@ -4320,7 +4342,7 @@ class Handler(BaseHTTPRequestHandler):
             raise HttpError(400, "There's already an account with that email.")
         if b.get("ms_login") and s["kind"] == "tech":   # a client user who signs in with Microsoft (no password/TOTP - Microsoft does MFA)
             dom = str(b.get("ms_domain") or email.split("@")[-1]).strip().lower()[:253]
-            db.run("INSERT INTO users (email, name, kind, role, org_id, created_at, ms_login, ms_domain) VALUES (?,?,?,?,?,?,1,?)",
+            db.run("INSERT INTO users (email, name, kind, role, org_id, created_at, ms_login, ms_domain, sso_provider) VALUES (?,?,?,?,?,?,1,?,'microsoft')",
                    (email, str(b.get("name") or "")[:120], "client", role, org_id, now(), dom))
             db.audit(s["email"], "user invited (Microsoft sign-in)", email, self.client_ip(), org_id=org_id, detail=role)
             return self.json({"ok": True, "ms": True, "email": email, "domain": dom, "enabled": settings.client_ms_mode in ("guest", "multi")})

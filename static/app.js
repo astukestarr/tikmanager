@@ -1600,7 +1600,7 @@ async function users() {
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Type</th>${isTech() ? "<th>Client</th>" : ""}<th>Role</th><th>MFA</th><th>Last sign-in</th><th></th></tr></thead><tbody>
       ${rows.map((u) => `<tr><td>${esc(u.email)}${u.disabled ? ` <span class="pill">disabled</span>` : ""}${u.invited ? ` <span class="pill">invited</span>` : ""}</td>
         <td>${esc(u.name)}</td><td>${u.kind === "tech" ? esc((window.BRAND && window.BRAND.company) || "Staff") : "Client"}</td>${isTech() ? `<td>${esc(u.org || "")}</td>` : ""}<td>${esc(u.role)}</td>
-        <td>${u.kind === "tech" || u.ms_login ? "Microsoft" : u.totp_enabled ? "✓" : "—"}</td><td>${ago(u.last_login)}</td>
+        <td>${u.kind === "tech" || u.ms_login ? (u.sso_provider === "oidc" ? "OIDC" : "Microsoft") : u.totp_enabled ? "✓" : "—"}</td><td>${ago(u.last_login)}</td>
         <td class="row">${u.email === me.email ? "" : `
           ${isTech() ? `<button class="btn" type="button" data-edit="${u.id}">Edit</button>` : ""}
           ${u.invited ? `<button class="btn" type="button" data-act="resend" data-id="${u.id}">New link</button>` : ""}
@@ -1655,8 +1655,8 @@ async function editUserDialog(u, orgs) {
   const clientsField = isClient ? `<label class="field">Clients <span class="small muted">(hold Ctrl/Cmd to choose several; the first is their main one)</span>
       <select id="euOrgs" multiple size="${Math.min(8, Math.max(3, orgs.length))}">${orgs.map((o) => `<option value="${o.id}"${cur.has(String(o.id)) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>` : "";
   const signinField = isClient ? `<label class="field">Sign-in method
-      <select id="euSignin"><option value="password"${u.ms_login ? "" : " selected"}>Password + authenticator</option><option value="microsoft"${u.ms_login ? " selected" : ""}>Microsoft only</option></select>
-      <span class="small muted">Microsoft only: no password, Microsoft does MFA, locked to their email domain. Switching to password sends a fresh setup link; switching to Microsoft drops the current password/authenticator.</span></label>` : "";
+      <select id="euSignin"><option value="password"${u.ms_login ? "" : " selected"}>Password + authenticator</option><option value="microsoft"${u.ms_login && u.sso_provider !== "oidc" ? " selected" : ""}>Microsoft only</option><option value="oidc"${u.sso_provider === "oidc" ? " selected" : ""}>Single sign-on (OIDC)</option></select>
+      <span class="small muted">SSO (Microsoft / OIDC): no password, the identity provider does MFA, locked to their email domain. Switching to password sends a fresh setup link; switching to SSO drops the current password/authenticator. OIDC needs "Client OIDC sign-in" on in Admin → Settings.</span></label>` : "";
   dialog(`<h2>Edit ${esc(u.email)}</h2>
     <label class="field">Name <input id="euName" value="${esc(u.name)}" maxlength="120"></label>
     <label class="field">Role <select id="euRole">${roleOpts}</select></label>
@@ -2821,6 +2821,18 @@ async function adminSystem() {
         "Microsoft sign-in" option (matched to their email, locked to its domain). <b>Guests in our tenant:</b> B2B-invite them into your Azure AD;
         they sign in through your tenant, so your Conditional Access and access reviews apply (single-tenant app is fine). <b>Their own Microsoft:</b>
         set the app registration to multi-tenant; they sign in from their own tenant. Your staff sign-in is unchanged.</p>
+      <h3>Single sign-on (OIDC) — Pocket ID, Authentik, Keycloak, Okta, Google…</h3>
+      <p class="small muted">Any OpenID Connect provider, alongside or instead of Microsoft. In your provider create an app with redirect URI
+        <span class="mono">${esc(s.redirect_uri)}</span> and scopes <span class="mono">openid profile email</span>. Staff still need their email domain in the
+        technician allowlist above; the ID token's signature is verified against the provider's keys.</p>
+      <div class="grid2">${f("cfOidcIssuer", "Issuer URL", s.oidc_issuer, { ph: "https://id.example.com" })}
+        ${f("cfOidcClient", "Client ID", s.oidc_client_id, { ph: "tikmanager" })}
+        <label class="field">Client secret <input id="cfOidcSecret" type="password" autocomplete="new-password" placeholder="${s.oidc_client_secret_set ? "saved - leave blank to keep" : ""}"></label>
+        ${f("cfOidcLabel", "Button label", s.oidc_label, { ph: "Pocket ID" })}
+        ${f("cfOidcScopes", "Scopes", s.oidc_scopes, { ph: "openid profile email" })}</div>
+      <label class="field">Client (customer) OIDC sign-in <select id="cfOidcMode">
+        <option value="off" ${s.client_oidc_mode !== "on" ? "selected" : ""}>Off - only staff use OIDC</option>
+        <option value="on" ${s.client_oidc_mode === "on" ? "selected" : ""}>On - client users may sign in with OIDC (domain-locked)</option></select></label>
       <h3>Routers</h3>
       <div class="grid2">${f("cfEndpoint", "WireGuard address routers connect to", s.wg_endpoint, { ph: "tikmanager.example.com:51820" })}
         ${f("cfPing", "Latency test target", s.ping_target, { ph: "1.1.1.1" })}</div>
@@ -2866,7 +2878,8 @@ async function adminSystem() {
   $("cfSave").addEventListener("click", async () => {
     try {
       await post("/api/admin/settings", { tech_domains: $("cfDomains").value, tech_admins: $("cfAdmins").value, entra_tenant_id: $("cfTenant").value,
-        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, client_ms_mode: $("cfMsMode").value, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value, direct_controller_ip: $("cfDirectIp").value });
+        entra_client_id: $("cfClient").value, entra_client_secret: $("cfSecret").value, client_ms_mode: $("cfMsMode").value, wg_endpoint: $("cfEndpoint").value, ping_target: $("cfPing").value, direct_controller_ip: $("cfDirectIp").value,
+        oidc_issuer: $("cfOidcIssuer").value, oidc_client_id: $("cfOidcClient").value, oidc_client_secret: $("cfOidcSecret").value, oidc_label: $("cfOidcLabel").value, oidc_scopes: $("cfOidcScopes").value, client_oidc_mode: $("cfOidcMode").value });
       await adminSystem(); say("cfStatus", "Saved.", true);
     } catch (e) { say("cfStatus", e.message); }
   });

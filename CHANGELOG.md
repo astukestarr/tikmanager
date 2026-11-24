@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.8.0-beta.1 - 2026-11-24
+
+- **Sign in with any OpenID Connect provider (Pocket ID, Authentik, Keycloak, Okta, Google…).** Alongside — or
+  instead of — Microsoft, you can now point TikManager at any standards-compliant OIDC identity provider. Set the
+  issuer, client ID and secret in **Admin → Settings → Single sign-on (OIDC)**; staff then sign in with the new
+  button (still gated by the technician email-domain allowlist), and client users can be set to OIDC sign-in,
+  domain-locked, when "Client OIDC sign-in" is on. Microsoft and OIDC can both be configured at once. The ID token's
+  **signature is verified against the provider's published keys (RS256/JWKS)** on top of the issuer, audience, nonce,
+  expiry and email-verified checks — stdlib only, no new dependencies.
+
 ## 4.7.0-beta.1 - 2026-11-24
 
 - **Manage routers without a TikManager WireGuard tunnel.** If your routers are already reachable over your own
