@@ -3,7 +3,7 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
-## 4.6.0-beta.1 - 2026-11-24
+## 4.6.0 - 2026-11-24
 
 - **Edit any user.** The Users screen gains an **Edit** button on every user (technicians): change their **name** and
   **role**, and for a client user the **clients** they can see and their **sign-in method** - all in one dialog. (The
