@@ -128,6 +128,13 @@ class Sessions:
             else:
                 s = {**s, "real_email": s["email"], "real_role": s["role"], "real_kind": s["kind"], "viewing_as": True,
                      "email": u["email"], "name": u["name"], "kind": u["kind"], "role": u["role"], "org_id": u["org_id"]}
+        if s["kind"] == "client":   # every client this login may see: their primary org plus any extra ones (user_orgs)
+            uid = s.get("as_user_id") or s["user_id"]
+            ids, seen = [], set()
+            for oid in [s["org_id"], *(r["org_id"] for r in self.db.q("SELECT org_id FROM user_orgs WHERE user_id = ?", (uid,)))]:
+                if oid and oid not in seen:
+                    seen.add(oid); ids.append(oid)
+            s["org_ids"] = ids
         return s
 
     def end(self, sid):

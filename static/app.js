@@ -41,7 +41,8 @@ function newVersionLoaded(v) {
 
 async function api(path, opts = {}) {
   // reads follow the chosen customer, so every page and nav count shows just their data (server scopes via org_scope)
-  if ((opts.method || "GET").toUpperCase() === "GET" && appOrg && me?.kind !== "client" && !ORG_GLOBAL.test(path)) {
+  if ((opts.method || "GET").toUpperCase() === "GET" && appOrg && !ORG_GLOBAL.test(path)
+      && (me?.kind !== "client" || (me?.orgs || []).length > 1)) {   // a client spanning several clients can pick one, like a tech
     path += (path.includes("?") ? "&" : "?") + "org=" + encodeURIComponent(appOrg);
   }
   const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", "X-CSRF-Token": me?.csrf || "", ...(opts.headers || {}) } });
@@ -1570,8 +1571,9 @@ async function users() {
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Type</th>${isTech() ? "<th>Client</th>" : ""}<th>Role</th><th>MFA</th><th>Last sign-in</th><th></th></tr></thead><tbody>
       ${rows.map((u) => `<tr><td>${esc(u.email)}${u.disabled ? ` <span class="pill">disabled</span>` : ""}${u.invited ? ` <span class="pill">invited</span>` : ""}</td>
         <td>${esc(u.name)}</td><td>${u.kind === "tech" ? esc((window.BRAND && window.BRAND.company) || "Staff") : "Client"}</td>${isTech() ? `<td>${esc(u.org || "")}</td>` : ""}<td>${esc(u.role)}</td>
-        <td>${u.kind === "tech" ? "Microsoft" : u.totp_enabled ? "✓" : "—"}</td><td>${ago(u.last_login)}</td>
+        <td>${u.kind === "tech" || u.ms_login ? "Microsoft" : u.totp_enabled ? "✓" : "—"}</td><td>${ago(u.last_login)}</td>
         <td class="row">${u.email === me.email ? "" : `
+          ${isTech() ? `<button class="btn" type="button" data-edit="${u.id}">Edit</button>` : ""}
           ${u.invited ? `<button class="btn" type="button" data-act="resend" data-id="${u.id}">New link</button>` : ""}
           ${u.kind === "client" && u.totp_enabled ? `<button class="btn" type="button" data-act="reset-mfa" data-id="${u.id}">Reset MFA</button>` : ""}
           ${u.kind === "client" && !u.disabled && can("clients") ? `<button class="btn" type="button" data-viewas="${u.id}" title="See TikManager exactly as this user does (read-only)">View as</button>` : ""}
@@ -1597,6 +1599,7 @@ async function users() {
   document.querySelectorAll("[data-viewas]").forEach((b) => b.addEventListener("click", async () => {
     try { await post(`/api/users/${b.dataset.viewas}/view-as`); location.href = "/#dashboard"; location.reload(); } catch (err) { alert(err.message); }
   }));
+  document.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => editUserDialog(rows.find((u) => String(u.id) === b.dataset.edit), orgs)));
   document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
     if (b.dataset.act === "delete" && !confirm("Permanently delete this user? This can't be undone.")) return;
     try {
@@ -1606,6 +1609,48 @@ async function users() {
       else users();
     } catch (err) { alert(err.message); }
   }));
+}
+
+// Edit an existing user: name + role for anyone; a client user's assigned clients and sign-in method too.
+async function editUserDialog(u, orgs) {
+  if (!u) return;
+  const isClient = u.kind === "client";
+  let roleOpts;
+  if (isClient) {
+    roleOpts = [["viewer", "Viewer"], ["admin", "Client admin"]].map(([v, l]) => `<option value="${v}"${u.role === v ? " selected" : ""}>${l}</option>`).join("");
+  } else {
+    const R = await api("/api/roles").catch(() => ({ roles: [], no_access: { id: "none", name: "No access" } }));
+    roleOpts = [...R.roles, R.no_access].map((r) => `<option value="${esc(r.id)}"${u.role === r.id ? " selected" : ""}>${esc(r.name)}</option>`).join("");
+  }
+  const cur = new Set((u.org_ids || []).map(String));
+  const clientsField = isClient ? `<label class="field">Clients <span class="small muted">(hold Ctrl/Cmd to choose several; the first is their main one)</span>
+      <select id="euOrgs" multiple size="${Math.min(8, Math.max(3, orgs.length))}">${orgs.map((o) => `<option value="${o.id}"${cur.has(String(o.id)) ? " selected" : ""}>${esc(o.name)}</option>`).join("")}</select></label>` : "";
+  const signinField = isClient ? `<label class="field">Sign-in method
+      <select id="euSignin"><option value="password"${u.ms_login ? "" : " selected"}>Password + authenticator</option><option value="microsoft"${u.ms_login ? " selected" : ""}>Microsoft only</option></select>
+      <span class="small muted">Microsoft only: no password, Microsoft does MFA, locked to their email domain. Switching to password sends a fresh setup link; switching to Microsoft drops the current password/authenticator.</span></label>` : "";
+  dialog(`<h2>Edit ${esc(u.email)}</h2>
+    <label class="field">Name <input id="euName" value="${esc(u.name)}" maxlength="120"></label>
+    <label class="field">Role <select id="euRole">${roleOpts}</select></label>
+    ${clientsField}${signinField}
+    <div id="euStatus" class="status"></div>
+    <div class="actions"><button class="btn primary" type="button" id="euSave">Save</button><button class="btn" type="button" data-close>Cancel</button></div>`);
+  const st = (m, ok) => { $("euStatus").textContent = m; $("euStatus").className = `status ${ok ? "ok" : "err"}`; };
+  $("euSave").addEventListener("click", async () => {
+    const body = { name: $("euName").value, role: $("euRole").value };
+    if (isClient) {
+      body.org_ids = [...$("euOrgs").selectedOptions].map((o) => +o.value);
+      body.sign_in = $("euSignin").value;
+      if (!body.org_ids.length) return st("Pick at least one client.");
+    }
+    $("euSave").disabled = true;
+    try {
+      const r = await post(`/api/users/${u.id}/edit`, body);
+      $("dlg").close();
+      if (r.link) dialog(`<h2>Password setup link</h2>${r.emailed === true ? `<p class="status ok">Emailed to them.</p>` : typeof r.emailed === "string" ? `<p class="status err">The email couldn't be sent: ${esc(r.emailed)}</p>` : `<p class="small muted">Send this link to the person (valid ${r.expires_days} days):</p>`}
+        <div class="code">${esc(r.link)}</div><div class="actions"><button class="btn" type="button" data-close>Done</button></div>`);
+      users();
+    } catch (e) { $("euSave").disabled = false; st(e.message); }
+  });
 }
 
 // --- Admin: branding, technicians, system ---------------------------------------------------------------------
@@ -7680,12 +7725,13 @@ async function loadUDevices(key) {
 
 // The top-bar "Customer" pulldown: pick one customer and the whole app (every page + the nav counts) follows.
 async function setupCustomerPicker() {
-  if (!isTech() || me.viewing_as) return;   // client users are already locked to their own org; no picker in view-as
+  const multiClient = me.kind === "client" && (me.orgs || []).length > 1;   // a client login assigned to several clients
+  if (!isTech() && !multiClient) return;   // single-org client users are locked to their one org; no picker
   const sel = $("custSel");
   if (!sel) return;
   let orgs = [];
   try { orgs = await api("/api/orgs"); } catch { return; }
-  sel.innerHTML = `<option value="">All customers</option>` + orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("");
+  sel.innerHTML = `<option value="">${isTech() ? "All customers" : "All my clients"}</option>` + orgs.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("");
   if (appOrg && !orgs.some((o) => String(o.id) === appOrg)) { appOrg = ""; try { localStorage.setItem("tm.customer", ""); } catch { /* private */ } }
   sel.value = appOrg;
   $("custWrap").classList.remove("hidden");

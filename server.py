@@ -418,7 +418,13 @@ class Handler(BaseHTTPRequestHandler):
         "list every customer" query out of the global selector so its dropdown keeps every option.
         """
         if s["kind"] == "client":
-            return f"{column} = ?", [s["org_id"]]
+            ids = s.get("org_ids") or ([s["org_id"]] if s["org_id"] else [])
+            req = getattr(self, "_req_org", None)   # the top-bar picker narrows a multi-client login to one of their clients
+            if org_id != "all" and req and req in ids:
+                ids = [req]
+            if not ids:
+                return "1=0", []
+            return f"{column} IN ({','.join('?' * len(ids))})", list(ids)
         if org_id == "all":
             return "1=1", []
         if org_id in (None, "", 0):
@@ -426,6 +432,10 @@ class Handler(BaseHTTPRequestHandler):
         if org_id:
             return f"{column} = ?", [int(org_id)]
         return "1=1", []
+
+    def sees_org(self, s, org_id):
+        """True if this session may see rows for org_id (techs: any; clients: one of their assigned orgs)."""
+        return s["kind"] != "client" or org_id in (s.get("org_ids") or [s["org_id"]])
 
     def vpn_sites(self, v):
         rows = db.q("""SELECT s.*, d.name, d.online, d.wan_ip, d.model, d.thumb_slug FROM vpn_sites s JOIN devices d ON d.id = s.device_id
@@ -692,11 +702,24 @@ class Handler(BaseHTTPRequestHandler):
         return rows
 
     # --- client admins: Winbox and site-to-site VPNs, only where a TikManager administrator turned them on for the client ---
+    def active_org(self, s):
+        """The one client org a client login is looking at: the top-bar pick when it's theirs, their only org, else
+        None (a multi-client login with nothing picked - the 'All my clients' view)."""
+        if s["kind"] != "client":
+            return None
+        ids = s.get("org_ids") or ([s["org_id"]] if s["org_id"] else [])
+        req = getattr(self, "_req_org", None)
+        if req and req in ids:
+            return req
+        return ids[0] if len(ids) == 1 else None
+
     def client_access(self, s):
-        """(winbox level 'off'/'read'/'full', vpn allowed) for a client admin's organization; technicians aren't limited here."""
-        if s["kind"] != "client" or s["role"] != "admin" or not s["org_id"]:
+        """(winbox level 'off'/'read'/'full', vpn allowed) for a client admin's organization; technicians aren't limited here.
+        For a multi-client login, this is the org currently picked (Winbox/VPN need one client in context)."""
+        oid = self.active_org(s)
+        if s["kind"] != "client" or s["role"] != "admin" or not oid:
             return "off", False
-        o = db.one("SELECT client_winbox, client_vpn FROM orgs WHERE id=?", (s["org_id"],)) or {}
+        o = db.one("SELECT client_winbox, client_vpn FROM orgs WHERE id=?", (oid,)) or {}
         level = o.get("client_winbox") if o.get("client_winbox") in ("read", "full") else "off"
         return level, bool(o.get("client_vpn"))
 
@@ -705,8 +728,9 @@ class Handler(BaseHTTPRequestHandler):
         organization has IPAM turned on. Writes stay technician-only (ipam_post keeps tech=True, write=True)."""
         s = self.require()
         if s["kind"] == "client":
-            o = db.one("SELECT client_ipam FROM orgs WHERE id=?", (s["org_id"],)) if s["org_id"] else None
-            if not (o and o["client_ipam"]):
+            ids = s.get("org_ids") or ([s["org_id"]] if s["org_id"] else [])
+            ok = ids and db.one(f"SELECT 1 FROM orgs WHERE client_ipam=1 AND id IN ({','.join('?' * len(ids))})", ids)
+            if not ok:
                 raise HttpError(403, "IPAM isn't turned on for your organization - ask your IT provider.")
         return s
 
@@ -733,19 +757,19 @@ class Handler(BaseHTTPRequestHandler):
         if s["role"] != "admin":
             raise HttpError(403, "Only your organization's admins can use Winbox.")
         level = self.client_access(s)[0]
-        if level == "off" or d["org_id"] != s["org_id"]:
+        if level == "off" or not self.sees_org(s, d["org_id"]):
             raise HttpError(403, "Winbox isn't turned on for your organization - ask your IT provider.")
         return s, level
 
     def vpn_for(self, s, vid):
         v = db.one("SELECT v.*, o.name AS org FROM vpns v JOIN orgs o ON o.id = v.org_id WHERE v.id=?", (int(vid),))
-        if not v or (s["kind"] == "client" and v["org_id"] != s["org_id"]):
+        if not v or not self.sees_org(s, v["org_id"]):
             raise HttpError(404, "VPN not found.")
         return v
 
     def device_for(self, s, did):
         d = db.one("SELECT * FROM devices WHERE id = ?", (int(did),))
-        if not d or (s["kind"] == "client" and d["org_id"] != s["org_id"]):
+        if not d or not self.sees_org(s, d["org_id"]):
             raise HttpError(404, "Device not found.")
         return d
 
@@ -909,8 +933,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def ipam_get(self, path, q):
         s = self.require_ipam()   # any technician, or a client user whose org has IPAM turned on; writes need 'ipam'
-        # clients see only their own organization; techs follow the global Customer selector (?org=), else all
-        org = s["org_id"] if s["kind"] == "client" else self._req_org
+        # clients see one of their own organizations (the picked one, else their main); techs follow the ?org= selector
+        org = (self.active_org(s) or (s.get("org_ids") or [s["org_id"]])[0]) if s["kind"] == "client" else self._req_org
 
         def owned(sid):   # a client may only open a subnet in their own organization
             d = ipam.subnet(int(sid))
@@ -1139,9 +1163,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"entra": settings.entra_configured, "dev": self.dev_login_allowed()})
         if path == "/api/me":
             s = self.require()
-            org = db.one("SELECT name FROM orgs WHERE id=?", (s["org_id"],)) if s["org_id"] else None
+            # A client login may span several clients (user_orgs). The top-bar picker chooses which one is in context;
+            # `org` is that one's name (None = "All my clients"), and `orgs` lists every client they may switch between.
+            cids = s.get("org_ids") or ([s["org_id"]] if s["org_id"] else [])
+            cur = self.active_org(s)
+            org = db.one("SELECT name FROM orgs WHERE id=?", (cur,)) if cur else None
+            client_orgs = (db.q(f"SELECT id, name FROM orgs WHERE id IN ({','.join('?' * len(cids))}) ORDER BY name", cids)
+                           if s["kind"] == "client" and cids else [])
             rl = roles.get(s["role"]) if s["kind"] == "tech" else None
-            return self.json({"email": s["email"], "name": s["name"], "kind": s["kind"], "role": s["role"], "org_id": s["org_id"],
+            return self.json({"email": s["email"], "name": s["name"], "kind": s["kind"], "role": s["role"],
+                              "org_id": cur if s["kind"] == "client" else s["org_id"], "orgs": client_orgs,
                               "perms": sorted(roles.perms(s)) if s["kind"] == "tech" else [], "is_admin": s["kind"] == "tech" and roles.is_admin(s),
                               "role_name": rl["name"] if rl else s["role"],
                               "org": org["name"] if org else None, "csrf": s["csrf"], "dev": settings.dev, "version": __version__,
@@ -1149,11 +1180,10 @@ class Handler(BaseHTTPRequestHandler):
                               "update": updates.info() if self.can(s, "settings") else None,
                               "prefs": user_prefs(s["user_id"]),
                               "client_winbox": self.client_access(s)[0], "client_vpn": self.client_access(s)[1], "managed_vpn": settings.managed_vpn,
-                              "client_ipam": bool((db.one("SELECT client_ipam FROM orgs WHERE id=?", (s["org_id"],)) or {}).get("client_ipam"))
-                                              if s["kind"] == "client" and s["org_id"] else False,
+                              "client_ipam": bool(cids and db.one(f"SELECT 1 FROM orgs WHERE client_ipam=1 AND id IN ({','.join('?' * len(cids))})", cids)),
                               "viewing_as": {"by": s["real_email"]} if s.get("viewing_as") else None,
                               "unifi": (bool(db.one("SELECT 1 FROM net_accounts")) if s["kind"] == "tech"
-                                        else bool(db.one("SELECT 1 FROM net_sites WHERE org_id=?", (s["org_id"],))))})
+                                        else bool(cids and db.one(f"SELECT 1 FROM net_sites WHERE org_id IN ({','.join('?' * len(cids))})", cids)))})
         if path == "/api/orgs":
             s = self.require()
             where, args = self.org_scope(s, "all", column="o.id")   # the customer directory + the top-bar picker: always every customer
@@ -1212,7 +1242,7 @@ class Handler(BaseHTTPRequestHandler):
             s = self.require()
             key = urllib.parse.unquote(m.group(1))
             site = db.one("SELECT * FROM net_sites WHERE id=?", (key,))
-            if not site or (s["kind"] == "client" and site["org_id"] != s["org_id"]):
+            if not site or not self.sees_org(s, site["org_id"]):
                 raise HttpError(404, "Site not found.")
             return self.json({"devices": unifi.devices(key)})
         if m := re.fullmatch(r"/api/net/accounts/(\d+)/consoles", path):   # consoles under a UniFi connection (for local keys)
@@ -1466,7 +1496,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"vpn": v, "candidates": self.vpn_candidates(v["org_id"], v["id"])})
         if path == "/api/vpn-candidates":   # a client's routers with their subnets, for a new VPN
             s = self.require_vpn()
-            org_id = s["org_id"] if s["kind"] == "client" else int(q.get("org_id") or 0)
+            org_id = (self.active_org(s) or (s.get("org_ids") or [s["org_id"]])[0]) if s["kind"] == "client" else int(q.get("org_id") or 0)
             return self.json({"candidates": self.vpn_candidates(org_id, None)})
         # --- Diagnostics (technicians) ---
         if path == "/api/diag/candidates":   # routers to run a test against
@@ -2150,12 +2180,16 @@ class Handler(BaseHTTPRequestHandler):
             if s["kind"] == "client":
                 if s["role"] != "admin":
                     raise HttpError(403, "Only your organization's admins can see its users.")
-                rows = db.q("SELECT id, email, name, kind, role, org_id, totp_enabled, disabled, last_login, invite_expires FROM users WHERE org_id=? ORDER BY email", (s["org_id"],))
+                rows = db.q("SELECT id, email, name, kind, role, org_id, ms_login, totp_enabled, disabled, last_login, invite_expires FROM users WHERE org_id=? ORDER BY email", (s["org_id"],))
             else:
-                rows = db.q("""SELECT u.id, u.email, u.name, u.kind, u.role, u.org_id, o.name AS org, u.totp_enabled, u.disabled, u.last_login, u.invite_expires
+                rows = db.q("""SELECT u.id, u.email, u.name, u.kind, u.role, u.org_id, o.name AS org, u.ms_login, u.totp_enabled, u.disabled, u.last_login, u.invite_expires,
+                               (SELECT GROUP_CONCAT(org_id) FROM user_orgs WHERE user_id = u.id) AS extra_orgs
                                FROM users u LEFT JOIN orgs o ON o.id = u.org_id ORDER BY u.kind DESC, o.name, u.email""")
             for r in rows:
                 r["invited"] = bool(r.pop("invite_expires"))
+                r["ms_login"] = bool(r.get("ms_login"))
+                extra = [int(x) for x in str(r.pop("extra_orgs", "") or "").split(",") if x]   # every client this user may see
+                r["org_ids"] = ([r["org_id"]] + [o for o in extra if o != r["org_id"]]) if r["org_id"] else extra
             return self.json(rows)
         if path == "/api/audit":
             s = self.require(tech=True, admin=True)
@@ -2977,7 +3011,7 @@ class Handler(BaseHTTPRequestHandler):
             if b.get("id"):
                 self.vpn_for(s, b["id"])   # a client admin can only change their own organization's VPNs
             try:
-                org_id = s["org_id"] if s["kind"] == "client" else int(b.get("org_id") or 0)
+                org_id = (self.active_org(s) or (s.get("org_ids") or [s["org_id"]])[0]) if s["kind"] == "client" else int(b.get("org_id") or 0)
                 sites = [{"device_id": int(x["device_id"]), "subnets": [str(n) for n in x.get("subnets") or []][:50]} for x in (b.get("sites") or [])[:250]]
                 name = str(b.get("name") or "").strip()[:80] or "Site-to-site VPN"
                 vid = vpns.save(int(b["id"]) if b.get("id") else None, org_id, name, int(b.get("hub_device_id") or 0),
@@ -3980,6 +4014,8 @@ class Handler(BaseHTTPRequestHandler):
             db.run("UPDATE users SET role=? WHERE id=?", (role, u["id"]))
             db.audit(s["email"], "role changed", u["email"], self.client_ip(), org_id=u["org_id"], detail=role)
             return self.json({"ok": True})
+        if m := re.fullmatch(r"/api/users/(\d+)/edit", path):
+            return self.edit_user(int(m.group(1)))
         if path == "/api/users/invite":
             return self.invite()
         if m := re.fullmatch(r"/api/users/(\d+)/(disable|enable|reset-mfa|resend|delete)", path):
@@ -4159,6 +4195,66 @@ class Handler(BaseHTTPRequestHandler):
         return self.json({"ok": True}, headers=[("Set-Cookie", self.start_session(u))])
 
     # --- users and invitations ------------------------------------------------------------------------------
+    def edit_user(self, uid):
+        """Change an existing user: name, role, (client users) their assigned clients and their sign-in method."""
+        s = self.require(tech=True)
+        u = db.one("SELECT * FROM users WHERE id=?", (uid,))
+        if not u:
+            raise HttpError(404, "User not found.")
+        need = "techs" if u["kind"] == "tech" else "clients"
+        if not self.can(s, need):
+            raise HttpError(403, f"Your role doesn't allow this - it needs: {PERM_LABEL[need]}.")
+        b = self.body()
+        name = str(b.get("name") if b.get("name") is not None else u["name"]).strip()[:120]
+        role = str(b.get("role") or u["role"])
+        if u["kind"] == "tech":   # same role rules as POST /api/users/{id}/role
+            if role != ROLE_NONE and not roles.get(role):
+                raise HttpError(400, "No such role.")
+            if (role == ROLE_ADMIN or u["role"] == ROLE_ADMIN) and not roles.is_admin(s):
+                raise HttpError(403, "Only administrators can make someone an administrator, or change an administrator's role.")
+            if u["email"] == s["email"] and role != ROLE_ADMIN and roles.is_admin(s):
+                raise HttpError(400, "You can't remove your own administrator role.")
+            if u["role"] == ROLE_ADMIN and role != ROLE_ADMIN and not db.one(
+                    "SELECT 1 FROM users WHERE kind='tech' AND role=? AND disabled=0 AND id<>?", (ROLE_ADMIN, u["id"])):
+                raise HttpError(400, "That's the last administrator - make someone else an administrator first.")
+            db.run("UPDATE users SET name=?, role=? WHERE id=?", (name, role, u["id"]))
+            db.audit(s["email"], "user edited", u["email"], self.client_ip(), detail=f"role {role}")
+            return self.json({"ok": True})
+        # --- client user: role, assigned clients, and (optionally) sign-in method ---
+        if role not in CLIENT_ROLES:
+            raise HttpError(400, f"Role must be one of: {', '.join(CLIENT_ROLES)}.")
+        org_ids = list(dict.fromkeys(int(x) for x in (b.get("org_ids") or []) if str(x).isdigit()))
+        if not org_ids:
+            raise HttpError(400, "Assign the user to at least one client.")
+        found = {r["id"] for r in db.q(f"SELECT id FROM orgs WHERE id IN ({','.join('?' * len(org_ids))})", org_ids)}
+        if len(found) != len(org_ids):
+            raise HttpError(400, "One of those clients no longer exists.")
+        primary = org_ids[0]
+        db.run("UPDATE users SET name=?, role=?, org_id=? WHERE id=?", (name, role, primary, u["id"]))
+        db.run("DELETE FROM user_orgs WHERE user_id=?", (u["id"],))
+        for oid in org_ids[1:]:
+            db.run("INSERT OR IGNORE INTO user_orgs (user_id, org_id) VALUES (?,?)", (u["id"], oid))
+        result = {"ok": True}
+        want = b.get("sign_in")
+        if want == "microsoft" and not u["ms_login"]:   # drop password/TOTP; Microsoft does MFA, locked to their domain
+            dom = str(b.get("ms_domain") or u["email"].split("@")[-1]).strip().lower()[:253]
+            db.run("UPDATE users SET ms_login=1, ms_domain=?, password_hash=NULL, totp_secret=NULL, totp_enabled=0, "
+                   "entra_oid=NULL, invite_hash=NULL, invite_expires=NULL WHERE id=?", (dom, u["id"]))
+            sessions.end_all_for(u["id"])
+            db.audit(s["email"], "user set to Microsoft sign-in", u["email"], self.client_ip(), org_id=primary)
+            result.update({"ms": True, "domain": dom, "enabled": settings.client_ms_mode in ("guest", "multi")})
+        elif want == "password" and u["ms_login"]:   # back to password + authenticator: send a fresh invite to set them up
+            t = token()
+            db.run("UPDATE users SET ms_login=0, entra_oid=NULL, invite_hash=?, invite_expires=? WHERE id=?",
+                   (token_hash(t), now() + INVITE_TTL, u["id"]))
+            sessions.end_all_for(u["id"])
+            db.audit(s["email"], "user set to password sign-in", u["email"], self.client_ip(), org_id=primary)
+            link = f"{settings.public_url}/invite/{t}"
+            result.update({"link": link, "expires_days": INVITE_TTL // 86400, "emailed": self.email_invite(u["email"], link, s)})
+        else:
+            db.audit(s["email"], "user edited", u["email"], self.client_ip(), org_id=primary, detail=f"role {role}")
+        return self.json(result)
+
     def invite(self):
         s = self.require(write=True)
         b = self.body()
@@ -4208,7 +4304,7 @@ class Handler(BaseHTTPRequestHandler):
     def user_action(self, uid, action):
         s = self.require(write=True)
         u = db.one("SELECT * FROM users WHERE id=?", (uid,))
-        if not u or (s["kind"] == "client" and (s["role"] != "admin" or u["org_id"] != s["org_id"])):
+        if not u or (s["kind"] == "client" and (s["role"] != "admin" or not self.sees_org(s, u["org_id"]))):
             raise HttpError(404, "User not found.")
         if s["kind"] == "tech" and u["kind"] == "tech" and not self.can(s, "techs"):
             raise HttpError(403, f"Your role doesn't allow this - it needs: {PERM_LABEL['techs']}.")

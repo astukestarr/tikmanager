@@ -3,6 +3,21 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.6.0-beta.1 - 2026-11-24
+
+- **Edit any user.** The Users screen gains an **Edit** button on every user (technicians): change their **name** and
+  **role**, and for a client user the **clients** they can see and their **sign-in method** - all in one dialog. (The
+  role could only be changed for technicians, on Admin > Technicians, before.)
+- **One client login can span several clients.** A client user can be assigned to **more than one client**; they then
+  get the same top-bar **Customer picker** staff have (limited to their own clients, plus "All my clients"), and every
+  page, dashboard and count follows the picked client. Picking a client that isn't theirs does nothing - they can only
+  ever see their assigned clients.
+- **Microsoft-only sign-in is now visible and changeable.** The Microsoft sign-in box makes a user **Microsoft-only**:
+  no password or authenticator, Microsoft handles MFA, locked to their email domain - and a user set up for a password
+  is refused Microsoft sign-in (and vice-versa). The Users table now shows a **Microsoft** marker for those users, and
+  Edit can switch a user between Microsoft-only and password + authenticator (switching to password sends a fresh setup
+  link). Microsoft sign-in for clients still needs *Client Microsoft sign-in* turned on in Admin > Settings.
+
 ## 4.5.1 - 2026-11-17
 
 - **Fix: upgrades failed on large databases ("Couldn't back up the database - not installed").** The pre-upgrade
