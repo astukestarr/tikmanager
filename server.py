@@ -2069,6 +2069,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"leases": poller.client(d).dhcp_leases(), "read_at": now()})
             except RouterError as e:
                 raise HttpError(502, f"Couldn't read the DHCP leases: {e}") from None
+        if path == "/api/dev/lab":   # dev only: TikLab summary (simulated fleet + CHR host-lab hints)
+            if not settings.dev:
+                raise HttpError(404, "Not found.")
+            self.require(tech=True)
+            sims = db.q("""SELECT d.id, d.name, d.model, d.online, o.name AS org FROM devices d
+                           LEFT JOIN orgs o ON o.id=d.org_id WHERE d.sim=1 ORDER BY d.id""")
+            real = db.q("""SELECT d.id, d.name, d.model, d.online, d.tunnel_ip, o.name AS org FROM devices d
+                           LEFT JOIN orgs o ON o.id=d.org_id WHERE (d.sim=0 OR d.sim IS NULL) AND d.state='adopted' ORDER BY d.name""")
+            return self.json({"sims": sims, "real": real, "controller_ip": settings.direct_controller_ip or ""})
         if m := re.fullmatch(r"/api/devices/(\d+)", path):
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -2547,6 +2556,14 @@ class Handler(BaseHTTPRequestHandler):
             count = max(1, min(20, int((self.body() or {}).get("count") or 6)))
             added = self.seed_demo_fleet(count)
             return self.json({"ok": True, "added": added})
+        if path == "/api/dev/clear-sims":   # dev only: remove every simulated router (leaves real routers and clients)
+            if not settings.dev:
+                raise HttpError(404, "Not found.")
+            s = self.require(tech=True, write=True)
+            n = db.one("SELECT COUNT(*) AS n FROM devices WHERE sim=1")["n"]
+            db.run("DELETE FROM devices WHERE sim=1")
+            db.audit(s["email"], "simulated routers removed", f"{n} routers", self.client_ip())
+            return self.json({"ok": True, "removed": n})
         if m := re.fullmatch(r"/api/devices/(\d+)/backup", path):
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))

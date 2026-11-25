@@ -5,6 +5,8 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
 
 ## 4.9.0-beta.2 - 2026-11-25
 
+- **TikLab (Admin → TikLab, dev mode).** A home for the test lab: manage the simulated fleet right there — seed a batch
+  or remove them all — and see the real CHR routers you've adopted, with the `chr-lab.sh` commands to bring more up.
 - **`deploy/chr-lab.sh`: run real CHR routers on one Ubuntu host, no Proxmox.** For the hybrid test lab, a script that
   stands up real MikroTik CHR instances on a single box (the TikManager server is fine): installs QEMU, makes a
   host-local NAT bridge, downloads CHR, and launches N routers each auto-configured (static IP, API, admin password)
