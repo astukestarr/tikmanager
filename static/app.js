@@ -4633,7 +4633,9 @@ function webhookDialog(x, h) {
 
 // --- Ports: port diagram, VLAN grids / port table, port + VLAN changes tested with automatic undo (ports.py) -----------
 const ptView = { vlans: true, diagram: true, devices: true, sel: new Set(), q: "", status: "", native: "", tick: 0 };
-const ptNum = (n) => (n.match(/(\d+)(?:-\d+)?$/) || [, n])[1];
+// Short tile label: the port number. Prefer trailing digits (ether5, sfp-sfpplus2), but fall back to the first digit
+// run so renamed ports with a text suffix (ether1-gateway, sfp1-slave-local) still show "1" instead of the whole name.
+const ptNum = (n) => (n.match(/(\d+)(?:-\d+)?$/) || n.match(/(\d+)/) || [, n])[1];
 function ptLayout(ports) {   // UniFi-style: odd ports on top, even below; SFP ports as their own block
   const split = (list) => list.length > 6 ? [list.filter((_, i) => i % 2 === 0), list.filter((_, i) => i % 2 === 1)] : [list, []];
   return [split(ports.filter((p) => !p.sfp)), split(ports.filter((p) => p.sfp))];
@@ -7815,7 +7817,8 @@ async function go(v, arg) {
     // auto-refresh, skipped while someone is typing in a field on the page
     // the dashboard refreshes the board on screen (not the last one picked - another tab may have changed that) and keeps
     // the scroll position
-    if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || vpnHold || (v === "router" && rView.rtab === "remote") || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
+    // Ports is skipped too: the 30 s rebuild would wipe a port selection, a half-set VLAN change or the scroll position.
+    if (v === "dashboard" || v === "router") timer = setInterval(() => { if (rView.hold || vpnHold || (v === "router" && (rView.rtab === "remote" || rView.rtab === "ports")) || document.activeElement?.closest?.("#main input, #main select, #main textarea")) return;
       const y = window.scrollY, board = v === "dashboard" ? $("main").dataset.board || arg : null;
       (v === "router" ? router(arg) : dashboard(board)).then(() => { if (v === "dashboard" && $("main").dataset.board === board) window.scrollTo({ top: y }); }).catch(() => {}); }, 30000);
     if (v === "upgrades") timer = setInterval(() => {

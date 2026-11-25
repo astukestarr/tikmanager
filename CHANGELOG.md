@@ -3,6 +3,15 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.8.2 - 2026-11-25
+
+- **Port diagram: renamed ports show their number again.** A port renamed with a text suffix (e.g. `ether1-gateway`,
+  `sfp1-slave-local`) was drawn with its whole name inside the tile, which overflowed and wrapped into the row below.
+  Each tile now shows just the port number, and any label without a number is clipped rather than wrapped.
+- **Ports tab no longer auto-refreshes under you.** The router page's 30-second refresh rebuilt the Ports tab,
+  wiping a port selection, a half-set VLAN change or the scroll position. It's now paused while the Ports tab is open
+  (as it already was for Remote access); use the **Refresh** button when you want fresh data.
+
 ## 4.8.1 - 2026-11-25
 
 - **Port diagram: "Disabled" and "No link" ports no longer look the same.** On a router's Ports tab, disabled ports

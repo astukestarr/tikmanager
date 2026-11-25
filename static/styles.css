@@ -600,7 +600,7 @@ button.bk-tile { text-align: left; cursor: pointer; font: inherit; color: inheri
 .pt-block { display: flex; flex-direction: column; gap: 4px; }
 .pt-row { display: flex; gap: 4px; } .pt-labels span { width: 34px; font-size: 9px; line-height: 1.1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .pt, .pt-gap { width: 34px; height: 30px; border-radius: 5px; flex: none; }
-.pt { position: relative; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: 600 11px/1 inherit; cursor: pointer; padding: 0; }
+.pt { position: relative; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: 600 11px/1 inherit; cursor: pointer; padding: 0; overflow: hidden; white-space: nowrap; }
 .pt.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pt-n { pointer-events: none; } .pt-poe { position: absolute; left: 2px; top: 1px; font-size: 9px; font-style: normal; } .pt-up { position: absolute; right: 2px; top: 0; font-size: 10px; font-style: normal; }
 .pt-1g, .sw2.pt-1g { background: #3cb371; color: #fff; border-color: #2f9a60; } .pt-100m, .sw2.pt-100m { background: #c8b400; color: #fff; border-color: #a99800; }
