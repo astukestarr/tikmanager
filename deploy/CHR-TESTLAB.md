@@ -69,6 +69,20 @@ The cross-side call works once you **build a site-to-site VPN between the two CH
 subnets to each other — which is exactly the end-to-end path a real two-site customer has, now testable with no
 hardware. Each router's LAN is a distinct /24 so the VPN routes never collide.
 
+**VLANs.** Each CHR's LAN is a **VLAN-aware trunk** (ether2 on a bridge with `vlan-filtering=yes`), seeded with VLANs
+`10` and `20` — each with its own subnet `10.<router>.<vlan>.0/24`, address and DHCP. This is exactly what TikManager's
+**Ports** tab edits (bridge VLAN filtering: tagged/untagged/PVID per port), so you can view and change the tagging there
+against a real router. Put the test client on a VLAN with `client <N> vlan <id> …`:
+
+```
+sudo ./deploy/chr-lab.sh client 1 vlan 10 ping 10.1.10.1     # client on VLAN 10 -> its gateway
+sudo ./deploy/chr-lab.sh client 1 vlan 10 serve 80 &         # endpoint on VLAN 10 behind router 1
+sudo ./deploy/chr-lab.sh client 2 vlan 10 curl http://10.1.10.100/   # reach it from router 2's VLAN 10
+```
+
+Seed different VLANs with `VLANS="10 20 30" sudo ./deploy/chr-lab.sh up …` (ids 2–254). To test segmentation, add
+firewall rules in TikManager/Winbox and watch which client-to-client paths stop working.
+
 ### Or on Proxmox
 
 ### On Proxmox

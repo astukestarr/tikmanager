@@ -11,8 +11,9 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
   via cloud-init — ready to adopt by address and Winbox into. Uses KVM when present, falls back to QEMU emulation on a
   VM/VPS without it (keep N small). Each router also gets a **LAN with a lightweight test client** behind it (a network
   namespace at `192.168.2x.100`), so you can test an endpoint on each side — e.g. serve HTTP behind one router and curl
-  it from behind another across a site-to-site VPN you build in TikManager. `up / status / client / console / creds /
-  down / destroy`. See `deploy/CHR-TESTLAB.md`.
+  it from behind another across a site-to-site VPN you build in TikManager. Each LAN is a **VLAN-aware trunk** seeded
+  with VLANs 10/20 (manageable in the Ports tab), and `client N vlan <id> …` drops the test host onto any VLAN.
+  `up / status / client / console / creds / down / destroy`. See `deploy/CHR-TESTLAB.md`.
 
 ## 4.9.0-beta.1 - 2026-11-25
 

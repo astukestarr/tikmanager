@@ -27,6 +27,7 @@ BASE_OCTET="${BASE_OCTET:-11}"
 RAM="${RAM:-256}"                      # MB per CHR
 DATA="${DATA:-/opt/chr-lab}"
 MAX_N="${MAX_N:-6}"
+VLANS="${VLANS:-10 20}"                 # VLAN ids seeded on each CHR's LAN trunk (ids 2-254). VLAN v on router i = 10.i.v.0/24
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 need_root() { [ "$(id -u)" = "0" ] || die "run as root (sudo)."; }
@@ -92,22 +93,41 @@ lan_gw()  { echo "$(lan_net "$1").1"; }                     # CHR's LAN (ether2)
 lan_cli() { echo "$(lan_net "$1").100"; }                   # the test client's address behind router i
 
 make_seed() {   # $1 = instance index ; builds a NoCloud cloud-init ISO with a RouterOS first-boot script
-  local i="$1" ip pw dir lnet
+  local i="$1" ip pw dir lnet v
   ip=$(ip_of "$i"); pw=$(cat "$DATA/admin_pw"); dir="$DATA/seed-$i"; lnet=$(lan_net "$i")
   mkdir -p "$dir"
   printf 'instance-id: lab-chr-%s\nlocal-hostname: lab-chr-%s\n' "$i" "$i" > "$dir/meta-data"
-  cat > "$dir/user-data" <<RSC
+  {
+    cat <<RSC
 # RouterOS first-boot config (applied by CHR cloud-init)
 # --- WAN (ether1): reaches TikManager + the internet via the host NAT bridge ---
 /ip address add address=$ip/24 interface=ether1
 /ip route add dst-address=0.0.0.0/0 gateway=$HOST_IP
 /ip dns set servers=$HOST_IP allow-remote-requests=no
-# --- LAN (ether2): the segment the test client sits on, one unique /24 per router (so VPN routes don't collide) ---
-/ip address add address=$lnet.1/24 interface=ether2
-/ip pool add name=lan ranges=$lnet.150-$lnet.200
-/ip dhcp-server add name=lan interface=ether2 address-pool=lan disabled=no lease-time=1h
+# --- LAN (ether2): a VLAN-aware bridge / trunk. Untagged default = $lnet.0/24; tagged VLANs below.
+#     Manage this in TikManager's Ports tab (bridge VLAN filtering is exactly what it edits).
+/interface bridge add name=bridge-lan vlan-filtering=no
+/interface bridge port add bridge=bridge-lan interface=ether2
+/ip address add address=$lnet.1/24 interface=bridge-lan
+/ip pool add name=pool-lan ranges=$lnet.150-$lnet.200
+/ip dhcp-server add name=dhcp-lan interface=bridge-lan address-pool=pool-lan disabled=no lease-time=1h
 /ip dhcp-server network add address=$lnet.0/24 gateway=$lnet.1 dns-server=$lnet.1
+/interface bridge vlan add bridge=bridge-lan untagged=ether2 tagged=bridge-lan vlan-ids=1
 /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment=lab
+RSC
+    for v in $VLANS; do
+      cat <<RSC
+# VLAN $v -> 10.$i.$v.0/24 (client attaches with: chr-lab.sh client $i vlan $v ...)
+/interface bridge vlan add bridge=bridge-lan tagged=bridge-lan,ether2 vlan-ids=$v
+/interface vlan add name=vlan$v interface=bridge-lan vlan-id=$v
+/ip address add address=10.$i.$v.1/24 interface=vlan$v
+/ip pool add name=pool$v ranges=10.$i.$v.150-10.$i.$v.200
+/ip dhcp-server add name=dhcp$v interface=vlan$v address-pool=pool$v disabled=no lease-time=1h
+/ip dhcp-server network add address=10.$i.$v.0/24 gateway=10.$i.$v.1 dns-server=10.$i.$v.1
+RSC
+    done
+    cat <<RSC
+/interface bridge set bridge-lan vlan-filtering=yes
 # --- management ---
 /ip service enable www
 /ip service set www port=80
@@ -115,6 +135,7 @@ make_seed() {   # $1 = instance index ; builds a NoCloud cloud-init ISO with a R
 /user set admin password=$pw
 /system identity set name=lab-chr-$i
 RSC
+  } > "$dir/user-data"
   xorriso -as mkisofs -quiet -output "$DATA/seed-$i.iso" -volid CIDATA -joliet -rock "$dir/meta-data" "$dir/user-data"
 }
 
@@ -182,39 +203,54 @@ Adopt them in TikManager:
   3. Open Winbox on the adopted router - it relays to the real :8291 and the GUI loads.
 
 Each router has a test client behind it (a host on its LAN), for testing an endpoint on each side:
-  - Router i LAN = 192.168.(20+i).0/24  (router 1 -> 192.168.21.0/24, router 2 -> .22, ...) - each its own /24.
-  - The client is the .100 on that LAN. Drive it with:   sudo $0 client <i> ping|curl|serve|exec ...
-  - Example (after you build a site-to-site VPN between two CHRs in TikManager and route their LANs):
-      sudo $0 client 1 serve 80 &                 # test endpoint behind router 1
-      sudo $0 client 2 curl -s http://$(lan_cli 1)/    # reach it from behind router 2, across the tunnel
+  - Router i untagged LAN = 192.168.(20+i).0/24 (client at .100). Tagged VLANs ($(echo "$VLANS" | tr ' ' ',')) seeded
+    on each router: VLAN v = 10.i.v.0/24. Manage the VLANs in TikManager's Ports tab.
+  - Drive the client:   sudo $0 client <i> [vlan <id>] ping|curl|serve|exec ...
+  - Endpoint-on-each-side example (after a site-to-site VPN between two CHRs, with the VLAN subnets routed):
+      sudo $0 client 1 vlan 10 serve 80 &                 # endpoint behind router 1 on VLAN 10
+      sudo $0 client 2 vlan 10 curl -s http://10.1.10.100/   # reach it from router 2's VLAN-10 client
 
 NOTE
 }
 
 cmd_status() {
-  printf "%-10s %-14s %-9s %-16s %-10s\n" INSTANCE "WAN/MGMT" RUNNING "LAN (client gw)" CLIENT
+  printf "%-10s %-14s %-9s %-16s %-10s %-10s\n" INSTANCE "WAN/MGMT" RUNNING "LAN (client gw)" CLIENT VLANS
   for i in $(seq 1 "$MAX_N"); do
     [ -f "$DATA/chr-$i.pid" ] || continue
     local r; r=no; running "$i" && r=yes
     local c=-; ip netns list 2>/dev/null | grep -qw "client$i" && c=$(lan_cli "$i")
-    printf "%-10s %-14s %-9s %-16s %-10s\n" "lab-chr-$i" "$(ip_of "$i")" "$r" "$(lan_gw "$i")/24" "$c"
+    printf "%-10s %-14s %-9s %-16s %-10s %-10s\n" "lab-chr-$i" "$(ip_of "$i")" "$r" "$(lan_gw "$i")/24" "$c" "$(echo "$VLANS" | tr ' ' ',')"
   done
 }
 
-# Run a command as the test client behind router N, e.g.:
-#   client 1 ping 192.168.22.100          (reach router 2's client - works once a VPN links them)
-#   client 2 curl -s http://192.168.21.100/
-#   client 1 serve [port]                 (start a test HTTP endpoint on the client, default port 80)
-#   client 1 exec -- ip addr              (any command inside the namespace)
+client_vlan() {   # $1=instance $2=vlan id : ensure a tagged VLAN subinterface on the client, addressed 10.i.v.100
+  local i="$1" v="$2" ns="client$1"
+  [ "$v" -ge 2 ] && [ "$v" -le 254 ] || die "VLAN id must be 2-254 (lab addressing uses it as an octet)."
+  ip -n "$ns" link show "cli$i.$v" >/dev/null 2>&1 && return 0
+  ip -n "$ns" link add link "cli$i" name "cli$i.$v" type vlan id "$v"
+  ip -n "$ns" addr add "10.$i.$v.100/24" dev "cli$i.$v"
+  ip -n "$ns" link set "cli$i.$v" up
+}
+
+# Run a command as the test client behind router N. Add 'vlan <id>' to act on a tagged VLAN:
+#   client 1 ping 192.168.21.1            (untagged default LAN -> its gateway)
+#   client 1 vlan 10 ping 10.1.10.1       (on VLAN 10 -> that VLAN's gateway)
+#   client 1 vlan 10 serve 80             (a test endpoint on VLAN 10, bound to 10.1.10.100)
+#   client 2 vlan 10 curl http://10.1.10.100/   (reach router 1's VLAN-10 endpoint, once a VPN links the sites)
+#   client 1 exec -- ip -br addr          (any command inside the namespace)
 cmd_client() {
-  local i="${1:?usage: client N <ping|curl|serve|exec|ip> ...}"; shift
-  local ns="client$i"
+  local i="${1:?usage: client N [vlan ID] <ping|curl|serve|exec|ip> ...}"; shift
+  local ns="client$i" src; src=$(lan_cli "$i")
   ip netns list | grep -qw "$ns" || die "no client for router $i (is it up?)"
+  if [ "${1:-}" = "vlan" ]; then
+    local v="${2:?usage: client N vlan ID ...}"; shift 2
+    client_vlan "$i" "$v"; src="10.$i.$v.100"
+  fi
   case "${1:-ip}" in
-    ping)  shift; ip netns exec "$ns" ping -c3 "$@";;
-    curl)  shift; ip netns exec "$ns" curl "$@";;
+    ping)  shift; ip netns exec "$ns" ping -c3 -I "$src" "$@";;
+    curl)  shift; ip netns exec "$ns" curl --interface "$src" "$@";;
     ip)    ip netns exec "$ns" ip -brief addr;;
-    serve) local port="${2:-80}"; echo "serving on $(lan_cli "$i"):$port (Ctrl-C to stop)"; ip netns exec "$ns" python3 -m http.server "$port" --bind "$(lan_cli "$i")";;
+    serve) local port="${2:-80}"; echo "serving on $src:$port (Ctrl-C to stop)"; ip netns exec "$ns" python3 -m http.server "$port" --bind "$src";;
     exec)  shift; [ "${1:-}" = "--" ] && shift; ip netns exec "$ns" "$@";;
     *)     ip netns exec "$ns" "$@";;
   esac
