@@ -87,16 +87,28 @@ ensure_pw() {
   cat "$DATA/admin_pw"
 }
 
+lan_net() { echo "192.168.$((20 + $1))"; }                 # per-instance LAN subnet: router i -> 192.168.(20+i).0/24
+lan_gw()  { echo "$(lan_net "$1").1"; }                     # CHR's LAN (ether2) address = the test client's gateway
+lan_cli() { echo "$(lan_net "$1").100"; }                   # the test client's address behind router i
+
 make_seed() {   # $1 = instance index ; builds a NoCloud cloud-init ISO with a RouterOS first-boot script
-  local i="$1" ip pw dir
-  ip=$(ip_of "$i"); pw=$(cat "$DATA/admin_pw"); dir="$DATA/seed-$i"
+  local i="$1" ip pw dir lnet
+  ip=$(ip_of "$i"); pw=$(cat "$DATA/admin_pw"); dir="$DATA/seed-$i"; lnet=$(lan_net "$i")
   mkdir -p "$dir"
   printf 'instance-id: lab-chr-%s\nlocal-hostname: lab-chr-%s\n' "$i" "$i" > "$dir/meta-data"
   cat > "$dir/user-data" <<RSC
 # RouterOS first-boot config (applied by CHR cloud-init)
+# --- WAN (ether1): reaches TikManager + the internet via the host NAT bridge ---
 /ip address add address=$ip/24 interface=ether1
 /ip route add dst-address=0.0.0.0/0 gateway=$HOST_IP
 /ip dns set servers=$HOST_IP allow-remote-requests=no
+# --- LAN (ether2): the segment the test client sits on, one unique /24 per router (so VPN routes don't collide) ---
+/ip address add address=$lnet.1/24 interface=ether2
+/ip pool add name=lan ranges=$lnet.150-$lnet.200
+/ip dhcp-server add name=lan interface=ether2 address-pool=lan disabled=no lease-time=1h
+/ip dhcp-server network add address=$lnet.0/24 gateway=$lnet.1 dns-server=$lnet.1
+/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment=lab
+# --- management ---
 /ip service enable www
 /ip service set www port=80
 /ip service enable winbox
@@ -104,6 +116,20 @@ make_seed() {   # $1 = instance index ; builds a NoCloud cloud-init ISO with a R
 /system identity set name=lab-chr-$i
 RSC
   xorriso -as mkisofs -quiet -output "$DATA/seed-$i.iso" -volid CIDATA -joliet -rock "$dir/meta-data" "$dir/user-data"
+}
+
+ensure_client() {   # $1 = instance index ; a lightweight netns "client" on router i's LAN (no VM - ~free)
+  local i="$1" ns lnet gw cli
+  ns="client$i"; lnet=$(lan_net "$i"); gw=$(lan_gw "$i"); cli=$(lan_cli "$i")
+  ip netns list | grep -qw "$ns" && return 0
+  ip netns add "$ns"
+  ip link add "cli$i" type veth peer name "cli$i-br"      # one end into the namespace, one onto the LAN bridge
+  ip link set "cli$i-br" master "lan$i"; ip link set "cli$i-br" up
+  ip link set "cli$i" netns "$ns"
+  ip netns exec "$ns" ip addr add "$cli/24" dev "cli$i"
+  ip netns exec "$ns" ip link set "cli$i" up
+  ip netns exec "$ns" ip link set lo up
+  ip netns exec "$ns" ip route add default via "$gw"
 }
 
 running() { [ -f "$DATA/chr-$1.pid" ] && kill -0 "$(cat "$DATA/chr-$1.pid")" 2>/dev/null; }
@@ -115,16 +141,25 @@ start_one() {
   mac=$(mac_of "$i"); disk="$DATA/chr-$i.qcow2"; serial=$((2300 + i))
   [ -f "$disk" ] || qemu-img create -q -f qcow2 -F qcow2 -b "$DATA/chr-base.qcow2" "$disk" >/dev/null
   [ -f "$DATA/seed-$i.iso" ] || make_seed "$i"
+  # WAN NIC (ether1) on the shared management/NAT bridge
   ip tuntap add dev "tap-chr$i" mode tap 2>/dev/null || true
   ip link set "tap-chr$i" master "$BRIDGE"; ip link set "tap-chr$i" up
-  echo ">> starting CHR $i ($(ip_of "$i"), accel=$accel, console telnet 127.0.0.1:$serial)"
+  # LAN NIC (ether2) on this router's own bridge, where its test client lives
+  ip link show "lan$i" >/dev/null 2>&1 || ip link add "lan$i" type bridge
+  ip link set "lan$i" up
+  ip tuntap add dev "tap-lan$i" mode tap 2>/dev/null || true
+  ip link set "tap-lan$i" master "lan$i"; ip link set "tap-lan$i" up
+  echo ">> starting CHR $i (WAN $(ip_of "$i"), LAN $(lan_gw "$i")/24, accel=$accel, console telnet 127.0.0.1:$serial)"
   qemu-system-x86_64 -name "lab-chr-$i" -machine pc -accel "$accel" -cpu qemu64 -smp 1 -m "$RAM" \
     -drive file="$disk",if=virtio,format=qcow2 \
     -drive file="$DATA/seed-$i.iso",media=cdrom \
-    -netdev tap,id=n0,ifname="tap-chr$i",script=no,downscript=no \
-    -device virtio-net-pci,netdev=n0,mac="$mac" \
+    -netdev tap,id=wan,ifname="tap-chr$i",script=no,downscript=no \
+    -device virtio-net-pci,netdev=wan,mac="$mac" \
+    -netdev tap,id=lan,ifname="tap-lan$i",script=no,downscript=no \
+    -device virtio-net-pci,netdev=lan,mac="$(printf '52:54:00:cd:%02x:%02x' "$NET_ID" "$i")" \
     -serial telnet:127.0.0.1:$serial,server,nowait \
     -display none -daemonize -pidfile "$DATA/chr-$i.pid"
+  ensure_client "$i"
 }
 
 cmd_up() {
@@ -142,22 +177,47 @@ cmd_up() {
 Adopt them in TikManager:
   1. Admin -> Settings: set the controller's overlay IP to $HOST_IP (this host, on the lab bridge).
      (If TikManager runs on a DIFFERENT box, add a route to $NET.0/24 via this server, $(hostname -I | awk '{print $1}').)
-  2. Adopt routers -> "...or add one by its address": enter each IP below,
+  2. Adopt routers -> "...or add one by its address": enter each WAN/MGMT IP above,
      username 'admin', password: $(ensure_pw)
   3. Open Winbox on the adopted router - it relays to the real :8291 and the GUI loads.
+
+Each router has a test client behind it (a host on its LAN), for testing an endpoint on each side:
+  - Router i LAN = 192.168.(20+i).0/24  (router 1 -> 192.168.21.0/24, router 2 -> .22, ...) - each its own /24.
+  - The client is the .100 on that LAN. Drive it with:   sudo $0 client <i> ping|curl|serve|exec ...
+  - Example (after you build a site-to-site VPN between two CHRs in TikManager and route their LANs):
+      sudo $0 client 1 serve 80 &                 # test endpoint behind router 1
+      sudo $0 client 2 curl -s http://$(lan_cli 1)/    # reach it from behind router 2, across the tunnel
 
 NOTE
 }
 
 cmd_status() {
-  printf "%-10s %-14s %-9s %-8s\n" INSTANCE IP RUNNING PING
+  printf "%-10s %-14s %-9s %-16s %-10s\n" INSTANCE "WAN/MGMT" RUNNING "LAN (client gw)" CLIENT
   for i in $(seq 1 "$MAX_N"); do
     [ -f "$DATA/chr-$i.pid" ] || continue
-    local r p; r=no; p=no
-    running "$i" && r=yes
-    ping -c1 -W1 "$(ip_of "$i")" >/dev/null 2>&1 && p=yes
-    printf "%-10s %-14s %-9s %-8s\n" "lab-chr-$i" "$(ip_of "$i")" "$r" "$p"
+    local r; r=no; running "$i" && r=yes
+    local c=-; ip netns list 2>/dev/null | grep -qw "client$i" && c=$(lan_cli "$i")
+    printf "%-10s %-14s %-9s %-16s %-10s\n" "lab-chr-$i" "$(ip_of "$i")" "$r" "$(lan_gw "$i")/24" "$c"
   done
+}
+
+# Run a command as the test client behind router N, e.g.:
+#   client 1 ping 192.168.22.100          (reach router 2's client - works once a VPN links them)
+#   client 2 curl -s http://192.168.21.100/
+#   client 1 serve [port]                 (start a test HTTP endpoint on the client, default port 80)
+#   client 1 exec -- ip addr              (any command inside the namespace)
+cmd_client() {
+  local i="${1:?usage: client N <ping|curl|serve|exec|ip> ...}"; shift
+  local ns="client$i"
+  ip netns list | grep -qw "$ns" || die "no client for router $i (is it up?)"
+  case "${1:-ip}" in
+    ping)  shift; ip netns exec "$ns" ping -c3 "$@";;
+    curl)  shift; ip netns exec "$ns" curl "$@";;
+    ip)    ip netns exec "$ns" ip -brief addr;;
+    serve) local port="${2:-80}"; echo "serving on $(lan_cli "$i"):$port (Ctrl-C to stop)"; ip netns exec "$ns" python3 -m http.server "$port" --bind "$(lan_cli "$i")";;
+    exec)  shift; [ "${1:-}" = "--" ] && shift; ip netns exec "$ns" "$@";;
+    *)     ip netns exec "$ns" "$@";;
+  esac
 }
 
 cmd_console() { local i="${1:?usage: console N}"; echo "Serial console for CHR $i (Ctrl-] then 'quit' to leave):"; exec telnet 127.0.0.1 $((2300 + i)); }
@@ -169,8 +229,11 @@ cmd_down() {
     if running "$i"; then kill "$(cat "$DATA/chr-$i.pid")" 2>/dev/null || true; fi
     rm -f "$DATA/chr-$i.pid"
     ip link del "tap-chr$i" 2>/dev/null || true
+    ip link del "tap-lan$i" 2>/dev/null || true
+    ip netns del "client$i" 2>/dev/null || true     # removes the namespace and its veth
+    ip link del "lan$i" 2>/dev/null || true
   done
-  echo ">> all CHRs stopped."
+  echo ">> all CHRs and test clients stopped."
 }
 
 cmd_destroy() {
@@ -188,9 +251,10 @@ cmd_destroy() {
 case "${1:-}" in
   up)      shift; cmd_up "$@";;
   status)  cmd_status;;
+  client)  shift; need_root; cmd_client "$@";;
   console) shift; cmd_console "$@";;
   creds)   cmd_creds;;
   down)    cmd_down;;
   destroy) cmd_destroy;;
-  *) echo "usage: $0 {up [N]|status|console N|creds|down|destroy}"; exit 1;;
+  *) echo "usage: $0 {up [N]|status|client N <ping|curl|serve|exec> ...|console N|creds|down|destroy}"; exit 1;;
 esac

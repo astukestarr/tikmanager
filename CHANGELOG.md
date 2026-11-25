@@ -9,7 +9,10 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
   stands up real MikroTik CHR instances on a single box (the TikManager server is fine): installs QEMU, makes a
   host-local NAT bridge, downloads CHR, and launches N routers each auto-configured (static IP, API, admin password)
   via cloud-init — ready to adopt by address and Winbox into. Uses KVM when present, falls back to QEMU emulation on a
-  VM/VPS without it (keep N small). `up / status / console / creds / down / destroy`. See `deploy/CHR-TESTLAB.md`.
+  VM/VPS without it (keep N small). Each router also gets a **LAN with a lightweight test client** behind it (a network
+  namespace at `192.168.2x.100`), so you can test an endpoint on each side — e.g. serve HTTP behind one router and curl
+  it from behind another across a site-to-site VPN you build in TikManager. `up / status / client / console / creds /
+  down / destroy`. See `deploy/CHR-TESTLAB.md`.
 
 ## 4.9.0-beta.1 - 2026-11-25
 

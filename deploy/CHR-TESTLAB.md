@@ -54,6 +54,21 @@ Then in TikManager: set the **controller's overlay IP** (Admin → Settings) to 
 "…or add one by its address"**, and enter each CHR's IP with `admin` / the password from `creds`. If TikManager runs on
 a *different* host than the one running the CHRs, add a route to `10.77.0.0/24` via the CHR host first.
 
+**Test clients behind each router.** Every CHR comes up with a LAN (ether2) on its own subnet
+(`192.168.21.0/24` for router 1, `.22` for router 2, …) and a lightweight **network-namespace host** sitting on it at
+`.100` — a near-free stand-in for a client device, so you can test an endpoint on each side. Drive it with
+`sudo ./deploy/chr-lab.sh client <N> …`:
+
+```
+sudo ./deploy/chr-lab.sh client 1 ping 192.168.21.1    # client reaches its own router
+sudo ./deploy/chr-lab.sh client 1 serve 80 &           # a test HTTP endpoint behind router 1
+sudo ./deploy/chr-lab.sh client 2 curl -s http://192.168.21.100/   # reach it from behind router 2
+```
+
+The cross-side call works once you **build a site-to-site VPN between the two CHRs in TikManager** and route their LAN
+subnets to each other — which is exactly the end-to-end path a real two-site customer has, now testable with no
+hardware. Each router's LAN is a distinct /24 so the VPN routes never collide.
+
 ### Or on Proxmox
 
 ### On Proxmox
