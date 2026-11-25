@@ -3,6 +3,16 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.9.0-beta.1 - 2026-11-25
+
+- **Hybrid test lab: simulated routers alongside real routers you can Winbox into.** Dev mode's simulator is now
+  per-device instead of all-or-nothing, so a dev/test instance can run many simulated MikroTiks for building and
+  demoing *and* a few real routers (e.g. MikroTik CHR VMs) adopted for real — the real ones are polled live and the
+  Winbox relay reaches their real `:8291`, so the full Winbox GUI works. A new **"Seed demo fleet"** button on the
+  Adopt screen creates six simulated routers across demo clients in one click. Simulated routers show a **sim** marker,
+  and opening Winbox on one connects to a local stand-in (exercises the session/audit flow) rather than a real GUI.
+  See `deploy/CHR-TESTLAB.md`. Real servers are unaffected — every device is treated exactly as before.
+
 ## 4.8.2 - 2026-11-25
 
 - **Port diagram: renamed ports show their number again.** A port renamed with a text suffix (e.g. `ether1-gateway`,

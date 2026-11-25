@@ -34,7 +34,9 @@ class Poller:
         return derive(self.key, f"router-api:{d['id']}")
 
     def client(self, d):
-        if self.s.dev:
+        # Per-device: a router flagged sim=1 (seeded / "Simulate") is faked; sim=0 is a real router even in a dev
+        # instance (so a real CHR can be adopted alongside sims). sim NULL on a legacy dev DB stays simulated.
+        if d.get("sim") or (d.get("sim") is None and self.s.dev):
             return SimRouter(d["id"], d["name"])
         tls = d.get("api_tls_port")
         # HTTPS failed just now: HTTP first for 10 minutes - and HTTPS again at once if HTTP is refused (WebFig over HTTP off)

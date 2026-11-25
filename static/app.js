@@ -535,7 +535,8 @@ async function showAdoption() {
     <p class="small muted">Same command for every router. Needs RouterOS 7 and internet access from the router. Routers can't do anything until a
       technician approves them; if this command ever leaks, an admin can replace it.</p>
     <div class="actions"><button class="btn primary" type="button" id="copy">Copy command</button>
-      ${me.dev ? `<button class="btn" type="button" id="sim">Simulate a router registering (dev)</button>` : ""}
+      ${me.dev ? `<button class="btn" type="button" id="sim">Simulate a router registering (dev)</button>
+        <button class="btn" type="button" id="seedFleet">Seed demo fleet (6)</button>` : ""}
       ${can("settings") ? `<button class="btn danger" type="button" id="rotate">Replace command</button>` : ""}
       <span class="status" id="cStatus"></span></div>
     <h3 style="margin-top:18px">Over your own network (Netbird, Tailscale, routed WAN…)</h3>
@@ -544,8 +545,9 @@ async function showAdoption() {
   const say = (t, k) => { $("cStatus").textContent = t; $("cStatus").className = `status ${k || ""}`; };
   $("copy").addEventListener("click", async () => { await navigator.clipboard.writeText($("cmd").textContent); say("Copied.", "ok"); });
   $("sim")?.addEventListener("click", async () => { await post("/api/dev/register"); say("A simulated router registered.", "ok"); });
+  $("seedFleet")?.addEventListener("click", async () => { const b = $("seedFleet"); b.disabled = true; try { const r = await post("/api/dev/seed-fleet", { count: 6 }); say(`Seeded ${r.added} simulated routers across demo clients.`, "ok"); } catch (err) { say(err.message, "err"); } finally { b.disabled = false; } });
   $("copyD")?.addEventListener("click", async () => { await navigator.clipboard.writeText($("cmdD").textContent); const e = $("cStatusD"); e.textContent = "Copied."; e.className = "status ok"; });
-  $("simD")?.addEventListener("click", async () => { try { await post("/api/devices/manual", { ip: `100.64.0.${2 + Math.floor(Math.random() * 250)}`, admin_user: "admin", admin_pass: "x" }); const e = $("cStatusD"); e.textContent = "A simulated direct router was added."; e.className = "status ok"; } catch (err) { const e = $("cStatusD"); e.textContent = err.message; e.className = "status err"; } });
+  $("simD")?.addEventListener("click", async () => { try { await post("/api/devices/manual", { ip: `100.64.0.${2 + Math.floor(Math.random() * 250)}`, admin_user: "admin", admin_pass: "x", sim: true }); const e = $("cStatusD"); e.textContent = "A simulated direct router was added."; e.className = "status ok"; } catch (err) { const e = $("cStatusD"); e.textContent = err.message; e.className = "status err"; } });
   $("mAdd")?.addEventListener("click", async () => {
     const st = $("mStatus"); st.textContent = "Connecting…"; st.className = "status";
     try {
@@ -638,7 +640,7 @@ async function router(id) {
     <aside class="card dev-side">
       <div class="dev-head">${thumbImg(d, "thumb-lg")}</div>
       <div class="dev-name">${esc(d.name)}</div>
-      <div class="dev-sub">${stateDot(d)}${d.state === "adopted" ? ` <span class="muted small">· seen ${ago(d.last_seen)}</span>` : ""}</div>
+      <div class="dev-sub">${stateDot(d)}${d.state === "adopted" ? ` <span class="muted small">· seen ${ago(d.last_seen)}</span>` : ""}${d.sim ? ` <span class="pill" title="A simulated test router (not real hardware). Winbox opens a stand-in, not a real RouterOS session.">sim</span>` : ""}</div>
       ${(d.tags || []).length ? `<div class="tag-row dev-tags">${tagPills(d.tags)}</div>` : ""}
       ${isTech() && d.notes ? `<div class="dev-notes small"><b>Notes</b><div>${esc(d.notes)}</div></div>` : ""}
       ${d.state !== "adopted" ? `<p class="small">Registered ${ago(d.first_seen)} from <span class="mono">${esc(d.public_ip || "")}</span>. Approve it to pick its client and start monitoring.</p>

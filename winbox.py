@@ -86,7 +86,9 @@ class WinboxRelay:
             ipaddress.ip_address(allow_ip)
         except ValueError:
             raise ValueError("That isn't an IP address.") from None
-        target = ("127.0.0.1", 18291) if getattr(self.s, "dev", False) else (d["tunnel_ip"], int(target_port or 8291))
+        # Simulated routers have no real Winbox service: relay to the dev echo stand-in (exercises the session/audit
+        # flow). Real routers - including a real CHR adopted in a dev/hybrid instance - relay to their own :8291.
+        target = ("127.0.0.1", 18291) if d.get("sim") else (d["tunnel_ip"], int(target_port or 8291))
         with self.lock:
             mine = next((x for x in self.sessions.values() if x["device_id"] == d["id"] and x["user"] == user), None)
             if mine:   # one session per technician per router: reuse it (new address, fresh timer)
