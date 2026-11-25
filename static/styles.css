@@ -605,7 +605,9 @@ button.bk-tile { text-align: left; cursor: pointer; font: inherit; color: inheri
 .pt-n { pointer-events: none; } .pt-poe { position: absolute; left: 2px; top: 1px; font-size: 9px; font-style: normal; } .pt-up { position: absolute; right: 2px; top: 0; font-size: 10px; font-style: normal; }
 .pt-1g, .sw2.pt-1g { background: #3cb371; color: #fff; border-color: #2f9a60; } .pt-100m, .sw2.pt-100m { background: #c8b400; color: #fff; border-color: #a99800; }
 .pt-25g, .sw2.pt-25g { background: #1aa6a6; color: #fff; border-color: #148a8a; } .pt-10g, .sw2.pt-10g { background: #2f7cf6; color: #fff; border-color: #2266d0; }
-.pt-down, .sw2.pt-down { background: var(--bg); color: var(--muted); } .pt-off, .sw2.pt-off { background: var(--border); color: var(--muted); text-decoration: line-through; }
+.pt-down, .sw2.pt-down { background: var(--bg); color: var(--muted); }
+.pt-off, .sw2.pt-off { color: var(--muted); text-decoration: line-through;
+  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--muted) 42%, transparent) 0 2px, transparent 2px 5px), var(--bg); }
 .pt-native { background: var(--bg); } .pt-none { background: transparent; color: var(--muted); border-style: dashed; }
 .pt-tag, .sw2.pt-tag { background: #3cb371; color: #fff; border-color: #2f9a60; } .pt-nat, .sw2.pt-nat { background: #2f7cf6; color: #fff; border-color: #2266d0; }
 .pt-blk, .sw2.pt-blk { background: var(--border); color: var(--muted); }

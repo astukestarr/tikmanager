@@ -3,6 +3,12 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.8.1-beta.1 - 2026-11-25
+
+- **Port diagram: "Disabled" and "No link" ports no longer look the same.** On a router's Ports tab, disabled ports
+  are now drawn with a diagonal hatch instead of a flat grey fill, so they read as distinct from unconnected ("No
+  link") ports in both light and dark themes — the two fill colours were nearly identical before.
+
 ## 4.8.0 - 2026-11-24
 
 - **Sign in with any OpenID Connect provider (Pocket ID, Authentik, Keycloak, Okta, Google…).** Alongside — or
