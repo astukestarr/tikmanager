@@ -32,6 +32,30 @@ can exercise the session / audit / Security-page flow), **not** a real RouterOS 
 MikroTik **CHR** is the real RouterOS as a VM. The free licence (`p1`, applied automatically on the unlimited trial)
 caps each interface at 1 Mbit/s — fine for a test lab.
 
+### Easiest: on one Ubuntu host with `chr-lab.sh` (no Proxmox)
+
+If you just have a single Ubuntu/Debian server (the box TikManager runs on is fine), `deploy/chr-lab.sh` brings up real
+CHRs on it under QEMU — it installs QEMU, makes a host-local NAT bridge (`10.77.0.0/24`), downloads CHR, and launches
+N instances each with a static IP, `www` (API) and an admin password set automatically via cloud-init.
+
+```
+sudo ./deploy/chr-lab.sh up 1       # start with 1 to prove it, then: up 2 / up 3
+sudo ./deploy/chr-lab.sh status     # IPs + reachability
+sudo ./deploy/chr-lab.sh creds      # the generated admin password
+sudo ./deploy/chr-lab.sh console 1  # serial console to CHR 1, if you need to poke it by hand
+sudo ./deploy/chr-lab.sh down       # stop them
+```
+
+**No KVM? It still works.** On a VM/VPS without nested virtualisation the script falls back to QEMU emulation (TCG):
+correct but CPU-heavy and slow to boot, so keep it to **2–3 CHRs** on a 2-vCPU box — the free simulated routers cover
+breadth, the CHRs just give you a couple of real-Winbox targets. With `/dev/kvm` present it uses KVM automatically.
+
+Then in TikManager: set the **controller's overlay IP** (Admin → Settings) to `10.77.0.1`, open **Adopt routers →
+"…or add one by its address"**, and enter each CHR's IP with `admin` / the password from `creds`. If TikManager runs on
+a *different* host than the one running the CHRs, add a route to `10.77.0.0/24` via the CHR host first.
+
+### Or on Proxmox
+
 ### On Proxmox
 1. Download the CHR disk image from mikrotik.com → *Cloud Hosted Router* → the current `7.x` **stable**, "Raw disk
    image" (`chr-7.x.img.zip`); unzip to `chr-7.x.img`.

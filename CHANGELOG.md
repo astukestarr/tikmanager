@@ -3,6 +3,14 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.9.0-beta.2 - 2026-11-25
+
+- **`deploy/chr-lab.sh`: run real CHR routers on one Ubuntu host, no Proxmox.** For the hybrid test lab, a script that
+  stands up real MikroTik CHR instances on a single box (the TikManager server is fine): installs QEMU, makes a
+  host-local NAT bridge, downloads CHR, and launches N routers each auto-configured (static IP, API, admin password)
+  via cloud-init — ready to adopt by address and Winbox into. Uses KVM when present, falls back to QEMU emulation on a
+  VM/VPS without it (keep N small). `up / status / console / creds / down / destroy`. See `deploy/CHR-TESTLAB.md`.
+
 ## 4.9.0-beta.1 - 2026-11-25
 
 - **Hybrid test lab: simulated routers alongside real routers you can Winbox into.** Dev mode's simulator is now
