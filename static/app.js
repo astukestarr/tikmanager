@@ -535,8 +535,7 @@ async function showAdoption() {
     <p class="small muted">Same command for every router. Needs RouterOS 7 and internet access from the router. Routers can't do anything until a
       technician approves them; if this command ever leaks, an admin can replace it.</p>
     <div class="actions"><button class="btn primary" type="button" id="copy">Copy command</button>
-      ${me.dev ? `<button class="btn" type="button" id="sim">Simulate a router registering (dev)</button>
-        <button class="btn" type="button" id="seedFleet">Seed demo fleet (6)</button>` : ""}
+      ${me.dev ? `<button class="btn" type="button" id="sim">Simulate a router registering (dev)</button>` : ""}
       ${can("settings") ? `<button class="btn danger" type="button" id="rotate">Replace command</button>` : ""}
       <span class="status" id="cStatus"></span></div>
     <h3 style="margin-top:18px">Over your own network (Netbird, Tailscale, routed WAN…)</h3>
@@ -545,9 +544,8 @@ async function showAdoption() {
   const say = (t, k) => { $("cStatus").textContent = t; $("cStatus").className = `status ${k || ""}`; };
   $("copy").addEventListener("click", async () => { await navigator.clipboard.writeText($("cmd").textContent); say("Copied.", "ok"); });
   $("sim")?.addEventListener("click", async () => { await post("/api/dev/register"); say("A simulated router registered.", "ok"); });
-  $("seedFleet")?.addEventListener("click", async () => { const b = $("seedFleet"); b.disabled = true; try { const r = await post("/api/dev/seed-fleet", { count: 6 }); say(`Seeded ${r.added} simulated routers across demo clients.`, "ok"); } catch (err) { say(err.message, "err"); } finally { b.disabled = false; } });
   $("copyD")?.addEventListener("click", async () => { await navigator.clipboard.writeText($("cmdD").textContent); const e = $("cStatusD"); e.textContent = "Copied."; e.className = "status ok"; });
-  $("simD")?.addEventListener("click", async () => { try { await post("/api/devices/manual", { ip: `100.64.0.${2 + Math.floor(Math.random() * 250)}`, admin_user: "admin", admin_pass: "x", sim: true }); const e = $("cStatusD"); e.textContent = "A simulated direct router was added."; e.className = "status ok"; } catch (err) { const e = $("cStatusD"); e.textContent = err.message; e.className = "status err"; } });
+  $("simD")?.addEventListener("click", async () => { try { await post("/api/devices/manual", { ip: `100.64.0.${2 + Math.floor(Math.random() * 250)}`, admin_user: "admin", admin_pass: "x" }); const e = $("cStatusD"); e.textContent = "A simulated direct router was added."; e.className = "status ok"; } catch (err) { const e = $("cStatusD"); e.textContent = err.message; e.className = "status err"; } });
   $("mAdd")?.addEventListener("click", async () => {
     const st = $("mStatus"); st.textContent = "Connecting…"; st.className = "status";
     try {
@@ -640,7 +638,7 @@ async function router(id) {
     <aside class="card dev-side">
       <div class="dev-head">${thumbImg(d, "thumb-lg")}</div>
       <div class="dev-name">${esc(d.name)}</div>
-      <div class="dev-sub">${stateDot(d)}${d.state === "adopted" ? ` <span class="muted small">· seen ${ago(d.last_seen)}</span>` : ""}${d.sim ? ` <span class="pill" title="A simulated test router (not real hardware). Winbox opens a stand-in, not a real RouterOS session.">sim</span>` : ""}</div>
+      <div class="dev-sub">${stateDot(d)}${d.state === "adopted" ? ` <span class="muted small">· seen ${ago(d.last_seen)}</span>` : ""}</div>
       ${(d.tags || []).length ? `<div class="tag-row dev-tags">${tagPills(d.tags)}</div>` : ""}
       ${isTech() && d.notes ? `<div class="dev-notes small"><b>Notes</b><div>${esc(d.notes)}</div></div>` : ""}
       ${d.state !== "adopted" ? `<p class="small">Registered ${ago(d.first_seen)} from <span class="mono">${esc(d.public_ip || "")}</span>. Approve it to pick its client and start monitoring.</p>
@@ -1715,55 +1713,16 @@ async function editUserDialog(u, orgs) {
 }
 
 // --- Admin: branding, technicians, system ---------------------------------------------------------------------
-const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["api", "API access"], ["collectors", "Collectors"], ["security", "Updates & Security"], ["system", "Settings"], ["tiklab", "TikLab"]];
-const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), api: can("settings"), collectors: can("settings"), security: can("settings"), system: can("settings") || can("alerts"), tiklab: !!me.dev })[k];
+const ADMIN_TABS = [["branding", "Branding"], ["techs", "Technicians"], ["integrations", "Integrations"], ["api", "API access"], ["collectors", "Collectors"], ["security", "Updates & Security"], ["system", "Settings"]];
+const adminTabOk = (k) => ({ branding: can("settings"), techs: can("techs") || isTech(), integrations: can("integrations"), api: can("settings"), collectors: can("settings"), security: can("settings"), system: can("settings") || can("alerts") })[k];
 async function admin(tab) {
   tab = tab && adminTabOk(tab) ? tab : (ADMIN_TABS.find(([k]) => adminTabOk(k)) || ["techs"])[0];
   $("main").innerHTML = `<h1>Admin</h1><div class="tabs" role="tablist">
       ${ADMIN_TABS.filter(([k]) => adminTabOk(k)).map(([k, l]) => `<button type="button" role="tab" data-tab="${k}" class="${k === tab ? "active" : ""}">${l}</button>`).join("")}
     </div><div id="adminBody"></div>`;
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => admin(b.dataset.tab)));
-  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, api: adminApi, collectors: adminCollectors, security: adminSecurity, system: adminSystem, tiklab: adminTikLab };
+  const tabs = { branding: adminBranding, techs: adminTechs, integrations: adminIntegrations, api: adminApi, collectors: adminCollectors, security: adminSecurity, system: adminSystem };
   await (tabs[tab] || adminBranding)();
-}
-
-// TikLab (dev only): the test-lab home - simulated routers managed here, real CHR routers run on the host via chr-lab.sh
-async function adminTikLab() {
-  const l = await api("/api/dev/lab");
-  const simRows = l.sims.length
-    ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Client</th><th>Model</th><th>Status</th></tr></thead><tbody>
-        ${l.sims.map((d) => `<tr class="click" data-dev="${d.id}"><td>${esc(d.name)}</td><td>${esc(d.org || "")}</td><td class="small">${esc(d.model || "")}</td>
-          <td>${d.online ? `<span class="status ok">online</span>` : `<span class="status warn">offline</span>`}</td></tr>`).join("")}</tbody></table></div>`
-    : `<p class="muted small">No simulated routers yet. Seed a fleet to get started.</p>`;
-  const realRows = l.real.length
-    ? `<div class="table-wrap"><table><thead><tr><th>Router</th><th>Client</th><th>Model</th><th>Address</th><th>Status</th></tr></thead><tbody>
-        ${l.real.map((d) => `<tr class="click" data-dev="${d.id}"><td>${esc(d.name)}</td><td>${esc(d.org || "")}</td><td class="small">${esc(d.model || "")}</td>
-          <td class="mono small">${esc(d.tunnel_ip || "")}</td><td>${d.online ? `<span class="status ok">online</span>` : `<span class="status warn">offline</span>`}</td></tr>`).join("")}</tbody></table></div>`
-    : `<p class="muted small">No real routers adopted yet. Bring up CHRs on the host (below), then adopt them by address.</p>`;
-  $("adminBody").innerHTML = `
-    <div class="card"><div class="row"><h2>Simulated routers</h2><span class="spacer"></span><span class="pill">${l.sims.length}</span></div>
-      <p class="muted small">Fake MikroTiks for building and demoing - no hardware. They run in-process; Winbox opens a stand-in, not a real session.</p>
-      ${simRows}
-      <div class="actions">
-        <label>How many <input id="tlN" type="number" min="1" max="20" value="6" class="wg-port-input"></label>
-        <button class="btn primary" type="button" id="tlSeed">Seed fleet</button>
-        <button class="btn danger" type="button" id="tlClear" ${l.sims.length ? "" : "disabled"}>Remove all simulated</button>
-        <span class="status" id="tlStatus"></span></div></div>
-
-    <div class="card"><div class="row"><h2>Real routers (CHR)</h2><span class="spacer"></span><span class="pill">${l.real.length}</span></div>
-      <p class="muted small">Real RouterOS you can Winbox into, run on the TikManager host with <span class="mono">deploy/chr-lab.sh</span>.
-        These can't be launched from here (they need root + QEMU on the server) - run the commands over SSH, then adopt each by address.</p>
-      ${realRows}
-      <div class="code">sudo ./deploy/chr-lab.sh up 3        # bring up 3 CHRs (+ a test client on each)
-sudo ./deploy/chr-lab.sh status      # IPs, clients, VLANs
-sudo ./deploy/chr-lab.sh creds       # the admin password to adopt with
-sudo ./deploy/chr-lab.sh client 1 vlan 10 ping 10.1.10.1</div>
-      <p class="small muted">Then: set the controller overlay IP${l.controller_ip ? ` (now <span class="mono">${esc(l.controller_ip)}</span>)` : ""} to the lab bridge <span class="mono">10.77.0.1</span> in
-        <b>Settings</b>, and adopt each CHR with <b>Adopt routers &rarr; add by address</b>. Full guide: <span class="mono">deploy/CHR-TESTLAB.md</span>.</p></div>`;
-  document.querySelectorAll("#adminBody tr[data-dev]").forEach((tr) => tr.addEventListener("click", () => go("router", tr.dataset.dev)));
-  const say = (t, k) => { $("tlStatus").textContent = t; $("tlStatus").className = `status ${k || ""}`; };
-  $("tlSeed").addEventListener("click", async () => { const b = $("tlSeed"); b.disabled = true; try { const r = await post("/api/dev/seed-fleet", { count: +$("tlN").value || 6 }); say(`Seeded ${r.added} routers.`, "ok"); adminTikLab(); } catch (e) { say(e.message, "err"); b.disabled = false; } });
-  $("tlClear").addEventListener("click", async () => { if (!confirm("Remove every simulated router? Real routers and their test clients are untouched.")) return; try { const r = await post("/api/dev/clear-sims"); say(`Removed ${r.removed} routers.`, "ok"); adminTikLab(); } catch (e) { say(e.message, "err"); } });
 }
 
 async function adminBranding() {

@@ -89,7 +89,6 @@ def _device_row(salt, d):
         "firmware_upgrade": d.get("fw_upgrade"),
         "factory_version": d.get("fw_factory"),
         "security_target": d.get("sec_target"),
-        "sim": bool(d.get("sim")),               # a lab router (test environment), not a customer's
     }
 
 

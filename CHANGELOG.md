@@ -3,6 +3,13 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.9.0-beta.4 - 2026-11-27
+
+- **Removed the hybrid test lab.** The per-device simulator flag, the "Seed demo fleet" seeder, the dev-only **TikLab**
+  Admin section, the `deploy/chr-lab.sh` / `deploy/CHR-TESTLAB.md` CHR setup, and the `/api/dev/lab`,
+  `/api/dev/seed-fleet` and `/api/dev/clear-sims` endpoints are all gone. Dev mode's simulator is back to its original
+  all-or-nothing behaviour. The upgrade self-heal and diagnostics bundle from beta.3 are kept.
+
 ## 4.9.0-beta.3 - 2026-11-27
 
 - **Upgrades no longer show a false "update failure" when a router just comes back slowly.** A big router behind a
@@ -20,30 +27,6 @@ safe to upgrade with the button; **major** (x.0.0) = changes that need manual st
   events — and **drops** every public/WAN/tunnel IP, MAC and key. Names, serials and keys become **stable one-way
   hashes** (`router-7f3a2c`), so the same router reads the same across a bundle and across repeat submissions ("it
   happened again") without anyone learning which router it is. Review it on screen, then copy or download the JSON.
-
-## 4.9.0-beta.2 - 2026-11-25
-
-- **TikLab (Admin → TikLab, dev mode).** A home for the test lab: manage the simulated fleet right there — seed a batch
-  or remove them all — and see the real CHR routers you've adopted, with the `chr-lab.sh` commands to bring more up.
-- **`deploy/chr-lab.sh`: run real CHR routers on one Ubuntu host, no Proxmox.** For the hybrid test lab, a script that
-  stands up real MikroTik CHR instances on a single box (the TikManager server is fine): installs QEMU, makes a
-  host-local NAT bridge, downloads CHR, and launches N routers each auto-configured (static IP, API, admin password)
-  via cloud-init — ready to adopt by address and Winbox into. Uses KVM when present, falls back to QEMU emulation on a
-  VM/VPS without it (keep N small). Each router also gets a **LAN with a lightweight test client** behind it (a network
-  namespace at `192.168.2x.100`), so you can test an endpoint on each side — e.g. serve HTTP behind one router and curl
-  it from behind another across a site-to-site VPN you build in TikManager. Each LAN is a **VLAN-aware trunk** seeded
-  with VLANs 10/20 (manageable in the Ports tab), and `client N vlan <id> …` drops the test host onto any VLAN.
-  `up / status / client / console / creds / down / destroy`. See `deploy/CHR-TESTLAB.md`.
-
-## 4.9.0-beta.1 - 2026-11-25
-
-- **Hybrid test lab: simulated routers alongside real routers you can Winbox into.** Dev mode's simulator is now
-  per-device instead of all-or-nothing, so a dev/test instance can run many simulated MikroTiks for building and
-  demoing *and* a few real routers (e.g. MikroTik CHR VMs) adopted for real — the real ones are polled live and the
-  Winbox relay reaches their real `:8291`, so the full Winbox GUI works. A new **"Seed demo fleet"** button on the
-  Adopt screen creates six simulated routers across demo clients in one click. Simulated routers show a **sim** marker,
-  and opening Winbox on one connects to a local stand-in (exercises the session/audit flow) rather than a real GUI.
-  See `deploy/CHR-TESTLAB.md`. Real servers are unaffected — every device is treated exactly as before.
 
 ## 4.8.2 - 2026-11-25
 

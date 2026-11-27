@@ -2078,15 +2078,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"leases": poller.client(d).dhcp_leases(), "read_at": now()})
             except RouterError as e:
                 raise HttpError(502, f"Couldn't read the DHCP leases: {e}") from None
-        if path == "/api/dev/lab":   # dev only: TikLab summary (simulated fleet + CHR host-lab hints)
-            if not settings.dev:
-                raise HttpError(404, "Not found.")
-            self.require(tech=True)
-            sims = db.q("""SELECT d.id, d.name, d.model, d.online, o.name AS org FROM devices d
-                           LEFT JOIN orgs o ON o.id=d.org_id WHERE d.sim=1 ORDER BY d.id""")
-            real = db.q("""SELECT d.id, d.name, d.model, d.online, d.tunnel_ip, o.name AS org FROM devices d
-                           LEFT JOIN orgs o ON o.id=d.org_id WHERE (d.sim=0 OR d.sim IS NULL) AND d.state='adopted' ORDER BY d.name""")
-            return self.json({"sims": sims, "real": real, "controller_ip": settings.direct_controller_ip or ""})
         if m := re.fullmatch(r"/api/devices/(\d+)", path):
             s = self.require()
             d = self.device_for(s, m.group(1))
@@ -2523,9 +2514,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, "Enter an admin username TikManager can use once to set the router up.")
             port = int(b.get("api_port") or 0) or 80
             tls = int(b.get("api_tls_port") or 0) or None
-            sim = bool(b.get("sim")) and settings.dev   # dev-only: a simulated router, not actually reached
-            if sim:   # stand in for a reachable router without connecting
-                ident, board, serial, ver = host, "RB5009UG+S+", f"SIMD{secrets.randbelow(10**6):06d}", "7.19.4 (stable)"
+            if settings.dev:   # dev stands in for a reachable router
+                cl, ident, board, serial, ver = SimRouter(0, host), host, "RB5009UG+S+", f"SIMD{secrets.randbelow(10**6):06d}", "7.19.4 (stable)"
             else:
                 cl = RouterOS(host, user, pw, port=port, tls_port=tls)
                 try:   # prove we can reach it and read who it is, before creating anything
@@ -2539,13 +2529,12 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:  # noqa: BLE001 - surface the router/connection error to the tech
                     raise HttpError(400, f"Couldn't reach the router at {host} over your network: {str(e)[:200]}")
             d = self.register_router(None, str(ident)[:80], board[:60], serial[:40], ver[:40],
-                                     port, conn_mode="direct", mgmt_ip=host, sim=1 if sim else 0)
-            if not sim:
-                try:   # set up the controller-only API user + web service, then forget the admin credential
-                    cl.provision_direct(settings.direct_controller_ip, derive(KEY, f"router-api:{d['id']}"))
-                except Exception as e:  # noqa: BLE001 - roll the record back so a half-set-up router doesn't linger
-                    db.run("DELETE FROM devices WHERE id=? AND state='pending'", (d["id"],))
-                    raise HttpError(400, f"Reached the router but couldn't set it up: {str(e)[:200]}")
+                                     port, conn_mode="direct", mgmt_ip=host)
+            try:   # set up the controller-only API user + web service, then forget the admin credential
+                cl.provision_direct(settings.direct_controller_ip, derive(KEY, f"router-api:{d['id']}"))
+            except Exception as e:  # noqa: BLE001 - roll the record back so a half-set-up router doesn't linger
+                db.run("DELETE FROM devices WHERE id=? AND state='pending'", (d["id"],))
+                raise HttpError(400, f"Reached the router but couldn't set it up: {str(e)[:200]}")
             db.audit(s["email"], "router added directly (no WireGuard)", f"{ident} at {host}", self.client_ip())
             return self.json({"ok": True, "id": d["id"]})
         if path == "/api/dev/register":   # dev only: stands in for a router running the adoption command
@@ -2556,23 +2545,8 @@ class Handler(BaseHTTPRequestHandler):
             self.register_router(base64.b64encode(secrets.token_bytes(32)).decode(),
                                  r.choice(["MikroTik", "Main-Office", "Branch-Router", "Clinic-GW", "Warehouse-AP"]) + f"-{r.randint(1, 99)}",
                                  r.choice(["RB5009UG+S+", "hAP ax3", "CCR2004-16G-2S+", "hEX S"]), f"HG{r.randint(10 ** 7, 10 ** 8 - 1):X}",
-                                 "7.19.4 (stable)", sim=1)
+                                 "7.19.4 (stable)")
             return self.json({"ok": True})
-        if path == "/api/dev/seed-fleet":   # dev only: a ready-made test fleet of simulated routers across demo clients
-            if not settings.dev:
-                raise HttpError(404, "Not found.")
-            self.require(tech=True, write=True)
-            count = max(1, min(20, int((self.body() or {}).get("count") or 6)))
-            added = self.seed_demo_fleet(count)
-            return self.json({"ok": True, "added": added})
-        if path == "/api/dev/clear-sims":   # dev only: remove every simulated router (leaves real routers and clients)
-            if not settings.dev:
-                raise HttpError(404, "Not found.")
-            s = self.require(tech=True, write=True)
-            n = db.one("SELECT COUNT(*) AS n FROM devices WHERE sim=1")["n"]
-            db.run("DELETE FROM devices WHERE sim=1")
-            db.audit(s["email"], "simulated routers removed", f"{n} routers", self.client_ip())
-            return self.json({"ok": True, "removed": n})
         if m := re.fullmatch(r"/api/devices/(\d+)/backup", path):
             s = self.require(tech=True, write=True)
             d = self.device_for(s, m.group(1))
@@ -4489,10 +4463,9 @@ class Handler(BaseHTTPRequestHandler):
         self.controller_settings()
         self.send(200, adoption.stage1(settings, t).encode(), "text/plain; charset=utf-8")
 
-    def register_router(self, pubkey, identity, model, serial, version, api_port=None, conn_mode="wireguard", mgmt_ip=None, sim=0):
+    def register_router(self, pubkey, identity, model, serial, version, api_port=None, conn_mode="wireguard", mgmt_ip=None):
         """Create or update the router's record; returns it. A known key (WireGuard) or serial (direct) keeps its record
-        (re-running the command); anything new waits for a tech to approve it. sim=1 marks a simulated test router
-        (set only by dev-only paths); a re-registration keeps whatever sim flag the record already had."""
+        (re-running the command); anything new waits for a tech to approve it."""
         ip = self.client_ip()
         if conn_mode == "direct":
             # Direct (overlay) routers are keyed off serial (fallback identity) and reached at the overlay IP they came
@@ -4512,8 +4485,8 @@ class Handler(BaseHTTPRequestHandler):
             if db.one("SELECT id FROM devices WHERE tunnel_ip=?", (addr,)):   # the management address must be unique (one router per overlay IP)
                 raise HttpError(400, f"Another router is already managed at {addr}. Each router needs its own overlay address.")
             did = db.run("""INSERT INTO devices (org_id, name, name_custom, identity, model, serial, version, tunnel_ip, conn_mode, state,
-                            public_ip, first_seen, created_at, created_by, api_port, sim) VALUES (NULL,?,0,?,?,?,?,?,'direct','pending',?,?,?,'router',?,?)""",
-                         (identity or serial or "New router", identity, model, serial, version, addr, ip, now(), now(), api_port, 1 if sim else 0))
+                            public_ip, first_seen, created_at, created_by, api_port) VALUES (NULL,?,0,?,?,?,?,?,'direct','pending',?,?,?,'router',?)""",
+                         (identity or serial or "New router", identity, model, serial, version, addr, ip, now(), now(), api_port))
             db.event(did, None, "registered", f"direct {model} {serial} from {addr}".strip())
             db.audit("router", "router registered (direct, waiting for approval)", identity or serial, ip)
             return db.one("SELECT * FROM devices WHERE id=?", (did,))
@@ -4529,37 +4502,11 @@ class Handler(BaseHTTPRequestHandler):
             raise HttpError(429, "Too many routers are waiting for approval.")
         used = {r["tunnel_ip"] for r in db.q("SELECT tunnel_ip FROM devices WHERE tunnel_ip IS NOT NULL")}
         did = db.run("""INSERT INTO devices (org_id, name, name_custom, identity, model, serial, version, wg_pubkey, tunnel_ip, state,
-                        public_ip, first_seen, created_at, created_by, api_port, sim) VALUES (NULL,?,0,?,?,?,?,?,?,'pending',?,?,?,'router',?,?)""",
-                     (identity or serial or "New router", identity, model, serial, version, pubkey, wg.next_ip(used), ip, now(), now(), api_port, 1 if sim else 0))
+                        public_ip, first_seen, created_at, created_by, api_port) VALUES (NULL,?,0,?,?,?,?,?,?,'pending',?,?,?,'router',?)""",
+                     (identity or serial or "New router", identity, model, serial, version, pubkey, wg.next_ip(used), ip, now(), now(), api_port))
         db.event(did, None, "registered", f"{model} {serial} from {ip}".strip())
         db.audit("router", "router registered (waiting for approval)", identity or serial, ip)
         return db.one("SELECT * FROM devices WHERE id=?", (did,))
-
-    def seed_demo_fleet(self, count):
-        """Dev test lab: create `count` adopted simulated routers (sim=1) spread across a few demo clients, each ready
-        to open (ports/VLANs/firewall/VPNs all come from routeros.SimRouter, keyed on the device id)."""
-        r = __import__("random").Random()
-        orgs = []
-        for n in ("Rebein Brothers", "Acme Dental", "Hillside Clinic"):   # reuse the demo-data client names
-            o = db.one("SELECT id FROM orgs WHERE name=?", (n,))
-            orgs.append(o["id"] if o else db.run("INSERT INTO orgs (name, created_at) VALUES (?,?)", (n, now())))
-        roles = ["Main-Office", "Branch-GW", "Clinic-FW", "Warehouse-AP", "HQ-Core", "Remote-Site", "Guest-WiFi", "DC-Edge"]
-        used = {x["tunnel_ip"] for x in db.q("SELECT tunnel_ip FROM devices WHERE tunnel_ip IS NOT NULL")}
-        added = 0
-        for i in range(count):
-            ip = wg.next_ip(used)
-            used.add(ip)
-            org, name = orgs[i % len(orgs)], f"{r.choice(roles)}-{r.randint(1, 99)}"
-            did = db.run("INSERT INTO devices (org_id, name, name_custom, identity, model, serial, version, wg_pubkey, tunnel_ip, "
-                         "conn_mode, state, adopted_at, first_seen, created_at, created_by, sim) "
-                         "VALUES (?,?,0,?,?,?,?,?,?,'wireguard','adopted',?,?,?,'seed',1)",
-                         (org, name, name, "RB5009UG+S+", f"SIM{r.randint(10 ** 7, 10 ** 8 - 1):X}", "7.19.4 (stable)",
-                          base64.b64encode(secrets.token_bytes(32)).decode(), ip, now(), now(), now()))
-            db.run("UPDATE devices SET model=? WHERE id=?", (SimRouter(did).model, did))   # match what the sim reports
-            db.event(did, org, "seeded", "simulated test router")
-            added += 1
-        db.audit("seed", "demo fleet seeded", f"{added} simulated routers", self.client_ip())
-        return added
 
     def adopt_register(self, t, mode=None):
         self.check_enroll(t)
