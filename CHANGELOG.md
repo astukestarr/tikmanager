@@ -3,6 +3,24 @@
 Versions follow [semantic versioning](https://semver.org): **patch** (1.0.x) = fixes, **minor** (1.x.0) = new features,
 safe to upgrade with the button; **major** (x.0.0) = changes that need manual steps (described here).
 
+## 4.9.0-beta.3 - 2026-11-27
+
+- **Upgrades no longer show a false "update failure" when a router just comes back slowly.** A big router behind a
+  tunnel can take longer than the wait window to answer after a RouterOS install; the job was then marked failed even
+  though the router returned fine on the new version, and the scary note stuck until someone cleared it by hand. A new
+  reconcile pass now watches for this: when a device from a "didn't come back" failure polls back online **on the target
+  version**, the job self-heals to *done* ("came back late"), the device event and ConnectWise ticket are corrected, and
+  — if the job also wanted RouterBOARD firmware and it's still behind — the firmware step is re-queued so it isn't left
+  stranded (unless too much time has passed, in which case it's just flagged for the operator). The real danger (a router
+  that never comes back) still fails as before. The RouterOS and firmware **wait windows are now adjustable** on the
+  Upgrades page (`upgrade_install_wait_min` / `upgrade_back_wait_min`) for slow boards or slow tunnels.
+- **Diagnostics bundle (router page → "Diagnostics bundle…", technicians).** A scrubbed support bundle a tech can send
+  in instead of a screenshot — which leaks the public WAN IP, serial and site name. Built on an **allowlist** (only
+  known-safe, useful fields), it keeps what's needed to debug — model, board, versions, the upgrade timeline and device
+  events — and **drops** every public/WAN/tunnel IP, MAC and key. Names, serials and keys become **stable one-way
+  hashes** (`router-7f3a2c`), so the same router reads the same across a bundle and across repeat submissions ("it
+  happened again") without anyone learning which router it is. Review it on screen, then copy or download the JSON.
+
 ## 4.9.0-beta.2 - 2026-11-25
 
 - **TikLab (Admin → TikLab, dev mode).** A home for the test lab: manage the simulated fleet right there — seed a batch

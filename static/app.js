@@ -673,7 +673,8 @@ async function router(id) {
         <div><span class="in">↓ ${bps(wan?.rx_bps)}</span> <span class="out">↑ ${bps(wan?.tx_bps)}</span></div></div>
       <svg class="spark" id="spark" role="img" aria-label="Last hour of WAN traffic"></svg>
       ${canWrite() ? `<button class="btn wide" type="button" id="sideBackup">Back up now</button>
-      <button class="btn wide" type="button" id="sideScript" ${d.online ? "" : "disabled"}>Run script...</button>` : ""}` : ""}
+      <button class="btn wide" type="button" id="sideScript" ${d.online ? "" : "disabled"}>Run script...</button>` : ""}
+      ${isTech() ? `<button class="btn wide" type="button" id="sideDiag" title="A scrubbed support bundle - no IPs, serials or keys">Diagnostics bundle...</button>` : ""}` : ""}
     </aside>
     <section class="dev-main">
       ${adopted ? `<div class="tabs rtabs" role="tablist" aria-label="Router sections">${tabs.map(([k, l]) =>
@@ -822,6 +823,7 @@ async function router(id) {
     router(d.id);
   });
   $("sideScript")?.addEventListener("click", () => runScriptOn(d));
+  $("sideDiag")?.addEventListener("click", () => diagBundle(d));
   $("rUpgrade")?.addEventListener("click", () => upgradeDialog([d], () => router(d.id)));
   $("rUpCancel")?.addEventListener("click", async () => { await post(`/api/upgrades/${d.upgrade.id}/cancel`); router(d.id); });
   if ($("bkCard")) loadBackups(d).then(() => { if (rView.backupNow) { rView.backupNow = false; $("bkNow")?.click(); } });
@@ -1161,6 +1163,34 @@ function upgradeBox(d) {
   }
   if (last && !j) html += `<p class="small ${last.status === "failed" ? "status err" : "muted"}">Last upgrade ${ago(last.finished_at)}: ${esc(last.detail || last.status)}</p>`;
   return html;
+}
+
+// A scrubbed support bundle the tech can send in instead of a screenshot - no IPs, serials or keys; names one-way hashed.
+async function diagBundle(d) {
+  let bundle;
+  try { bundle = await api(`/api/diag/bundle?device=${d.id}`); }
+  catch (e) { return say(`Couldn't build the bundle: ${e.message || e}`, "err"); }
+  const text = JSON.stringify(bundle, null, 2);
+  const ref = (bundle.devices && bundle.devices[0] && bundle.devices[0].ref) || "device";
+  dialog(`<h2>Diagnostics bundle</h2>
+    <p class="small muted">Safe to send to support. Router names, serials and keys are replaced with one-way hashes;
+      public, WAN and tunnel IPs are dropped; no credentials or config are included. Review it below before you send it.</p>
+    <textarea class="diag-text mono" id="diagText" readonly spellcheck="false">${esc(text)}</textarea>
+    <div class="actions"><button class="btn primary" type="button" id="diagCopy">Copy</button>
+      <button class="btn" type="button" id="diagDl">Download .json</button>
+      <span class="spacer"></span><button class="btn" type="button" data-close>Close</button></div>`);
+  $("dlg").classList.add("wide");
+  $("diagCopy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(text); say("Copied - paste it into your email to support.", "ok"); }
+    catch { $("diagText").select(); say("Select the text and copy it (the browser blocked copying)."); }
+  });
+  $("diagDl").addEventListener("click", () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    a.download = `tikmanager-diag-${ref}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
 }
 
 // Internet links (ISP / WAN / LTE): up or down, address, since when, which one carries the traffic now

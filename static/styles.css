@@ -269,6 +269,7 @@ input[type=color] { width: 56px; height: 34px; padding: 2px; }
   background: var(--accent-soft); color: var(--accent); }
 .cmd-chip:hover { border-color: var(--accent); }
 .cmd-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.diag-text { width: 100%; min-height: 320px; font-family: var(--mono, monospace); font-size: 12px; white-space: pre; overflow-wrap: normal; }
 .diag-chart { width: 100%; height: 120px; display: block; }
 .diag-chart .area { fill: var(--accent); opacity: .15; }
 .diag-chart .line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }

@@ -30,6 +30,9 @@ ONLINE_WAIT = 30 * 60
 BACK_WAIT = 15 * 60
 INSTALL_WAIT = 30 * 60   # native install downloads, reboots and comes back - this one window covers the whole thing
 CHANNELS = ("stable", "long-term")
+RECONCILE_WINDOW = 24 * 3600   # self-heal a 'didn't come back' failure if the router returns on target within a day
+FIRMWARE_FINISH_WINDOW = 90 * 60   # only auto-finish the interrupted firmware step if the router is back this soon
+                                   # (still near the maintenance window); after that, just flag it for the operator
 
 
 def vkey(v):
@@ -51,6 +54,16 @@ class Upgrades:
             return json.loads(self.db.setting("upgrade_ticket") or "{}")
         except Exception:  # noqa: BLE001
             return {}
+
+    def _wait_secs(self, key, default):
+        """How long to wait for a router to come back, in seconds. Admin can raise it on the Upgrades page for slow
+        boards or slow tunnels (a big CCR behind WireGuard can take longer than the default to re-answer, which used to
+        be logged as a false 'didn't come back'). Blank/0 = the default."""
+        try:
+            m = int(self.db.setting(key) or 0)
+            return m * 60 if m > 0 else default
+        except (TypeError, ValueError):
+            return default
 
     # --- scheduling -------------------------------------------------------------------------------------------
     def schedule(self, devices, when, channel, firmware, user, stagger_min=0, sequential=False, max_fail=0, pin=False, cw_ticket=False):
@@ -249,9 +262,10 @@ class Upgrades:
                 self._step(jid, f"installing RouterOS {latest}")
                 self.db.event(d["id"], d["org_id"], "upgrading", f"RouterOS {installed} -> {latest} (download & install)")
                 cl.install_update()
-                st = self._wait_back(d, lambda s: vkey(s.get("version")) >= vkey(latest), timeout=INSTALL_WAIT)
+                install_wait = self._wait_secs("upgrade_install_wait_min", INSTALL_WAIT)
+                st = self._wait_back(d, lambda s: vkey(s.get("version")) >= vkey(latest), timeout=install_wait)
                 if not st:
-                    return self._finish(j, "failed", f"The router hasn't come back on RouterOS {latest} after {INSTALL_WAIT // 60} minutes - check it "
+                    return self._finish(j, "failed", f"The router hasn't come back on RouterOS {latest} after {install_wait // 60} minutes - check it "
                                                      f"(the pre-upgrade backup is saved).", latest)
                 notes.append(f"RouterOS {installed} → {latest}")
             else:
@@ -263,9 +277,10 @@ class Upgrades:
                     self._step(jid, f"RouterBOARD firmware {new}")
                     cl.routerboard_upgrade()
                     cl.reboot()
-                    if not self._wait_back(d, lambda s: vkey(s.get("fw_current")) >= vkey(new)):
+                    back_wait = self._wait_secs("upgrade_back_wait_min", BACK_WAIT)
+                    if not self._wait_back(d, lambda s: vkey(s.get("fw_current")) >= vkey(new), timeout=back_wait):
                         return self._finish(j, "failed", "; ".join(notes) + f"; the router didn't come back with RouterBOARD firmware {new} "
-                                                         f"after {BACK_WAIT // 60} minutes - check it.", latest)
+                                                         f"after {back_wait // 60} minutes - check it.", latest)
                     notes.append(f"firmware {cur} → {new}")
             self.db.run("UPDATE devices SET last_poll=NULL WHERE id=?", (d["id"],))   # poll right away to show the new versions
             self._finish(j, "done", "; ".join(notes), latest if latest and vkey(latest) > vkey(installed) else installed)
@@ -299,6 +314,59 @@ class Upgrades:
         self.db.event(j["device_id"], j["org_id"], "upgrade re-queued",
                       "TikManager restarted mid-upgrade - re-queued (it re-checks the version and only installs if still behind)")
 
+    def reconcile(self):
+        """Self-heal upgrades that were marked failed only because the router was slow to come back.
+
+        A 'didn't come back' failure (it alone sets to_version) whose device has since polled back online on the target
+        version is flipped to 'done' - the scary red note clears itself, the event/audit/ticket are corrected, and if the
+        job also wanted RouterBOARD firmware and it's still behind, the firmware step is re-queued so it isn't stranded.
+        Reads the poller's device rows (no router call), so it's cheap enough to run on the loop. This is the fix for the
+        false 'update failure' a user sees when a big CCR behind a tunnel takes longer than the wait window to answer."""
+        cutoff = time.time() - RECONCILE_WINDOW
+        for j in self.db.q("SELECT * FROM upgrades WHERE status='failed' AND to_version IS NOT NULL AND finished_at >= ?", (cutoff,)):
+            try:
+                d = self._device(j)
+                if not d or not d["online"]:
+                    continue
+                tgt = (j["to_version"] or "").split(" ")[0]
+                ver = (d["version"] or "").split(" ")[0]
+                if not (ver and tgt and vkey(ver) >= vkey(tgt)):
+                    continue   # not back on the target RouterOS version yet - leave it (could be a real failure)
+                fw_pending = bool(d["fw_upgrade"] and d["fw_current"] and vkey(d["fw_upgrade"]) > vkey(d["fw_current"]))
+                fw_timeout = "RouterBOARD firmware" in (j["detail"] or "")
+                if fw_timeout and fw_pending:
+                    continue   # the firmware step itself timed out and firmware is still behind - a real problem, leave it
+                note = (f"RouterBOARD firmware applied; on RouterOS {ver}" if fw_timeout
+                        else f"RouterOS came back on {ver}") + " - the router returned late, auto-resolved."
+                # The row was 'failed' when selected and only this loop touches a finished job, so flip it and record it.
+                self.db.run("UPDATE upgrades SET status='done', detail=?, finished_at=? WHERE id=?", (note[:500], time.time(), j["id"]))
+                self.db.event(j["device_id"], j["org_id"], "upgrade recovered", note[:300])
+                self.db.audit("reconcile", "upgrade recovered", d["name"], detail=note[:500], org_id=j["org_id"])
+                try:
+                    self._ticket_close(j, "done", note)   # correct the ticket that was closed as 'did not complete'
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
+                if j["firmware"] and not fw_timeout and fw_pending:
+                    if time.time() - (j["finished_at"] or 0) <= FIRMWARE_FINISH_WINDOW:
+                        self._requeue_firmware(j, d)
+                    else:
+                        self.db.event(j["device_id"], j["org_id"], "firmware pending",
+                                      f"RouterOS is on {ver}; the RouterBOARD firmware step is still pending - finish it on the Upgrades page.")
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+
+    def _requeue_firmware(self, j, d):
+        """Finish the RouterBOARD firmware step that the RouterOS wait-timeout interrupted. Re-queued through the normal
+        scheduler (fresh pre-upgrade backup, visible on the Upgrades page), not a background reboot - run() finds RouterOS
+        already current and does only the firmware. No new ticket (the original was just corrected)."""
+        if self.db.one("SELECT id FROM upgrades WHERE device_id=? AND status IN ('scheduled','running')", (d["id"],)):
+            return
+        self.db.run("""INSERT INTO upgrades (device_id, org_id, scheduled_at, channel, firmware, status, from_version,
+                       created_by, created_at, cw_ticket_on) VALUES (?,?,?,?,1,'scheduled',?,?,?,0)""",
+                    (d["id"], j["org_id"], time.time(), j["channel"], (d["version"] or "").split(" ")[0], "reconcile", time.time()))
+        self.db.event(d["id"], j["org_id"], "firmware re-queued",
+                      "RouterOS came back late; finishing the RouterBOARD firmware step the timeout interrupted")
+
     def loop(self):
         # Jobs that were mid-way when TikManager stopped: re-check the router rather than blindly failing them.
         for j in self.db.q("SELECT * FROM upgrades WHERE status='running'"):
@@ -307,7 +375,11 @@ class Upgrades:
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
                 self._finish(j, "failed", "TikManager restarted during this upgrade - check the router's version on its page.", counts=False)
-        last_check = 0
+        try:
+            self.reconcile()   # clear any false 'didn't come back' failures left from before a restart, right away
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+        last_check = last_reconcile = 0
         while True:
             try:
                 for j in self.db.q("SELECT * FROM upgrades WHERE status='scheduled' AND scheduled_at <= ? ORDER BY scheduled_at, seq", (time.time(),)):
@@ -325,6 +397,9 @@ class Upgrades:
                 if time.time() - last_check > 300:
                     self.check_due()
                     last_check = time.time()
+                if time.time() - last_reconcile > 120:
+                    self.reconcile()
+                    last_reconcile = time.time()
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
             time.sleep(15)

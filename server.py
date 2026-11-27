@@ -36,6 +36,7 @@ from upgrades import CHANNELS as UPGRADE_CHANNELS, Upgrades
 from vpn import VpnError, Vpns
 from wgbuild import WgBuilds, WgError
 from diagnostics import Diagnostics
+import diagbundle
 from ipam import Ipam, IpamError
 from ipsecbuild import IpsecBuilds, IpsecError
 from firewall import Firewall, FirewallError
@@ -1548,6 +1549,14 @@ class Handler(BaseHTTPRequestHandler):
             if not r or not r["result"]:
                 raise HttpError(404, "No finished report to export.")
             return self.diag_csv(diag.row(r))
+        if path == "/api/diag/bundle":   # scrubbed support bundle - safe to send in (no IPs, serials or keys; names hashed)
+            s = self.require(tech=True)
+            did = int(q.get("device") or 0)
+            if did:
+                self.device_for(s, did)   # access check (raises if they can't see it)
+            bundle = diagbundle.build(db, device_id=did or None, version=__version__)
+            headers = (("Content-Disposition", f'attachment; filename="tikmanager-diagnostics-{time.strftime("%Y%m%d")}.json"'),) if q.get("download") else ()
+            return self.json(bundle, headers=headers)
         if m := re.fullmatch(r"/api/devices/(\d+)/uptime", path):   # uptime history bar from online/offline events
             s = self.require()
             d = self.device_for(s, m.group(1))
